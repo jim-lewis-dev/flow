@@ -1,0 +1,98 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Select multiple categories through filtered checkbox lists; hidden selections survive search",
+    "Multiple statuses, categories, and exact tags combine correctly; metrics follow visible rows",
+    "Ledger text search combines with the selected groups and updates as typed",
+    "Row click edits directly; changing filters preserves draft; Save resets to New and keeps filters",
+    "Saving a new flow hidden by current filters still stores it and immediately clears entry",
+    "Entry suggestions and checkbox filters are mutually exclusive; Escape and outside click dismiss",
+    "All clears each restriction; every observed custom dropdown first maps at its final position",
+    "Search, all three filters, dates, and ledger columns fit a 1280-pixel-wide window"
+  ],
+  "errors": [],
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel",
+      "geometry": "300x292+1313+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel",
+      "geometry": "300x192+1083+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel",
+      "geometry": "300x267+1543+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel2",
+      "geometry": "300x192+1083+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x134+422+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
+      "geometry": "300x134+940+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel2",
+      "geometry": "300x292+1313+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel2",
+      "geometry": "300x267+1543+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel3",
+      "geometry": "300x192+1083+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel4",
+      "geometry": "300x192+1083+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel3",
+      "geometry": "300x292+1313+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel3",
+      "geometry": "300x267+1543+333",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel4",
+      "geometry": "300x292+673+397",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel5",
+      "geometry": "300x292+1313+333",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-u9e4jyh7/demo.sqlite3"
+}

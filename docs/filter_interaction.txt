@@ -1,0 +1,10 @@
+PASS Select multiple categories through filtered checkbox lists; hidden selections survive search
+PASS Multiple statuses, categories, and exact tags combine correctly; metrics follow visible rows
+PASS Ledger text search combines with the selected groups and updates as typed
+PASS Row click edits directly; changing filters preserves draft; Save resets to New and keeps filters
+PASS Saving a new flow hidden by current filters still stores it and immediately clears entry
+PASS Entry suggestions and checkbox filters are mutually exclusive; Escape and outside click dismiss
+PASS All clears each restriction; every observed custom dropdown first maps at its final position
+PASS Search, all three filters, dates, and ledger columns fit a 1280-pixel-wide window
+PASS 8 filter interaction checks; no callback exceptions.
+Report: docs/filter_interaction.json

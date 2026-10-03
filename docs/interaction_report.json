@@ -1,0 +1,187 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Mouse-select suggestion closes cleanly",
+    "Create full flow clears editor, selection, and popup",
+    "Expanded Notes and inline Notes share edits; Escape and Close retain the draft",
+    "Multiline Notes stay visible during arrow navigation and survive Save/reload",
+    "Main Save commits expanded Notes directly and closes the old editor",
+    "Second precision, explicit midnight, and date-only values survive Save/reload",
+    "Single click loads existing flow without popup",
+    "Edit endpoints and metadata; settle Pending to Complete without changing ID",
+    "Click next flow replaces every field without carryover",
+    "Ctrl+S from open dropdown does not reopen on key release",
+    "Same row reloads after save",
+    "Navigation dismisses flow suggestions",
+    "Account edit/save/new/reselect works",
+    "Modal open/close leaves no suggestion popup",
+    "Every observed custom popup first mapped at its final position",
+    "Cancel row switch preserves draft and selection",
+    "Discard row switch loads next record without saving draft",
+    "Save row switch commits old record then loads chosen next record",
+    "Void clears stale editor; empty Save cannot resurrect record",
+    "Native hover tooltip opens at its final position",
+    "Invalid Save preserves draft without vocabulary side effects",
+    "Corrected invalid entry saves normally",
+    "Cancel discards changed draft and clears every field",
+    "Filter refresh preserves unsaved draft; Save updates correct hidden ID",
+    "Graph account selection, Update Graph, and exact inspection work"
+  ],
+  "errors": [],
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x134+422+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
+      "geometry": "300x134+940+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel",
+      "geometry": "300x134+1200+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel",
+      "geometry": "300x98+1391+186",
+      "override": true
+    },
+    {
+      "path": ".!toplevel",
+      "geometry": "423x203+0+0",
+      "override": false
+    },
+    {
+      "path": ".!toplevel2",
+      "geometry": "650x350+0+0",
+      "override": false
+    },
+    {
+      "path": ".!toplevel3",
+      "geometry": "650x350+0+0",
+      "override": false
+    },
+    {
+      "path": ".!toplevel4",
+      "geometry": "650x350+0+0",
+      "override": false
+    },
+    {
+      "path": ".!toplevel5",
+      "geometry": "423x203+0+0",
+      "override": false
+    },
+    {
+      "path": ".!toplevel6",
+      "geometry": "423x203+0+0",
+      "override": false
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel2",
+      "geometry": "300x134+422+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel2",
+      "geometry": "300x134+1200+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel2",
+      "geometry": "300x134+1391+186",
+      "override": true
+    },
+    {
+      "path": ".!toplevel7",
+      "geometry": "423x203+0+0",
+      "override": false
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel4",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel3",
+      "geometry": "300x134+1200+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel4",
+      "geometry": "300x134+1200+186",
+      "override": true
+    },
+    {
+      "path": ".!toplevel8",
+      "geometry": "423x203+0+0",
+      "override": false
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!toplevel",
+      "geometry": "207x106+68+835",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel5",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel3",
+      "geometry": "300x134+422+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel2",
+      "geometry": "300x134+940+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel5",
+      "geometry": "300x134+1200+186",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-c3r2doln/demo.sqlite3",
+  "final_fix_followup": {
+    "success": true,
+    "input": "X11 XTest mouse and keyboard events",
+    "passed": [
+      "Full Date to Time editor to Save keeps the edited second-precise timestamp",
+      "Scaled graph Update and inspection work at 1920x1200 and after resize to 1280x800"
+    ],
+    "errors": [],
+    "maps": [
+      {
+        "path": ".!toplevel",
+        "geometry": "423x203+0+0",
+        "override": false
+      }
+    ],
+    "database": "/tmp/flow-real-input-di4nms2f/demo.sqlite3",
+    "tk_scaling": 1.65,
+    "window_sizes": [
+      "1920x1200",
+      "1280x800"
+    ]
+  }
+}

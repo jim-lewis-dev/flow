@@ -1,0 +1,63 @@
+Flow v0.5 — native interaction audit
+
+Result: PASS
+Input: X11 XTest mouse and keyboard events; no callback-invocation substitutes.
+Environment: Linux, native Tk 8.6, isolated Xvfb display, 1920x1200 screen.
+Window: 1920x1100. Data: newly seeded temporary demo database.
+Main checks passed: 25
+Tk callback exceptions: 0
+Observed popup/dialog first maps: 26
+Observed custom popup/tooltip first maps: 18
+Custom popups and tooltips first mapped at their final position; none at +0+0.
+Scope limit: Xvfb had no desktop window manager; desktop app-deactivation behavior was not covered.
+
+PASS Mouse-select suggestion closes cleanly
+PASS Create full flow clears editor, selection, and popup
+PASS Expanded Notes and inline Notes share edits; Escape and Close retain the draft
+PASS Multiline Notes stay visible during arrow navigation and survive Save/reload
+PASS Main Save commits expanded Notes directly and closes the old editor
+PASS Second precision, explicit midnight, and date-only values survive Save/reload
+PASS Single click loads existing flow without popup
+PASS Edit endpoints and metadata; settle Pending to Complete without changing ID
+PASS Click next flow replaces every field without carryover
+PASS Ctrl+S from open dropdown does not reopen on key release
+PASS Same row reloads after save
+PASS Navigation dismisses flow suggestions
+PASS Account edit/save/new/reselect works
+PASS Modal open/close leaves no suggestion popup
+PASS Every observed custom popup first mapped at its final position
+PASS Cancel row switch preserves draft and selection
+PASS Discard row switch loads next record without saving draft
+PASS Save row switch commits old record then loads chosen next record
+PASS Void clears stale editor; empty Save cannot resurrect record
+PASS Native hover tooltip opens at its final position
+PASS Invalid Save preserves draft without vocabulary side effects
+PASS Corrected invalid entry saves normally
+PASS Cancel discards changed draft and clears every field
+PASS Filter refresh preserves unsaved draft; Save updates correct hidden ID
+PASS Graph account selection, Update Graph, and exact inspection work
+
+Saved flow records were checked for exactly the nine agreed fields plus flow_id.
+Actual typing verified seconds, entering a full timestamp over an old time,
+explicit midnight, clearing the time, and reloading the stored values.
+
+Notes verification used physical typing and clicking. Expanded and inline views
+shared edits immediately. Escape and Close retained the current draft; the main
+Save committed it, including when the expanded window remained open. Up and Down
+kept the inline cursor visible. Reloading returned the exact multiline text.
+
+Reproduce: see tools/README.txt. The audit accepts --report PATH for JSON evidence.
+The audit does not open the normal user database.
+
+Final targeted follow-up after Date/Time synchronization and graph fitting fixes:
+Result: PASS — 2 additional physical input workflows, 0 callback exceptions.
+Tk scaling: 1.65. Graph windows: 1920x1200 and 1280x800.
+
+PASS Full Date to Time editor to Save keeps the edited second-precise timestamp
+PASS Scaled graph Update and inspection work at 1920x1200 and after resize to 1280x800
+
+The Date check typed a full timestamp over an existing time, opened Time,
+changed it to 09:00:01, clicked Apply and Save, and verified the stored timestamp.
+The graph check selected Cash, clicked Update Graph and the plot at both sizes,
+verified inspection output, figure/canvas pixel agreement, and visible date labels.
+The earlier 25 workflows were not repeated for these two isolated follow-up fixes.
