@@ -1,0 +1,12 @@
+PASS Startup requests fullscreen and a native Escape key returns to windowed mode
+PASS A flow at the graph's first midnight preserves the opening value and the resulting balance
+PASS Native hover shows exact account balances, opening value, and both ends of a vertical change
+PASS Multiple accounts have distinct hover amounts; hidden lines stop responding until shown
+PASS Combined plotting preserves the same first instant and counts transfers once per endpoint
+PASS Missing starting balances are prominent for single, mixed, and combined account selections
+PASS Typed month/day values without leading zeros normalize and graph successfully
+PASS Invalid dates and reversed ranges display visible errors and clear stale graph contents
+PASS Both calendars select dates; month navigation, Escape, switching calendars, and outside click work without origin flashing
+PASS Resized graphs keep the date controls and edge hover labels visible
+PASS 10 graph interaction checks; no callback exceptions.
+Report: docs/graph_interaction.json

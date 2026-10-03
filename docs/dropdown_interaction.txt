@@ -1,0 +1,9 @@
+PASS Account X updates both entry lists and preserves unsaved draft, records, and balances
+PASS Save keeps the removed suggestion absent and all dropdowns closed
+PASS Filtered category X removes the correct row while historical ledger filters remain available
+PASS Native wheel scrolling keeps each X aligned with its suggestion
+PASS Enter restores only the final quoted CSV tag without saving or replacing earlier tags
+PASS Fresh app restart retains removed suggestions; exact Enter restores an account in both lists
+PASS Suggestion row selection still works and no dropdown first maps at the screen origin
+PASS 7 dropdown interaction checks; no callback exceptions.
+Report: docs/dropdown_interaction.json

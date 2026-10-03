@@ -1,0 +1,57 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Account X updates both entry lists and preserves unsaved draft, records, and balances",
+    "Save keeps the removed suggestion absent and all dropdowns closed",
+    "Filtered category X removes the correct row while historical ledger filters remain available",
+    "Native wheel scrolling keeps each X aligned with its suggestion",
+    "Enter restores only the final quoted CSV tag without saving or replacing earlier tags",
+    "Fresh app restart retains removed suggestions; exact Enter restores an account in both lists",
+    "Suggestion row selection still works and no dropdown first maps at the screen origin"
+  ],
+  "errors": [],
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel",
+      "geometry": "300x134+1200+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel",
+      "geometry": "300x134+1391+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x134+203+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x134+422+186",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
+      "geometry": "300x134+203+186",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-n62rdtus/demo.sqlite3"
+}
