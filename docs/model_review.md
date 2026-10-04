@@ -1,4 +1,6 @@
-# Flow 0.5.5: model review
+# Flow 0.5.6: model review
+
+The project snapshot exporter adds no fields or tables. It exports source files and Git information; it excludes the database.
 
 Versions 0.5.4–0.5.5 add the ZIP updater, local Git workflow and removal of committed downloads. Account and Flow objects and the database schema are unchanged.
 

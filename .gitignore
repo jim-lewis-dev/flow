@@ -17,3 +17,4 @@ venv/
 *.bak.*
 *.suggestions.json
 .venv/
+/flow-snapshot.zip
