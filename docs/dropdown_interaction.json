@@ -14,44 +14,44 @@
   "maps": [
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel",
-      "geometry": "300x134+1200+186",
+      "geometry": "300x109+1200+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel",
-      "geometry": "300x134+1391+186",
+      "geometry": "300x109+1391+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
-      "geometry": "300x134+422+186",
+      "geometry": "300x109+422+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-n62rdtus/demo.sqlite3"
+  "database": "/tmp/flow-real-input-4bfrhbey/demo.sqlite3"
 }

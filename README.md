@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.6 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.7 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
@@ -88,7 +88,9 @@ Click **×** beside a dropdown suggestion to remove it from entry lists. From an
 
 Suggestion preferences live in `<database>.suggestions.json` beside each database. They add no fields to accounts or flows and do not change the SQLite schema. Database backups contain your records; copy this small preferences file too if you want to move the same dropdown choices to another computer.
 
-Click a ledger row to load all fields; no separate Edit button is needed. **Save** or **Ctrl+S** commits that record and returns to **New Flow**, with the defaults restored and both selection and focused ledger row cleared. Keyboard focus returns to Date, ready for the next entry. **Cancel** returns to the same New Flow state without saving. Saving leaves dropdowns closed. Notes commit with the whole flow, not when their expanded editor closes.
+Click a ledger row to load all fields. Double-click a cell to edit it directly; **F2** starts editing the focused row. The ledger and upper form show the same draft, including Notes. From, To, Name, Category and Tags use the same searchable suggestions; Status offers the four fixed choices. **Enter** finishes a cell and **Tab** moves to the next cell without saving. In Notes, Enter adds a line; **Ctrl+Enter** finishes the cell. **Escape** closes an open dropdown first, then the cell editor. Changing Date preserves its optional time; paste a full timestamp to replace both.
+
+**Save** or **Ctrl+S** commits that record and returns to **New Flow**, with the defaults restored and both selection and focused ledger row cleared. Keyboard focus returns to Date, ready for the next entry. **Cancel** returns to the same New Flow state without saving. Saving leaves dropdowns and cell editors closed. Notes commit with the whole flow, not when an editor closes. Ledger filters, totals and **Record JSON** use saved values until Save.
 
 Leaving an unsaved draft asks **Save changes to this flow?** with Yes, No and Cancel. Refreshes preserve the draft. Invalid inputs remain available for correction. Account editing follows the same save/cancel pattern.
 
@@ -144,6 +146,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `flowledger/core.py` | Validation, repository, transactions, audit and balance functions. |
 | `flowledger/schema.sql` | SQLite tables, constraints and indexes. |
 | `flowledger/gui.py` / `widgets.py` | Draft editing, tables, graphs and controls. |
+| `flowledger/ledger_editor.py` | Ledger cell editors sharing the upper form's draft. |
 | `flowledger/suggestions.py` | Remembers removed dropdown suggestions separately from records. |
 | `flowledger/filters.py` | Searchable checkbox dropdowns for ledger filtering. |
 | `flowledger/graphing.py` | Graph boundary points and permissive graph date entry. |
@@ -156,6 +159,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `docs/dropdown_interaction.txt` | Mouse/keyboard checks for suggestion removal and restoration. |
 | `docs/filter_interaction.txt` | Mouse/keyboard checks for multiple filters and New Flow after Save. |
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
+| `docs/ledger_interaction.txt` | Mouse/keyboard checks for ledger editing, shared drafts and Save/Cancel. |
 
 ```bash
 python3 -m unittest discover -s tests -v

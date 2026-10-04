@@ -49,7 +49,7 @@ Every date denotes a point in local time; a date-only value is not an all-day in
 
 ## GUI to stored record
 
-The nine form fields populate a draft dictionary. Inline and expanded Notes share one text buffer; closing either view retains the draft. **Save** commits the whole flow; **Cancel** discards the draft. Closing Notes is not a separate database save.
+The nine form fields populate one draft. Double-clicking a ledger cell opens an editor using the same StringVar as the upper form, or the same text buffer for Notes. Upper, ledger and expanded Notes editors therefore share their content. The selected ledger row previews that draft; the saved record dictionary stays unchanged. Filters, totals, Record JSON and graph calculations continue to use saved records until **Save**. **Cancel** discards the draft. Closing a cell or Notes editor is not a database save.
 
 `save_flow(draft)` validates endpoints, amount, date and status; creates new named choices; writes the flow and tags; and appends an audit entry in one SQLite transaction. Failed saves roll back together. The method returns the saved dictionary. Clicking a ledger row loads that dictionary into the form. **Record JSON** shows saved records; **Data > View Schema** shows the actual tables.
 

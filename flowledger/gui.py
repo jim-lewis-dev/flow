@@ -23,6 +23,7 @@ from .filters import CheckFilter
 from .calendar_widget import CalendarEntry
 from .graphing import graph_timeline, normalize_graph_date
 from .widgets import FilterCombo, ScrollFrame, TreeTooltip
+from .ledger_editor import LedgerEditor
 
 BG = "#f2f5f2"
 CARD = "#ffffff"
@@ -52,6 +53,7 @@ class _NotesPeer(tk.Text):
 
 class FlowApp(tk.Tk):
     """Desktop application; the caller owns and closes the repository."""
+    suggestion_fields = SUGGESTION_KINDS
     def __init__(self, repo, demo=False):
         super().__init__()
         self.repo = repo
@@ -80,6 +82,9 @@ class FlowApp(tk.Tk):
         self._configure_styles()
         self._build_shell()
         self._build_flows()
+        for variable in self.form_vars.values():
+            variable.trace_add("write", self._sync_flow_draft)
+        self.notes_text.bind("<<Modified>>", self._flow_notes_changed)
         self._build_accounts()
         self._build_charts()
         self._build_data()
@@ -112,6 +117,7 @@ class FlowApp(tk.Tk):
         style.configure("Section.TLabel", font=(FONT, 11, "bold"), background=CARD)
         style.configure("TEntry", fieldbackground="#fbfcfa", bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, padding=(7, 6), insertcolor=INK)
         style.map("TEntry", bordercolor=[("focus", TEAL)])
+        style.configure("Ledger.TEntry", padding=(3, 3))
         style.configure("TCombobox", fieldbackground="#fbfcfa", bordercolor=LINE, padding=(6, 6), arrowsize=12)
         style.map("TCombobox", fieldbackground=[("readonly", "#fbfcfa")], selectbackground=[("readonly", "#fbfcfa")], selectforeground=[("readonly", INK)])
         style.configure("TButton", background="#e6eee8", foreground=INK, borderwidth=0, padding=(10, 7), font=(FONT, 9, "bold"))
@@ -562,17 +568,24 @@ class FlowApp(tk.Tk):
             self.ledger.column(key, width=80, minwidth=20, anchor="e" if key == "amount_cents" else "w", stretch=False)
         self._fit_columns(self.ledger, {k: w for k, label, w in specs})
         self.ledger.grid(row=0, column=0, sticky="nsew")
-        ys = ttk.Scrollbar(tree_box, command=self.ledger.yview)
+        def scroll_ledger(*args):
+            self.ledger_editor.close()
+            self.ledger.yview(*args)
+        ys = ttk.Scrollbar(tree_box, command=scroll_ledger)
         ys.grid(row=0, column=1, sticky="ns")
-        self.ledger.configure(yscrollcommand=ys.set)
+        def ledger_scrolled(*args):
+            ys.set(*args)
+            self.ledger_editor.queue_position()
+        self.ledger.configure(yscrollcommand=ledger_scrolled)
         self.ledger.tag_configure("odd", background="#f6f9f6")
         self.ledger.tag_configure("Pending", foreground="#926413")
         self.ledger.tag_configure("Planned", foreground="#396f9f")
         self.ledger.tag_configure("Void", foreground="#92a098")
         self.ledger.bind("<<TreeviewSelect>>", self._select_flow)
-        self.ledger.bind("<Double-1>", self._repeat_row_click)
         self.ledger.bind("<Triple-1>", self._repeat_row_click)
         self.ledger_tooltip = TreeTooltip(self.ledger, self.flow_tooltip)
+        self.ledger_editor = LedgerEditor(self, _NotesPeer,
+            font=FONT, background="#fbfcfa", foreground=INK)
         actions = ttk.Frame(ledger_card, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 8))
         for label, command in [("Repeat", self.repeat_selected), ("Void", self.void_selected), ("History", self.show_history), ("Record JSON", self.show_flow_json)]:
@@ -580,7 +593,7 @@ class FlowApp(tk.Tk):
         ttk.Button(actions, text="Category Totals", style="Small.TButton", command=self.show_report).pack(side="right")
         self.report_summary = tk.StringVar(self, "")
         ttk.Label(actions, textvariable=self.report_summary, style="CardMuted.TLabel").pack(side="right", padx=14)
-        self.selection_detail = tk.StringVar(self, "Click a row to edit · Save commits changes · Cancel clears the form · Hover for details")
+        self.selection_detail = tk.StringVar(self, "Click a row · Double-click a cell to edit · Save commits changes")
         self.selection_label = ttk.Label(ledger_card, textvariable=self.selection_detail, style="CardMuted.TLabel", width=1)
         self.selection_label.grid(row=4, column=0, sticky="ew")
 
@@ -644,6 +657,8 @@ class FlowApp(tk.Tk):
             return False
         if focus and not self.show_view("flows"):
             return False
+        self.ledger_editor.close()
+        self._restore_draft_row()
         self._close_notes_editor()
         self.ledger.focus_set()
         self._close_popups()
@@ -665,6 +680,7 @@ class FlowApp(tk.Tk):
 
     def save_flow(self):
         """Commit one draft, then prepare New Flow with no selected ledger row."""
+        self.ledger_editor.close()
         self._close_popups()
         try:
             data = {key: var.get().strip() for key, var in self.form_vars.items() if key != "time"}
@@ -771,21 +787,65 @@ class FlowApp(tk.Tk):
     def _show_selection(self, event=None):
         selection = self.ledger.selection()
         if not selection:
-            self.selection_detail.set("Click a row to edit · Save commits changes · Cancel clears the form · Hover for details")
+            self.selection_detail.set("Click a row · Double-click a cell to edit · Save commits changes")
             return
         flow = self.ledger_rows.get(selection[0])
         if flow:
             tags = ", ".join(flow.get("tags", [])) or "No tags"
-            self.selection_detail.set(f"{flow['name']} · {flow['date'][:10]} · {tags}" + (f" · {flow['notes']}" if flow.get("notes") else ""))
+            # Keep selecting a multiline note from resizing the ledger and
+            # moving the clicked bottom row out from under its cell editor.
+            notes = flow.get("notes", "")
+            detail = f"{flow['name']} · {flow['date'][:10]} · {tags}" + (f" · {notes}" if notes else "")
+            self.selection_detail.set(detail.replace("\n", " · "))
 
     def sort_ledger(self, key):
         self.sort_reverse = not self.sort_reverse if self.sort_column == key else False
         self.sort_column = key
         self.refresh_ledger()
 
+    @staticmethod
+    def _flow_row_values(flow):
+        return (flow["date"][:10], flow["from_account"], flow["to_account"],
+                "$" + format_money(flow["amount_cents"]), flow["status"],
+                flow["name"], flow["category"], ", ".join(flow["tags"]),
+                flow["notes"].replace("\n", " · "))
+
+    def _restore_draft_row(self):
+        """Put the saved row back when its shared draft is discarded."""
+        flow = self.ledger_rows.get(self.editing_id)
+        if flow and self.ledger.exists(self.editing_id):
+            stripe = self.ledger.item(self.editing_id, "tags")[0]
+            self.ledger.item(self.editing_id, values=self._flow_row_values(flow),
+                             tags=(stripe, flow["status"]))
+
+    def _sync_flow_draft(self, *args):
+        """Render the selected form draft without changing stored flow data."""
+        row = self.editing_id
+        if not row or not self.ledger.exists(row):
+            return
+        values = self.form_vars
+        amount = values["amount"].get()
+        try:
+            amount = "$" + format_money(parse_money(amount))
+        except ValueError:
+            pass  # Show incomplete input exactly; Save supplies validation.
+        notes = self.notes_text.get("1.0", "end-1c")
+        displayed = (values["date"].get()[:10], values["from_account"].get(),
+            values["to_account"].get(), amount, values["status"].get(),
+            values["name"].get(), values["category"].get(),
+            values["tags"].get(), notes.replace("\n", " · "))
+        stripe = self.ledger.item(row, "tags")[0]
+        self.ledger.item(row, values=displayed, tags=(stripe, values["status"].get()))
+
+    def _flow_notes_changed(self, event=None):
+        if self.notes_text.edit_modified():
+            self.notes_text.edit_modified(False)
+            self._sync_flow_draft()
+
     def refresh_ledger(self):
         if not hasattr(self, "ledger"):
             return
+        self.ledger_editor.close()
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
         query = self.search_var.get().strip().casefold()
@@ -819,13 +879,12 @@ class FlowApp(tk.Tk):
         for index, flow in enumerate(flows):
             fid = flow["flow_id"]
             self.ledger_rows[fid] = flow
-            date = flow["date"][:10]
-            status = flow["status"]
-            values = (date, flow["from_account"], flow["to_account"], "$" + format_money(flow["amount_cents"]), status, flow["name"], flow["category"], ", ".join(flow["tags"]), flow["notes"].replace("\n", " · "))
+            values = self._flow_row_values(flow)
             tags = ("odd" if index % 2 else "even", flow["status"])
             self.ledger.insert("", "end", iid=fid, values=values, tags=tags)
         selected = [fid for fid in selection if fid in self.ledger_rows]
         self._set_flow_selection(selected[0] if selected else None)
+        self._sync_flow_draft()
         self.metric_vars[2].set(str(len(flows)))
         self.date_filter_label.configure(text=(self.filter_start.get() or "Any Start") + " → " + (self.filter_end.get() or "Any End") if date_start or date_end else "All Dates")
         self.report_rows = [flow for flow in flows if flow["status"] != "Void"]
@@ -845,9 +904,9 @@ class FlowApp(tk.Tk):
         self.status_message.set(f"Removed suggestion: {value}")
         return True
 
-    def _accept_suggestion(self, field):
+    def _accept_suggestion(self, field, widget=None):
         """Explicit Enter can restore a forgotten value; refresh/save cannot."""
-        widget = self.form_widgets[field]
+        widget = widget or self.form_widgets[field]
         value = widget._query()
         if not value:
             return
@@ -876,6 +935,7 @@ class FlowApp(tk.Tk):
             self.form_widgets[key].set_values(self.suggestion_preferences.visible("account", names))
         for key, values in [("category", self.repo.list_categories()), ("tags", self.repo.list_tags()), ("name", self.repo.list_names())]:
             self.form_widgets[key].set_values(self.suggestion_preferences.visible(SUGGESTION_KINDS[key], values))
+        self.ledger_editor.refresh_suggestions()
 
     def refresh_all(self):
         self.refresh_suggestions()

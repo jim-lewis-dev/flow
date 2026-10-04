@@ -15,84 +15,84 @@
   "maps": [
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel",
-      "geometry": "300x292+1313+333",
+      "geometry": "300x297+1478+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel",
-      "geometry": "300x192+1083+333",
+      "geometry": "300x193+1314+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel",
-      "geometry": "300x267+1543+333",
+      "geometry": "300x271+1620+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel2",
-      "geometry": "300x192+1083+333",
+      "geometry": "300x193+1314+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
-      "geometry": "300x134+422+186",
+      "geometry": "300x109+422+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
-      "geometry": "300x134+940+186",
+      "geometry": "300x109+940+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel2",
-      "geometry": "300x292+1313+333",
+      "geometry": "300x297+1478+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel2",
-      "geometry": "300x267+1543+333",
+      "geometry": "300x271+1620+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel3",
-      "geometry": "300x192+1083+333",
+      "geometry": "300x193+1314+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel4",
-      "geometry": "300x192+1083+333",
+      "geometry": "300x193+1314+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel3",
-      "geometry": "300x292+1313+333",
+      "geometry": "300x297+1478+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel3",
-      "geometry": "300x267+1543+333",
+      "geometry": "300x271+1620+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel4",
-      "geometry": "300x292+673+397",
+      "geometry": "300x297+838+365",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel5",
-      "geometry": "300x292+1313+333",
+      "geometry": "300x297+1478+306",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-u9e4jyh7/demo.sqlite3"
+  "database": "/tmp/flow-real-input-0_gy98pp/demo.sqlite3"
 }
