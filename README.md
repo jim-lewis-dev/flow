@@ -1,13 +1,13 @@
 # Flow
 
-Flow 0.5.5 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.6 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
-Download `Flow_patch_v0.5.5.zip` into `~/Downloads`. Install once:
+Download `Flow_patch_update.zip` into `~/Downloads`. Install once:
 
 ```bash
-unzip -p "$HOME/Downloads/Flow_patch_v0.5.5.zip" flow/update.py | python3 - "$HOME/Downloads/Flow_patch_v0.5.5.zip"
+unzip -p "$HOME/Downloads/Flow_patch_update.zip" flow/update.py | python3 - "$HOME/Downloads/Flow_patch_update.zip"
 ```
 
 This creates `~/projects/flow`, commits the installed files to a local Git repository, then removes the downloaded ZIP. Use this command for the upgrade from 0.5.4 too: its older installed updater does not delete ZIPs. It needs Python 3.10+, Git, unzip, and your Git name/email configured. It does not push anywhere.
@@ -29,6 +29,16 @@ git -C ~/projects/flow revert --no-edit HEAD
 ```
 
 For an older update, use the specific commit printed by the updater. Git rollback restores code; it does not undo edits to your records or reverse database migrations. [Update details](docs/updates.md) cover Git setup and release packaging.
+
+## Send a project snapshot
+
+```bash
+~/projects/flow/export.py
+```
+
+Upload `~/projects/flow/flow-snapshot.zip`. The command overwrites that same ZIP each time and works from any directory. It includes current files, including local edits and untracked source allowed by Git, plus Git status, HEAD and the last 20 commit messages. It excludes databases, suggestion preferences, environments, caches, archives, common credential files and `.git` contents. Arbitrarily named Python environments are recognized by `pyvenv.cfg`; symlinks are omitted.
+
+Export reads the working tree without staging, committing or changing it. It requires the project to be its own Git repository. Send a snapshot when we need to check your local state, especially after local edits or an unexpected result.
 
 ## Start
 
@@ -129,6 +139,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | File | Responsibility |
 | --- | --- |
 | `update.py` | Installs a verified ZIP, commits locally, then removes the downloaded ZIP. |
+| `export.py` | Overwrites the project snapshot ZIP with current files and Git status/log. |
 | `tools/package_update.py` | Builds the application ZIP and its file manifest. |
 | `flowledger/core.py` | Validation, repository, transactions, audit and balance functions. |
 | `flowledger/schema.sql` | SQLite tables, constraints and indexes. |
