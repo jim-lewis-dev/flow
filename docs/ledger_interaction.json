@@ -1,0 +1,84 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Native double-click edits an amount in both views; Enter keeps a draft and Save persists it",
+    "Top form edits preview immediately; cell edits share the draft; Ctrl+S saves and clears both editors",
+    "Editing a full timestamp in the Date cell updates the optional time and preserves seconds on Save",
+    "Account cells filter existing suggestions and accept new names without saving the flow early",
+    "Category and quoted comma-containing tags edit through ledger suggestions and save exactly",
+    "Status cell offers the four fixed choices and changes the saved status only on Save",
+    "Ledger, top, and expanded Notes share multiline text; Cancel discards the draft without data loss",
+    "Multiline ledger Notes survive Save and row reload; compact Notes keeps the caret visible",
+    "Double-clicking another row respects Cancel, No, and Yes without opening an editor for the wrong record",
+    "Filtering away an edited row closes its overlay but keeps and saves the correct draft",
+    "Sorting and native wheel scrolling preserve the draft without leaving a cell overlay on another row",
+    "Window resizing keeps the editor aligned or closes it and keeps all ledger columns visible",
+    "Save and Cancel return to a clean New Flow; every custom popup first maps at its final position"
+  ],
+  "errors": [],
+  "failure": "",
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
+      "geometry": "300x109+940+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo.!toplevel",
+      "geometry": "300x109+886+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo2.!toplevel",
+      "geometry": "300x95+207+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo3.!toplevel",
+      "geometry": "300x95+407+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo4.!toplevel",
+      "geometry": "300x81+1152+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo5.!toplevel",
+      "geometry": "300x53+1325+385",
+      "override": true
+    },
+    {
+      "path": ".!toplevel",
+      "geometry": "650x350+0+0",
+      "override": false
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo6.!toplevel",
+      "geometry": "300x109+886+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo8.!toplevel",
+      "geometry": "300x109+886+385",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo9.!toplevel",
+      "geometry": "300x109+886+1089",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo10.!toplevel",
+      "geometry": "300x109+886+1089",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo11.!toplevel",
+      "geometry": "300x109+886+1089",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-k0w5x_o4/demo.sqlite3"
+}
