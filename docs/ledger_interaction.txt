@@ -1,6 +1,10 @@
 Ledger editing: native X11 XTest interaction audit
-PASS: 13 workflows; 0 callback exceptions.
+PASS: 17 workflows; 0 callback exceptions.
 
+PASS Switching from account suggestions to the native Status list closes suggestions without focus errors
+PASS Repeat clears the original selection; Cancel keeps its copy and No lets the original open for cell editing
+PASS Yes saves the repeated copy once before double-clicking resumes editing the original
+PASS After Repeat, selecting the original and pressing F2 edits that record without saving the discarded copy
 PASS Native double-click edits an amount in both views; Enter keeps a draft and Save persists it
 PASS Top form edits preview immediately; cell edits share the draft; Ctrl+S saves and clears both editors
 PASS Editing a full timestamp in the Date cell updates the optional time and preserves seconds on Save

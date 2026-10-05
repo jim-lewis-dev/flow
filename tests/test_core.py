@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 from flowledger.core import Repository, balance_at, format_money, normalize_date, parse_money, timeline, ledger_balance_at, ledger_timeline
+from flowledger.exchange import commit_import, export_flows, preview_import, read_import
 
 
 class ValidationTests(unittest.TestCase):
@@ -120,6 +121,39 @@ class RepositoryTests(unittest.TestCase):
             self.flow(amount="12.00", amount_cents=1300)
         self.assertEqual(self.repo.list_flows(), [consistent])
         self.assertEqual(self.repo.history(), before)
+
+    def test_null_name_and_notes_rejected_without_suggestions_or_record_changes(self):
+        saved = self.flow(name="Lunch", notes="Keep this note", tags=["Original"])
+        before = list(self.repo.conn.iterdump())
+        for field in ("name", "notes"):
+            for editing in (False, True):
+                with self.subTest(field=field, editing=editing):
+                    changes = dict(date="2026-10-02", from_account="New Bank", to_account="New Shop",
+                                   amount="23.45", category="New Category", tags=["New Tag"],
+                                   **{field: "Before\x00after"})
+                    if editing:
+                        changes["flow_id"] = saved["flow_id"]
+                    with self.assertRaisesRegex(ValueError, field.title() + " cannot contain a null character"):
+                        self.repo.save_flow(changes)
+                    self.assertEqual(preview_import(self.repo, [changes])[0]["state"], "Error")
+                    self.assertEqual(list(self.repo.conn.iterdump()), before)
+
+    def test_saved_multiline_unicode_name_and_notes_roundtrip_csv_and_json(self):
+        saved = self.flow(name='Café 🚤\n"Lunch", crew', notes='\tFirst line: αβ\nSecond line: 旅行\r\nLast line.\n')
+        for suffix in (".csv", ".json"):
+            with self.subTest(suffix=suffix):
+                exported = Path(self.temp.name) / ("flows" + suffix)
+                self.assertEqual(export_flows(self.repo, exported), 1)
+                rows = read_import(exported)
+                self.assertEqual(rows[0]["name"], saved["name"])
+                self.assertEqual(rows[0]["notes"], saved["notes"])
+                imported = Repository(Path(self.temp.name) / ("roundtrip" + suffix + ".sqlite3"))
+                try:
+                    result = commit_import(imported, preview_import(imported, rows))
+                    self.assertEqual(result, {"imported": 1, "skipped": 0})
+                    self.assertEqual(imported.list_flows(), [saved])
+                finally:
+                    imported.close()
 
 
     def test_unknown_balance_remains_unknown(self):

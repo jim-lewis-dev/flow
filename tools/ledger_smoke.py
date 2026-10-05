@@ -185,6 +185,64 @@ try:
     first = flow_named("Lunch")["flow_id"]
     second = flow_named("Boat supplies")["flow_id"]
 
+    click(top_entry("from_account"))
+    assert app.form_widgets["from_account"].popup is not None
+    click(top_entry("status"))
+    assert "popdown" in str(app.tk.call("focus"))
+    assert not popups()
+    key("Down")
+    key("Return")
+    assert app.form_vars["status"].get() == "Pending"
+    click(app.cancel_button)
+    fresh_form()
+    ok("Switching from account suggestions to the native Status list closes suggestions without focus errors")
+
+    row(app.ledger, first)
+    click_text("Repeat")
+    assert app.editing_id is None and app.ledger.selection() == ()
+    assert app.ledger.focus() == ""
+    replace_all(top_entry("name"), "Repeated draft")
+    repeat_draft = app._flow_snapshot()
+    original = saved(first)
+    count_before = len(repo.list_flows())
+    answer_dialog("Cancel")
+    row(app.ledger, first)
+    assert app.editing_id is None and app.ledger.selection() == ()
+    assert app._flow_snapshot() == repeat_draft
+    assert len(repo.list_flows()) == count_before and saved(first) == original
+    answer_dialog("No")
+    double_cell(first, "name")
+    assert app.editing_id == first and app.ledger_editor.flow_id == first
+    assert app.form_vars["name"].get() == "Lunch"
+    assert len(repo.list_flows()) == count_before and saved(first) == original
+    click(app.cancel_button)
+    fresh_form()
+    ok("Repeat clears the original selection; Cancel keeps its copy and No lets the original open for cell editing")
+
+    row(app.ledger, first)
+    click_text("Repeat")
+    replace_all(top_entry("name"), "Saved repeat")
+    answer_dialog("Yes")
+    double_cell(first, "name")
+    assert app.editing_id == first and app.ledger_editor.flow_id == first
+    assert saved(first) == original and len(repo.list_flows()) == count_before + 1
+    assert flow_named("Saved repeat")["flow_id"] != first
+    click(app.cancel_button)
+    fresh_form()
+    ok("Yes saves the repeated copy once before double-clicking resumes editing the original")
+
+    row(app.ledger, first)
+    click_text("Repeat")
+    answer_dialog("No")
+    row(app.ledger, first)
+    key("F2")
+    assert app.editing_id == first and app.ledger_editor.flow_id == first
+    assert app.ledger_editor.field == "date"
+    assert saved(first) == original and len(repo.list_flows()) == count_before + 1
+    click(app.cancel_button)
+    fresh_form()
+    ok("After Repeat, selecting the original and pressing F2 edits that record without saving the discarded copy")
+
     replace_all(edit_cell(first, "amount_cents"), "23.45")
     assert app.form_vars["amount"].get() == "23.45"
     assert preview(first, "amount_cents") == "$23.45"

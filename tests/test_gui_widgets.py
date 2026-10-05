@@ -61,6 +61,32 @@ class DropdownTests(unittest.TestCase):
         self.assertEqual(self.combo.get(), "Boat maintenance")
         self.assertNotIn("Boat maintenance", self.combo.values)
 
+    def test_native_status_popup_closes_suggestions_without_callback_errors(self):
+        from tkinter import ttk
+
+        status = ttk.Combobox(self.root, values=("Complete", "Pending"), state="readonly")
+        status.set("Complete")
+        status.pack(fill="x", padx=20)
+        self.root.update()
+        self.assertIsNotNone(self.combo.popup)
+        x, y = status.winfo_width() - 8, status.winfo_height() // 2
+        status.event_generate("<ButtonPress-1>", x=x, y=y)
+        status.event_generate("<ButtonRelease-1>", x=x, y=y)
+        self.root.update()
+        focused = str(self.root.tk.call("focus"))
+        self.assertIn("popdown", focused)
+        # A deferred FocusOut check can run after ttk has moved focus into
+        # its Tcl-only listbox, even when the old suggestions already closed.
+        self.combo._defer_focus_check()
+        self.root.update()
+        self.assertIsNone(self.combo.popup)
+        self.root.tk.call("event", "generate", focused, "<Down>")
+        self.root.tk.call("event", "generate", focused, "<Return>")
+        self.root.update()
+        self.assertEqual(status.get(), "Pending")
+        self.assertIsNone(self.combo.popup)
+        self.assertEqual(self.callback_errors, [])
+
     def test_remove_target_keeps_draft_focus_and_popup_without_accepting(self):
         removed, accepted, maps = [], [], []
         self.combo.on_accept = lambda: accepted.append(True)
