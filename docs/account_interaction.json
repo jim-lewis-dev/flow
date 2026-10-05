@@ -1,0 +1,18 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Balance cells and upper fields share one draft; Enter does not save; Ctrl+S commits and recalculates current balances",
+    "Negative, zero, and Unknown starting balances save correctly; account names and calculated balances remain read-only",
+    "Starting Date cells preserve optional time, accept full timestamps to the second, and normalize dates on Save",
+    "Native row changes obey Cancel, No, and Yes; explicit Cancel restores the saved row and clears the account draft",
+    "Invalid balance or date displays an error while preserving the draft; correcting it allows Save",
+    "F2 and Tab/Shift+Tab navigate editable account cells; Escape finishes a cell without saving the account",
+    "Resizing, scrolling, and page changes preserve or discard drafts correctly without stale cell overlays",
+    "Account editing ends with clean focus and selection; positioned popups never first map at the top-left corner"
+  ],
+  "errors": [],
+  "failure": "",
+  "maps": [],
+  "database": "/tmp/flow-real-input-faqckyuz/demo.sqlite3"
+}

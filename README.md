@@ -1,16 +1,16 @@
 # Flow
 
-Flow 0.5.7 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.8 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
 Download `Flow_patch_update.zip` into `~/Downloads`. Install once:
 
 ```bash
-unzip -p "$HOME/Downloads/Flow_patch_update.zip" flow/update.py | python3 - "$HOME/Downloads/Flow_patch_update.zip"
+unzip -p "$HOME/Downloads/Flow_patch_update.zip" flow/update.py | python3 - --project "$HOME/projects/flow" "$HOME/Downloads/Flow_patch_update.zip"
 ```
 
-This creates `~/projects/flow`, commits the installed files to a local Git repository, then removes the downloaded ZIP. Use this command for the upgrade from 0.5.4 too: its older installed updater does not delete ZIPs. It needs Python 3.10+, Git, unzip, and your Git name/email configured. It does not push anywhere.
+This creates `~/projects/flow`, commits the installed files to a local Git repository, then removes the downloaded ZIP. Use this command once to upgrade an older updater too; it runs the current updater bundled in the ZIP. It needs Python 3.10+, Git, unzip, and your Git name/email configured. It does not push anywhere.
 
 For each subsequent patch, close Flow, download the ZIP into `~/Downloads`, then run:
 
@@ -20,7 +20,7 @@ For each subsequent patch, close Flow, download the ZIP into `~/Downloads`, then
 
 The updater uses the most recently downloaded `Flow_patch_*.zip`, prints the change description, validates it, replaces the application files, commits, then deletes that ZIP from Downloads. Launch separately with `~/projects/flow/launch.sh`. It prints the commit and exact rollback command. Pass a ZIP path to select a particular download. A bad newest download stops the update; it never silently installs an older one. Automatic selection also refuses a version older than the installed release.
 
-Local edits to managed code are committed first, so they can be recovered. Files removed from a later release are removed only when the previous release listed them. Other local files, databases and `.git` stay in place. No duplicate commit is made when the installed files are already identical; the already-committed ZIP is still removed. Failed updates keep the ZIP. If deletion alone fails, the successful commit stays and the error says the ZIP remains.
+An existing repository must be clean: uncommitted changes or untracked files stop the update before anything is replaced or committed. Commit or remove those changes yourself, then rerun. Ignored records and snapshots do not block updates. Files removed from a later release are removed only when the previous release listed them. Other local files, databases and `.git` stay in place. No duplicate commit is made when the installed files are already identical; the already-committed ZIP is still removed. Failed updates keep the ZIP. If deletion alone fails, the successful commit stays and the error says the ZIP remains.
 
 To undo the latest successful update:
 
@@ -100,6 +100,10 @@ Dates accept `YYYY-MM-DD`, optionally followed by `HH:MM` or `HH:MM:SS`; ISO `T`
 
 Every endpoint is an account, including merchants. Accounts has Name, Starting Balance and Starting Date, with optional time. No ownership or archive flags. Names stay fixed during editing; a different name creates a different account. Leave an unknown starting balance blank; enter zero for a known zero. Negative balances represent debt.
 
+Accounts uses the same editing gestures as the Flow Ledger: click a row to load it, then double-click **Starting Balance** or **Starting Date** to edit directly. **F2** opens Starting Balance; **Tab** moves between those two fields; Enter finishes a cell without saving. The cells and upper form share one draft. Save commits it; Cancel restores the saved row. Both clear the selection and focused row and return keyboard focus to the new account's Name field. Starting Date accepts a full timestamp, replacing the optional time; a date-only edit preserves the time already entered.
+
+Confirmed and Including Pending use saved records and update after Save. Graphs, totals, history and Record JSON show calculations or saved values. Account names identify existing flows and remain fixed in this patch.
+
 Balances are calculated from the account's one starting balance and eligible flows:
 
 | Basis | Included statuses |
@@ -147,6 +151,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `flowledger/schema.sql` | SQLite tables, constraints and indexes. |
 | `flowledger/gui.py` / `widgets.py` | Draft editing, tables, graphs and controls. |
 | `flowledger/ledger_editor.py` | Ledger cell editors sharing the upper form's draft. |
+| `flowledger/account_editor.py` | Starting balance/date cells using the same editing lifecycle. |
 | `flowledger/suggestions.py` | Remembers removed dropdown suggestions separately from records. |
 | `flowledger/filters.py` | Searchable checkbox dropdowns for ledger filtering. |
 | `flowledger/graphing.py` | Graph boundary points and permissive graph date entry. |
@@ -160,6 +165,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `docs/filter_interaction.txt` | Mouse/keyboard checks for multiple filters and New Flow after Save. |
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
 | `docs/ledger_interaction.txt` | Mouse/keyboard checks for ledger editing, shared drafts and Save/Cancel. |
+| `docs/account_interaction.txt` | Mouse/keyboard checks for account editing, timestamps and Save/Cancel. |
 
 ```bash
 python3 -m unittest discover -s tests -v

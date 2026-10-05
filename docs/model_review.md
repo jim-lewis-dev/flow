@@ -51,6 +51,8 @@ Every date denotes a point in local time; a date-only value is not an all-day in
 
 The nine form fields populate one draft. Double-clicking a ledger cell opens an editor using the same StringVar as the upper form, or the same text buffer for Notes. Upper, ledger and expanded Notes editors therefore share their content. The selected ledger row previews that draft; the saved record dictionary stays unchanged. Filters, totals, Record JSON and graph calculations continue to use saved records until **Save**. **Cancel** discards the draft. Closing a cell or Notes editor is not a database save.
 
+Accounts uses that same cell editor lifecycle for Starting Balance and Starting Date, sharing the upper form's variables. A starting value previews in its row; the calculated balances continue to use the saved anchor until Save. A pasted timestamp replaces the optional time, while a date-only edit preserves it. Account names remain fixed identities. Graphs, totals, audit history and saved JSON are inspection views.
+
 `save_flow(draft)` validates endpoints, amount, date and status; creates new named choices; writes the flow and tags; and appends an audit entry in one SQLite transaction. Failed saves roll back together. The method returns the saved dictionary. Clicking a ledger row loads that dictionary into the form. **Record JSON** shows saved records; **Data > View Schema** shows the actual tables.
 
 Accounts has Name, Starting Balance and Starting Date with optional time. Newly typed endpoints have unknown opening balances until supplied. Balances and graphs are calculated outputs, not extra account fields. There are no ownership or archive controls.
