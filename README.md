@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.8 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.9 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
@@ -11,6 +11,8 @@ unzip -p "$HOME/Downloads/Flow_patch_update.zip" flow/update.py | python3 - --pr
 ```
 
 This creates `~/projects/flow`, commits the installed files to a local Git repository, then removes the downloaded ZIP. Use this command once to upgrade an older updater too; it runs the current updater bundled in the ZIP. It needs Python 3.10+, Git, unzip, and your Git name/email configured. It does not push anywhere.
+
+The first commit is `initial flow commit`. Later update commits use the patch's change description.
 
 For each subsequent patch, close Flow, download the ZIP into `~/Downloads`, then run:
 
@@ -37,6 +39,8 @@ For an older update, use the specific commit printed by the updater. Git rollbac
 ```
 
 Upload `~/projects/flow/flow-snapshot.zip`. The command overwrites that same ZIP each time and works from any directory. It includes current files, including local edits and untracked source allowed by Git, plus Git status, HEAD and the last 20 commit messages. It excludes databases, suggestion preferences, environments, caches, archives, common credential files and `.git` contents. Arbitrarily named Python environments are recognized by `pyvenv.cfg`; symlinks are omitted.
+
+Recognizable Flow transaction exports in JSON or CSV are excluded by their contents, including renamed files and tracked files. Unchanged examples shipped with Flow are retained; replacing an example with personal records does not exempt those records. Ordinary JSON/CSV configuration remains included. This detects Flow records, not arbitrary personal information in other formats.
 
 Export reads the working tree without staging, committing or changing it. It requires the project to be its own Git repository. Send a snapshot when we need to check your local state, especially after local edits or an unexpected result.
 
@@ -91,6 +95,8 @@ Suggestion preferences live in `<database>.suggestions.json` beside each databas
 Click a ledger row to load all fields. Double-click a cell to edit it directly; **F2** starts editing the focused row. The ledger and upper form show the same draft, including Notes. From, To, Name, Category and Tags use the same searchable suggestions; Status offers the four fixed choices. **Enter** finishes a cell and **Tab** moves to the next cell without saving. In Notes, Enter adds a line; **Ctrl+Enter** finishes the cell. **Escape** closes an open dropdown first, then the cell editor. Changing Date preserves its optional time; paste a full timestamp to replace both.
 
 **Save** or **Ctrl+S** commits that record and returns to **New Flow**, with the defaults restored and both selection and focused ledger row cleared. Keyboard focus returns to Date, ready for the next entry. **Cancel** returns to the same New Flow state without saving. Saving leaves dropdowns and cell editors closed. Notes commit with the whole flow, not when an editor closes. Ledger filters, totals and **Record JSON** use saved values until Save.
+
+**Repeat** creates an unsaved copy and clears the ledger selection. Selecting the original row again resolves the copy through the usual Yes/No/Cancel prompt, then allows editing the original.
 
 Leaving an unsaved draft asks **Save changes to this flow?** with Yes, No and Cancel. Refreshes preserve the draft. Invalid inputs remain available for correction. Account editing follows the same save/cancel pattern.
 

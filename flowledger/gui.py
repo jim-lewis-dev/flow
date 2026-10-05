@@ -756,7 +756,9 @@ class FlowApp(tk.Tk):
     def _load_form(self, flow, repeat=False):
         if not self.show_view("flows"):
             return
-        self.new_flow(focus=False, confirm=False, clear_selection=False)
+        # A repeated flow is a new draft, so no saved row owns its selection.
+        # Selecting the original again must resolve that draft normally.
+        self.new_flow(focus=False, confirm=False, clear_selection=repeat)
         self.editing_id = None if repeat else flow["flow_id"]
         for key in ("from_account", "to_account", "name", "category"):
             self.form_vars[key].set(flow[key])

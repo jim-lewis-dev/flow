@@ -393,6 +393,9 @@ class Repository:
         category = data.get("category", "")
         if not all(isinstance(value, str) for value in (name, notes, category)):
             raise ValueError("Name, notes, and category must be text.")
+        for label, value in (("Name", name), ("Notes", notes)):
+            if "\x00" in value:
+                raise ValueError(f"{label} cannot contain a null character.")
         category = _name(category or "Uncategorized", "Category") if category.strip() else "Uncategorized"
         raw_tags = data.get("tags", [])
         if not isinstance(raw_tags, (list, tuple)):

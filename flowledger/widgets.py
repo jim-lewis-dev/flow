@@ -99,7 +99,7 @@ class FilterCombo(ttk.Frame):
         """
         if open_popup:
             self._dismissed = False
-        if self.focus_get() is not self.entry:
+        if str(self.tk.call("focus")) != str(self.entry):
             self._suppress_focus_open = not open_popup
             self.entry.focus_set()
         elif open_popup:
@@ -108,7 +108,7 @@ class FilterCombo(ttk.Frame):
     def _focus_in(self, event=None):
         suppress = self._suppress_focus_open
         self._suppress_focus_open = False
-        if self.focus_get() is not self.entry or self._dismissed:
+        if str(self.tk.call("focus")) != str(self.entry) or self._dismissed:
             return
         if self.popup is not None and self.popup.winfo_exists():
             return
@@ -146,7 +146,7 @@ class FilterCombo(ttk.Frame):
 
     def _after_paste(self):
         self._paste_id = None
-        if self.focus_get() is self.entry:
+        if str(self.tk.call("focus")) == str(self.entry):
             self.open_popup()
 
     def open_popup(self, show_all=False):
@@ -214,9 +214,9 @@ class FilterCombo(ttk.Frame):
         # Suggestions are a mouse target, while typing belongs to the input.
         # Some window managers give an override-redirect popup pointer focus.
         # Redirect it without selecting text or rebuilding the open list.
-        focused = self.focus_get()
-        if self.popup is not None and (focused is self.popup or
-                                       str(focused).startswith(str(self.popup) + ".")):
+        focused = str(self.tk.call("focus"))
+        if self.popup is not None and (focused == str(self.popup) or
+                                       focused.startswith(str(self.popup) + ".")):
             self.focus_set(open_popup=False)
 
     def _populate(self, show_all=None, *, preserve_scroll=False):
@@ -347,7 +347,7 @@ class FilterCombo(ttk.Frame):
     def _key_release(self, event):
         # A command such as Ctrl+S can move focus back here while its key is
         # still held. Its release is not text entry and must not open a popup.
-        if self.focus_get() is not self.entry or event.state & (0x0004 | 0x0008 | 0x0040):
+        if str(self.tk.call("focus")) != str(self.entry) or event.state & (0x0004 | 0x0008 | 0x0040):
             return
         ignored = {"Up", "Down", "Left", "Right", "Home", "End", "Prior", "Next",
                    "Return", "KP_Enter", "Escape", "Tab", "ISO_Left_Tab", "Insert",
@@ -394,14 +394,16 @@ class FilterCombo(ttk.Frame):
     def _check_focus(self, allow_pointer_grace=True):
         self._focus_check_id = None
         try:
-            focused = self.focus_get()
-            if focused is None and self.popup is not None:
+            # Native ttk popdowns exist only in Tcl, outside tkinter's widget
+            # registry. Compare their paths without resolving widget objects.
+            focused = str(self.tk.call("focus"))
+            if not focused and self.popup is not None:
                 # X can report no focus between leaving the input and entering
                 # the popup. The pointer already owns the suggestion window;
                 # do not destroy it before its FocusIn notification arrives.
-                pointed = self.winfo_containing(*self.winfo_pointerxy())
-                if allow_pointer_grace and (pointed is self.popup or
-                        str(pointed).startswith(str(self.popup) + ".")):
+                pointed = str(self.tk.call("winfo", "containing", *self.winfo_pointerxy()))
+                if allow_pointer_grace and (pointed == str(self.popup) or
+                        pointed.startswith(str(self.popup) + ".")):
                     # If focus remains outside this app, close after a brief
                     # transfer grace period even with the pointer still here.
                     self._focus_check_id = self.after(60, lambda: self._check_focus(False))
@@ -410,10 +412,10 @@ class FilterCombo(ttk.Frame):
             # (not just their listbox). Destroying one in that state returns
             # focus to the entry and can cause an endless destroy/reopen loop.
             in_popup = self.popup is not None and (
-                focused is self.popup or str(focused).startswith(str(self.popup) + "."))
-            if focused is not self.entry and not in_popup:
+                focused == str(self.popup) or focused.startswith(str(self.popup) + "."))
+            if focused != str(self.entry) and not in_popup:
                 self.close_popup()
-                if focused is not None:
+                if focused:
                     self._dismissed = False
         except tk.TclError:
             pass

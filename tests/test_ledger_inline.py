@@ -80,7 +80,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
         return flow
 
-    def click_cell(self, flow, column="name", twice=False):
+    def click_cell(self, flow, column="name", twice=False, pump_between=True):
         tree = self.app.ledger
         fid = flow["flow_id"]
         tree.see(fid)
@@ -95,6 +95,9 @@ class LedgerInlineEditingTests(unittest.TestCase):
             when = self.click_time + repeat * 150
             tree.event_generate("<ButtonPress-1>", x=x, y=y, time=when)
             tree.event_generate("<ButtonRelease-1>", x=x, y=y, time=when + 40)
+            if pump_between:
+                self.pump()
+        if not pump_between:
             self.pump()
 
     def open_cell(self, flow, column):
@@ -291,6 +294,67 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.ledger.set(first["flow_id"], "name"), "Unsaved draft")
         self.assertTrue(self.app.save_flow())
         self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], "Unsaved draft")
+
+    def test_repeat_copy_cancel_preserves_draft_then_no_allows_original_f2_edit(self):
+        original = self.seed()
+        self.click_cell(original)
+        self.app.repeat_selected()
+        self.pump()
+        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.assertEqual(self.app.ledger.focus(), "")
+        draft = self.app._flow_snapshot()
+        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
+            self.click_cell(original)
+        self.assertEqual(prompt.call_count, 1)
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app._flow_snapshot(), draft)
+        self.assertEqual(len(self.repo.list_flows()), 1)
+        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False) as prompt:
+            self.click_cell(original)
+        self.assertEqual(prompt.call_count, 1)
+        self.app.ledger.event_generate("<F2>")
+        self.pump()
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+        self.assertEqual(self.app.ledger_editor.flow_id, original["flow_id"])
+        self.assertEqual(self.app.ledger_editor.field, "date")
+        self.assertEqual(self.repo.list_flows(), [original])
+
+    def test_repeat_copy_yes_saves_copy_then_double_click_edits_original(self):
+        original = self.seed()
+        self.click_cell(original)
+        self.app.repeat_selected()
+        self.app.form_vars["name"].set("Repeated purchase")
+        self.pump()
+        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True) as prompt:
+            # Queue the gesture together: an instant mocked Yes otherwise
+            # sorts the saved copy under the second click before it is sent.
+            self.click_cell(original, "name", twice=True, pump_between=False)
+        self.assertEqual(prompt.call_count, 1)
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+        self.assertEqual(self.app.ledger_editor.flow_id, original["flow_id"])
+        self.assertEqual(self.app.ledger_editor.field, "name")
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+        copies = [flow for flow in self.repo.list_flows() if flow["flow_id"] != original["flow_id"]]
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0]["name"], "Repeated purchase")
+
+    def test_repeat_copy_failed_save_retains_invalid_draft_and_no_selection(self):
+        original = self.seed()
+        self.click_cell(original)
+        self.app.repeat_selected()
+        self.app.form_vars["amount"].set("invalid")
+        self.pump()
+        draft = self.app._flow_snapshot()
+        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True) as prompt:
+            self.click_cell(original)
+        self.assertEqual(prompt.call_count, 1)
+        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.assertEqual(self.app._flow_snapshot(), draft)
+        self.assertEqual(self.repo.list_flows(), [original])
+        self.assert_closed()
 
     def test_invalid_cell_values_remain_correctable_without_partial_database_changes(self):
         flow = self.seed()
