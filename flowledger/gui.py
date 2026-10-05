@@ -24,6 +24,7 @@ from .calendar_widget import CalendarEntry
 from .graphing import graph_timeline, normalize_graph_date
 from .widgets import FilterCombo, ScrollFrame, TreeTooltip
 from .ledger_editor import LedgerEditor
+from .account_editor import AccountEditor
 
 BG = "#f2f5f2"
 CARD = "#ffffff"
@@ -86,6 +87,8 @@ class FlowApp(tk.Tk):
             variable.trace_add("write", self._sync_flow_draft)
         self.notes_text.bind("<<Modified>>", self._flow_notes_changed)
         self._build_accounts()
+        for variable in self.account_vars.values():
+            variable.trace_add("write", self._sync_account_draft)
         self._build_charts()
         self._build_data()
         for entry_class in ("TEntry", "Entry", "TCombobox"):
@@ -195,7 +198,22 @@ class FlowApp(tk.Tk):
         return tuple(v.get() for v in self.form_vars.values()) + (self.notes_text.get("1.0", "end-1c"),)
 
     def _account_snapshot(self):
-        return tuple(v.get() for v in self.account_vars.values())
+        values = [v.get() for v in self.account_vars.values()]
+        try:
+            # Compare instants, so pasting the existing timestamp or adding
+            # optional zero seconds does not invent an unsaved change.
+            values[2] = normalize_date(self._account_when())
+            values[3] = ""
+        except ValueError:
+            pass  # Invalid input still differs and remains available to fix.
+        return tuple(values)
+
+    def _account_when(self):
+        raw = self.account_vars["date"].get().strip()
+        time_value = self.account_vars["time"].get().strip()
+        if len(raw) == 10 and time_value:
+            raw += " " + time_value
+        return raw
 
     def _confirm_changes(self, kind):
         """Resolve an unsaved draft before replacing it, never on mere refresh."""
@@ -224,8 +242,7 @@ class FlowApp(tk.Tk):
     def _set_account_selection(self, name):
         self._account_selection = name if name and self.accounts_tree.exists(name) else None
         self.accounts_tree.selection_set((self._account_selection,) if self._account_selection else ())
-        if self._account_selection:
-            self.accounts_tree.focus(self._account_selection)
+        self.accounts_tree.focus(self._account_selection or "")
 
     @staticmethod
     def _select_all_entry(event):
@@ -362,9 +379,23 @@ class FlowApp(tk.Tk):
         self.form_vars["date"].set(when[:10])
         self.form_vars["time"].set(when[11:])
 
+    def _split_account_date(self, event=None):
+        """A pasted timestamp replaces Time; a date alone keeps its seconds."""
+        raw = self.account_vars["date"].get().strip()
+        if len(raw) <= 10:
+            return
+        try:
+            when = normalize_date(raw)
+        except ValueError:
+            return  # Save leaves invalid input visible for correction.
+        self.account_vars["date"].set(when[:10])
+        self.account_vars["time"].set("" if when[11:] == "00:00:00" else when[11:])
+
     def edit_time(self, variable, title="Flow Time"):
         if variable is self.form_vars["time"]:
             self._split_flow_date()
+        elif variable is self.account_vars["time"]:
+            self._split_account_date()
         self._prepare_dialog()
         dialog = tk.Toplevel(self)
         dialog.title(title)
@@ -965,7 +996,7 @@ class FlowApp(tk.Tk):
         ttk.Label(header, textvariable=self.account_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
         self.account_save_button = ttk.Button(header, text="Save Account", style="Primary.TButton", command=self.save_account)
         self.account_save_button.pack(side="right")
-        self.account_cancel_button = ttk.Button(header, text="Cancel", style="Small.TButton", command=lambda: self.new_account(focus=False, confirm=False))
+        self.account_cancel_button = ttk.Button(header, text="Cancel", style="Small.TButton", command=lambda: self.new_account(confirm=False))
         self.account_cancel_button.pack(side="right", padx=8)
         self.account_new_button = ttk.Button(header, text="New Account", style="Small.TButton", command=self.new_account)
         self.account_new_button.pack(side="right")
@@ -983,6 +1014,7 @@ class FlowApp(tk.Tk):
             if key == "name":
                 self.account_name_entry = widget
             if key == "date":
+                widget.bind("<FocusOut>", self._split_account_date, add="+")
                 button = tk.Button(heading, text="Time", command=lambda: self.edit_time(self.account_vars["time"], "Starting Time"), font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0)
                 button.pack(side="right")
                 self.account_vars["time"].trace_add("write", lambda *args: button.configure(text=self.account_vars["time"].get() or "Time"))
@@ -1006,19 +1038,50 @@ class FlowApp(tk.Tk):
             self.accounts_tree.column(key, width=80, minwidth=20, stretch=False, anchor="e" if key in {"balance", "confirmed", "pending"} else "w")
         self._fit_columns(self.accounts_tree, {k: w for k, label, w in specs})
         self.accounts_tree.grid(row=1, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(card, command=self.accounts_tree.yview)
+        scroll = ttk.Scrollbar(card, command=self._accounts_yview)
         scroll.grid(row=1, column=1, sticky="ns")
-        self.accounts_tree.configure(yscrollcommand=scroll.set)
+        def accounts_scrolled(*args):
+            scroll.set(*args)
+            self.account_cell_editor.queue_position()
+        self.accounts_tree.configure(yscrollcommand=accounts_scrolled)
         self.accounts_tree.tag_configure("odd", background="#f6f9f6")
         self.accounts_tree.bind("<<TreeviewSelect>>", self._select_account)
-        self.accounts_tree.bind("<Double-1>", self._repeat_row_click)
         self.accounts_tree.bind("<Triple-1>", self._repeat_row_click)
+        self.account_cell_editor = AccountEditor(self, font=FONT, background=CARD, foreground=INK)
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda name: "Starting balance immediately before " + self.repo.get_account(name)["opening_at"] if self.repo.get_account(name) else None)
-        ttk.Label(card, text="Select an account to edit · Starting balances are before flows on the starting date · Hover for exact time", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date to edit · Save commits changes · Hover for exact time", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+    def _accounts_yview(self, *args):
+        self.account_cell_editor.close()
+        self.accounts_tree.yview(*args)
+
+    def _restore_account_draft_row(self):
+        name = self.account_editing
+        if not name or not self.accounts_tree.exists(name):
+            return
+        account = self.repo.get_account(name)
+        if account:
+            opening = account["opening_cents"]
+            self.accounts_tree.set(name, "balance", "Unknown" if opening is None else "$" + format_money(opening))
+            self.accounts_tree.set(name, "anchor", account["opening_at"][:10])
+
+    def _sync_account_draft(self, *args):
+        """Preview only starting values; calculated balances remain saved values."""
+        name = self.account_editing
+        if not name or not self.accounts_tree.exists(name):
+            return
+        raw = self.account_vars["opening"].get().strip()
+        try:
+            opening = "$" + format_money(parse_money(raw, allow_negative=True)) if raw else "Unknown"
+        except ValueError:
+            opening = raw  # Keep mistakes visible without writing a record.
+        self.accounts_tree.set(name, "balance", opening)
+        self.accounts_tree.set(name, "anchor", self.account_vars["date"].get()[:10])
 
     def refresh_accounts(self):
         if not hasattr(self, "accounts_tree"):
             return
+        self.account_cell_editor.close()
         self.account_tooltip.hide()
         selected = self._account_selection
         self.accounts_tree.delete(*self.accounts_tree.get_children())
@@ -1032,6 +1095,7 @@ class FlowApp(tk.Tk):
             pending = ledger_balance_at(account, flows, now, ("Complete", "Pending"))
             self.accounts_tree.insert("", "end", iid=account["name"], values=(account["name"], money(account["opening_cents"]), account["opening_at"][:10], money(confirmed), money(pending)), tags=("odd" if index % 2 else "even",))
         self._set_account_selection(selected)
+        self._sync_account_draft()
         self.account_summary.set(f"{len(accounts)} accounts")
 
     def _select_account(self, event=None):
@@ -1041,9 +1105,11 @@ class FlowApp(tk.Tk):
         name = selection[0] if selection else None
         if name == self._account_selection:
             return
+        self.account_cell_editor.close()
         self._set_account_selection(self._account_selection)
         if not self._confirm_changes("account"):
             return
+        self._restore_account_draft_row()
         self._close_popups()
         if not name:
             self.new_account(focus=False, confirm=False)
@@ -1066,6 +1132,8 @@ class FlowApp(tk.Tk):
     def new_account(self, focus=True, confirm=True):
         if confirm and not self._confirm_changes("account"):
             return False
+        self.account_cell_editor.close()
+        self._restore_account_draft_row()
         self._close_popups()
         self.account_editing = None
         self.account_name_entry.configure(state="normal")
@@ -1082,17 +1150,18 @@ class FlowApp(tk.Tk):
         return True
 
     def save_account(self):
+        self.account_cell_editor.close()
         self._close_popups()
         try:
             raw = self.account_vars["opening"].get().strip()
             cents = parse_money(raw, allow_negative=True) if raw else None
-            at = normalize_date(self.account_vars["date"].get().strip() + " " + (self.account_vars["time"].get().strip() or "00:00:00"))
+            at = normalize_date(self._account_when())
             account = self.repo.save_account(self.account_vars["name"].get(), opening_cents=cents, opening_at=at)
             self.new_account(focus=False, confirm=False)
             self.refresh_all()
             self.status_message.set(f"Account saved: {account['name']}")
             self.accounts_tree.see(account["name"])
-            self.accounts_tree.focus_set()
+            self.account_name_entry.focus_set()
             return True
         except (ValueError, sqlite3.Error) as exc:
             self.account_feedback.set(str(exc))

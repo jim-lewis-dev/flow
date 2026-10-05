@@ -15,9 +15,12 @@ from .widgets import FilterCombo
 class LedgerEditor:
     """Keep one editor attached to one visible ledger cell."""
 
-    def __init__(self, app, notes_peer, *, font, background, foreground):
+    view_name = "flows"
+    default_field = "date"
+
+    def __init__(self, app, notes_peer, *, font, background, foreground, tree=None):
         self.app = app
-        self.tree = app.ledger
+        self.tree = app.ledger if tree is None else tree
         self.notes_peer = notes_peer
         self.font = font
         self.background = background
@@ -46,25 +49,68 @@ class LedgerEditor:
     def _keyboard_edit(self, event=None):
         selected = self.tree.selection()
         if selected:
-            self.open(selected[0], "date")
+            self.open(selected[0], self.default_field)
         return "break"
+
+    @property
+    def editable_columns(self):
+        return tuple(self.tree["columns"])
+
+    @property
+    def draft_id(self):
+        return self.app.editing_id
+
+    @property
+    def row_id(self):
+        return self.flow_id
+
+    def _select_draft(self, row):
+        if self.draft_id != row:
+            self.tree.selection_set(row)
+            self.app._select_flow()
 
     def open(self, flow_id, field):
         """Open a cell on the selected draft, resolving any other draft first."""
-        if field not in self.tree["columns"] or not self.tree.exists(flow_id):
+        if field not in self.editable_columns or not self.tree.exists(flow_id):
             return False
         self.close()
-        if self.app.editing_id != flow_id:
-            self.tree.selection_set(flow_id)
-            self.app._select_flow()
-        if self.app.editing_id != flow_id:
+        self._select_draft(flow_id)
+        if self.draft_id != flow_id:
             return False  # Cancel or failed validation retained the old draft.
         self.app._close_popups()
         self.tree.see(flow_id)
         bounds = self.tree.bbox(flow_id, field)
-        if not bounds or self.app.current_view != "flows":
+        if not bounds or self.app.current_view != self.view_name:
             return False
         self.flow_id, self.field = flow_id, field
+        widget = self._make_widget(field)
+        self.widget = widget
+        self.position()
+        if field != "notes":
+            self.input.bind("<Return>", self._enter)
+            self.input.bind("<KP_Enter>", self._enter)
+        self.input.bind("<Control-Return>", self._enter)
+        self.input.bind("<Tab>", lambda event: self._tab(1))
+        self.input.bind("<Shift-Tab>", lambda event: self._tab(-1))
+        self.input.bind("<ISO_Left_Tab>", lambda event: self._tab(-1))
+        self.input.bind("<Escape>", self._escape)
+        self.input.bind("<FocusOut>", self._defer_focus_check, add="+")
+        if isinstance(widget, FilterCombo):
+            # Geometry has been positioned before focus can map a popup.
+            widget.focus_set(open_popup=False)
+            widget.entry.selection_range(0, "end")
+            widget.entry.icursor("end")
+        else:
+            self.input.focus_set()
+            if field != "notes":
+                self.input.selection_range(0, "end")
+                self.input.icursor("end")
+            else:
+                self.input.mark_set("insert", self.app.notes_text.index("insert"))
+                self.input.see("insert")
+        return True
+
+    def _make_widget(self, field):
         variable_key = "amount" if field == "amount_cents" else field
         if field == "notes":
             widget = self.notes_peer(self.tree, self.app.notes_text,
@@ -93,31 +139,7 @@ class LedgerEditor:
             widget = ttk.Entry(self.tree, textvariable=self.app.form_vars[variable_key],
                 width=1, style="Ledger.TEntry")
             self.input = widget
-        self.widget = widget
-        self.position()
-        if field != "notes":
-            self.input.bind("<Return>", self._enter)
-            self.input.bind("<KP_Enter>", self._enter)
-        self.input.bind("<Control-Return>", self._enter)
-        self.input.bind("<Tab>", lambda event: self._tab(1))
-        self.input.bind("<Shift-Tab>", lambda event: self._tab(-1))
-        self.input.bind("<ISO_Left_Tab>", lambda event: self._tab(-1))
-        self.input.bind("<Escape>", self._escape)
-        self.input.bind("<FocusOut>", self._defer_focus_check, add="+")
-        if isinstance(widget, FilterCombo):
-            # Geometry has been positioned before focus can map a popup.
-            widget.focus_set(open_popup=False)
-            widget.entry.selection_range(0, "end")
-            widget.entry.icursor("end")
-        else:
-            self.input.focus_set()
-            if field != "notes":
-                self.input.selection_range(0, "end")
-                self.input.icursor("end")
-            else:
-                self.input.mark_set("insert", self.app.notes_text.index("insert"))
-                self.input.see("insert")
-        return True
+        return widget
 
     def _enter(self, event=None):
         if isinstance(self.widget, FilterCombo):
@@ -127,7 +149,7 @@ class LedgerEditor:
 
     def _tab(self, direction):
         row, field = self.flow_id, self.field
-        columns = tuple(self.tree["columns"])
+        columns = self.editable_columns
         index = columns.index(field) + direction
         self.close()
         if 0 <= index < len(columns):
@@ -183,8 +205,8 @@ class LedgerEditor:
         if self.widget is None:
             return
         bounds = self.tree.bbox(self.flow_id, self.field)
-        if (not bounds or self.app.editing_id != self.flow_id or
-                self.app.current_view != "flows" or not self.tree.winfo_viewable()):
+        if (not bounds or self.draft_id != self.flow_id or
+                self.app.current_view != self.view_name or not self.tree.winfo_viewable()):
             self.close()
             return
         if isinstance(self.widget, FilterCombo):
@@ -204,13 +226,16 @@ class LedgerEditor:
         self.widget = self.input = None
         self.field = self.flow_id = None
         if widget is not None and widget.winfo_exists():
-            if field == "date":
-                self.app._split_flow_date()
+            self._finish_field(field)
             if isinstance(widget, FilterCombo):
                 widget.close_popup()
             widget.destroy()
         if focus_tree:
             self.tree.focus_set()
+
+    def _finish_field(self, field):
+        if field == "date":
+            self.app._split_flow_date()
 
     def refresh_suggestions(self):
         if isinstance(self.widget, FilterCombo):

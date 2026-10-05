@@ -327,7 +327,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.accounts_tree.selection(), ())
         for key in ("name", "opening", "time"):
             self.assertEqual(self.app.account_vars[key].get(), "", key)
-        self.assertEqual(self.app.focus_get(), self.app.accounts_tree)
+        self.assertEqual(self.app.focus_get(), self.app.account_name_entry)
         self.click_row(self.app.accounts_tree, "AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "0.00")
         self.assertEqual(self.app.account_vars["time"].get(), "")
