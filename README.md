@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.11 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.12 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
@@ -104,7 +104,11 @@ Click empty space below the ledger rows to deselect and return to New Flow. Vali
 
 **Repeat** copies every field, including date, time, status, notes and tags, into a new draft. It creates a new record only when you press **Add Flow**. Selecting a ledger row discards the copy without changing the original.
 
-**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons are also available. Completed flow/account edits, additions, Void, a whole import batch, and dropdown suggestion removal/restoration are reversible. Unfinished typing is reverted before undoing a saved change. New edits discard the redo branch. Closing the app clears undo history; saved records stay saved. Restoring a database clears undo history after the restore succeeds. Graph/filter choices and exported files are not record changes.
+**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons use the same history. Record edits, additions, Void, imports, suggestion removal/restoration, draft typing, New Flow/New Account clearing and Repeat are reversible. Filters, ledger search, date ranges, sorting, graph account selections, basis, dates, combined balance, Update Graph, line visibility, pan/zoom and table column changes join that same action order. A filter changed after an edit undoes first; the next undo reverses the edit. Shortcuts work inside custom dropdowns and Notes. Consecutive typing in one focused field is one step. New changes discard redo. Closing the app or successfully restoring a database clears history; saved records stay saved. File exports, scrolling and opening a page or popup do not create undo steps.
+
+**Drag a column title** to move it in Flow Ledger or Accounts. Click a ledger title to sort; drag its edge to resize. Cell editing and Tab follow the displayed column order. Moves and resizing are undoable. Column order and view settings last for the current session.
+
+Discarding an unadded draft by selecting a row, changing pages or clicking blank ledger space can also be undone. Undo restores the entry fields without adding a record; changing pages stays ordinary navigation.
 
 Dates use year-first order and optional 24-hour time in the same entry. Leading zeros are optional. Missing month/day default to 1; missing hour/minute/second default to 0. These rules apply to flows, account starting values and date filters.
 
@@ -173,6 +177,8 @@ If the old database contains named hypothetical collections, they remain in the 
 | `flowledger/core.py` | Validation, repository, transactions, audit and balance functions. |
 | `flowledger/schema.sql` | SQLite tables, constraints and indexes. |
 | `flowledger/history.py` | Session undo/redo of grouped changes; no persistent schema additions. |
+| `flowledger/view_history.py` | UI snapshots and typing groups in the same session action order. |
+| `flowledger/table_columns.py` | Header dragging, resizing history and correct display-to-field mapping. |
 | `flowledger/gui.py` / `widgets.py` | Draft editing, tables, graphs and controls. |
 | `flowledger/ledger_editor.py` | Ledger cell editors sharing the upper form's draft. |
 | `flowledger/account_editor.py` | Starting balance/date cells using the same editing lifecycle. |
@@ -190,6 +196,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
 | `docs/ledger_interaction.txt` | Mouse/keyboard checks for automatic flow edits, Add, Repeat and undo/redo. |
 | `docs/account_interaction.txt` | Mouse/keyboard checks for automatic account edits, timestamps and undo/redo. |
+| `docs/view_history_interaction.txt` | Native checks for filter/draft/graph undo and table dragging/editing. |
 | `docs/account_visibility_interaction.txt` | Mouse/keyboard checks for referenced accounts, blank-space clearing, silent validation and the single Date/Time entry. |
 
 ```bash

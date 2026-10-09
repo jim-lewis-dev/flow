@@ -7,7 +7,7 @@ undo stacks. The existing audit remains append-only, including undo/redo events.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import sqlite3
 from typing import Callable, TypeVar
@@ -45,6 +45,7 @@ class _ExternalAction:
     label: str
     undo: Callable[[], object]
     redo: Callable[[], object]
+    merge_key: object = None
 
 
 class SessionHistory:
@@ -108,6 +109,19 @@ class SessionHistory:
     def redo_label(self) -> str:
         return self._redo[-1].label if self._redo else ""
 
+    @property
+    def undo_token(self):
+        """Identify the latest action when ordering unfinished typing."""
+        return self._undo[-1] if self._undo else None
+
+    @property
+    def undo_affects_records(self) -> bool:
+        return bool(self._undo and isinstance(self._undo[-1], _Action))
+
+    @property
+    def redo_affects_records(self) -> bool:
+        return bool(self._redo and isinstance(self._redo[-1], _Action))
+
     def _ensure_idle(self) -> None:
         if self._closed:
             raise RuntimeError("Undo history is closed.")
@@ -156,17 +170,25 @@ class SessionHistory:
         return result
 
     def perform_external(self, label: str, callback: Callable[[], bool],
-                         undo: Callable[[], object], redo: Callable[[], object]) -> bool:
-        """Record one non-database preference change in the same undo order.
+                         undo: Callable[[], object], redo: Callable[[], object],
+                         *, merge_key: object = None) -> bool:
+        """Record one non-database change in the same undo order.
 
         ``callback`` returns whether anything changed. All three callbacks must
         leave their state untouched on failure, as SuggestionPreferences does.
         These actions cannot be nested inside a database action.
+        A non-null merge_key groups consecutive changes, retaining the first
+        undo callback and latest redo callback. An undone branch never merges.
         """
         self._ensure_idle()
         changed = callback()
         if changed:
-            self._undo.append(_ExternalAction(label, undo, redo))
+            previous = self._undo[-1] if self._undo else None
+            if (merge_key is not None and not self._redo and
+                    isinstance(previous, _ExternalAction) and previous.merge_key == merge_key):
+                self._undo[-1] = replace(previous, redo=redo)
+            else:
+                self._undo.append(_ExternalAction(label, undo, redo, merge_key))
             self._redo.clear()
         return changed
 

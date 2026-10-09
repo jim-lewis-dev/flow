@@ -25,6 +25,10 @@ class CheckFilter(ttk.Frame):
         self.popup = None
         self.search_entry = None
         self.search_variable = None
+        # The variable outlives a popup so session undo can restore its search.
+        # An ordinary reopen still starts with an empty search, as before.
+        self.query_variable = tk.StringVar(self)
+        self._restore_query = False
         self.canvas = None
         self.all_button = None
         self.checkbuttons = {}
@@ -125,7 +129,13 @@ class CheckFilter(ttk.Frame):
             if previous is not None and previous is not self:
                 previous.close_popup()
         top._flow_check_filter = self
+        if hasattr(top, "view_history"):
+            top._open_filter_query(self)
+        else:
+            self.query_variable.set("")
         self.popup = tk.Toplevel(self)
+        if hasattr(top, "_bind_history_popup"):
+            top._bind_history_popup(self.popup)
         # Place before the first map. Nested update calls here can flash the
         # popup at the origin and dispatch unrelated form callbacks.
         self.popup.withdraw()
@@ -139,9 +149,11 @@ class CheckFilter(ttk.Frame):
         self.popup.bind("<Button-5>", lambda event: self._scroll(1))
         body = ttk.Frame(self.popup, padding=8)
         body.pack(fill="both", expand=True)
-        self.search_variable = tk.StringVar(self.popup)
+        self.search_variable = self.query_variable
         self.search_entry = ttk.Entry(body, textvariable=self.search_variable)
         self.search_entry.pack(fill="x")
+        if hasattr(top, "view_history"):
+            top.view_history.watch_entry(self.search_entry)
         self._all_variable = tk.BooleanVar(self.popup, value=not self._selected)
         self.all_button = ttk.Checkbutton(body, text="All", variable=self._all_variable,
                                          command=self._clear)

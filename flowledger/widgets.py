@@ -169,6 +169,8 @@ class FilterCombo(ttk.Frame):
         top._flow_filter_combo = self
         if self.popup is None or not self.popup.winfo_exists():
             self.popup = tk.Toplevel(self)
+            if hasattr(top, "_bind_history_popup"):
+                top._bind_history_popup(self.popup)
             # Never map an unpositioned popup. In particular, do not call
             # update/update_idletasks here: they can map it at (0, 0) and
             # dispatch unrelated callbacks while this widget is half built.

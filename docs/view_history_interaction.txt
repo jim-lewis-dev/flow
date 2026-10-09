@@ -1,0 +1,26 @@
+Flow 0.5.12: native X11 XTest mouse and keyboard audit
+PASS: 23 workflows; 0 callback exceptions.
+
+PASS Ctrl+Z/Ctrl+Y inside a checkbox dropdown restores selections and checkmarks without closing it
+PASS Category, status, and tag changes share one undo order and never write transaction data
+PASS Choice-search typing is undoable as one field, including after closing and reopening its dropdown
+PASS Ledger search reverses a whole typing gesture and immediately restores the visible rows
+PASS An edit followed by a filter undoes the filter first, then the edit, including hidden rows and redo
+PASS New draft fields undo separately; New Flow clearing is reversible and never adds records
+PASS Blank-space and row-selection draft discards can be undone without saving a new flow
+PASS Changing pages still discards a new draft; undo restores its fields without changing pages
+PASS New-flow Notes undo/redo stays synchronized between the inline field and open expanded editor
+PASS Repeat can be undone and redone, copying every field including the full date/time
+PASS Drag a ledger header across several columns; one undo restores it and dragging does not sort
+PASS Reordered cells still edit the correct field; Tab follows the visible column order
+PASS Ordinary header clicks still sort, and sorting is undoable
+PASS Separator resizing still works after reordering and has one undo/redo step
+PASS Accounts headers reorder too; date/balance editing and visual Tab order survive, calculated cells stay read-only
+PASS Unadded account fields and New Account clearing use the same session undo
+PASS Applying a ledger date range is one undo action for both bounds
+PASS Graph All/None account selections undo and redo correctly
+PASS Balance basis and combined-balance checkbox share the same undo order as other controls
+PASS Calendar day selection and Update Graph undo independently while restoring the displayed plot
+PASS Clicking a legend line to hide/show it can be undone and redone
+PASS Physical plot zoom is one undo/redo action restoring exact axis limits
+PASS All checks leave saved records intact; custom popups map in place with no callback exceptions

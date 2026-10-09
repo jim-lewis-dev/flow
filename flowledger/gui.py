@@ -26,6 +26,8 @@ from .widgets import FilterCombo, ScrollFrame, TreeTooltip
 from .ledger_editor import LedgerEditor
 from .account_editor import AccountEditor
 from .history import SessionHistory
+from .view_history import ViewHistory
+from .table_columns import ColumnDrag, displayed_columns
 
 BG = "#f2f5f2"
 CARD = "#ffffff"
@@ -66,6 +68,7 @@ class FlowApp(tk.Tk):
         self._committing = False
         self._loading = False
         self._active_edit = None
+        self._active_edit_history = None
         self._draft_redo = None
         self.demo = demo
         self.suggestion_preferences = SuggestionPreferences(repo.path)
@@ -117,6 +120,7 @@ class FlowApp(tk.Tk):
         self._bind_form_edits()
         self.refresh_all()
         self.show_view("flows")
+        self._build_view_history()
         if self.suggestion_preferences.load_error:
             self._feedback(self.suggestion_preferences.load_error, True)
 
@@ -229,6 +233,178 @@ class FlowApp(tk.Tk):
     def _account_when(self):
         return self.account_vars["date"].get().strip()
 
+    def _build_view_history(self):
+        """Register UI snapshots in the same session history as record edits."""
+        view = self.view_history = ViewHistory(self)
+        for kind in ("flow", "account"):
+            view.register("draft:" + kind, lambda k=kind: self._draft_state(k),
+                          lambda value, k=kind: self._put_draft_state(k, value))
+        for key, choice in self.ledger_filters.items():
+            view.register("filter:" + key, choice.get,
+                          lambda values, c=choice: self._put_filter(c, values))
+            view.register("query:" + key, choice.query_variable.get,
+                          lambda text, c=choice: self._put_choice_query(c, text))
+            choice.query_variable.trace_add("write", lambda *args, k=key:
+                view.record("query:" + k, "Search filter choices", merge="typing"))
+        view.register("search", self.search_var.get, self._put_search)
+        view.watch_entry(self.search_entry)
+        view.register("dates", lambda: (self.filter_start.get(), self.filter_end.get()),
+                      self._put_date_filters)
+        view.register("sort", lambda: (self.sort_column, self.sort_reverse), self._put_sort)
+        for key, tree in (("ledger", self.ledger), ("accounts", self.accounts_tree)):
+            view.register("columns:" + key, lambda t=tree: displayed_columns(t),
+                          lambda values, t=tree: self._put_column_order(t, values))
+            view.register("widths:" + key,
+                          lambda t=tree: tuple((c, t.column(c, "width")) for c in t["columns"]),
+                          lambda values, t=tree: self._put_column_widths(t, values))
+        view.register("graph", self._graph_state, self._put_graph_state)
+        for variable, key in ((self.chart_basis, "basis"), (self.chart_start, "start"),
+                              (self.chart_end, "end"), (self.chart_combined, "combined")):
+            variable.trace_add("write", lambda *args, k=key:
+                view.record("graph", "Graph settings", merge=k))
+        for widget in (self.chart_basis_widget, self.chart_start_picker.entry,
+                       self.chart_end_picker.entry):
+            view.watch_entry(widget)
+        self.chart_accounts.bind("<<ListboxSelect>>", self._graph_accounts_changed)
+        self._chart_limit_pending = None
+        self.canvas.mpl_connect("button_press_event", lambda event: view.begin())
+        self._watch_chart_limits()
+
+    def _draft_state(self, kind):
+        values = (self._flow_snapshot() if kind == "flow" else
+                  tuple(v.get() for v in self.account_vars.values()))
+        title = self.form_title if kind == "flow" else self.account_title
+        return self._draft_identity(kind), values, getattr(self, "_clean_" + kind), title.cget("text")
+
+    def _put_draft_state(self, kind, state):
+        identity, values, clean, title = state
+        self._close_popups()
+        self._loading = True
+        try:
+            if kind == "flow":
+                self.ledger_editor.close(commit=False)
+                self._restore_draft_row()
+                self.editing_id = identity
+                for variable, value in zip(self.form_vars.values(), values):
+                    variable.set(value)
+                # Leave a shared Notes peer open; all views show this buffer.
+                self.notes_text.delete("1.0", "end")
+                self.notes_text.insert("1.0", values[-1])
+                self.notes_text.edit_modified(False)
+                self.form_title.configure(text=title)
+                self.save_button.configure(state="disabled" if identity else "normal")
+                self.form_feedback.set("Edits save automatically" if identity else "From, To, and Amount required")
+                self._set_flow_selection(identity)
+            else:
+                self.account_cell_editor.close(commit=False)
+                self._restore_account_draft_row()
+                self.account_editing = identity
+                for variable, value in zip(self.account_vars.values(), values):
+                    variable.set(value)
+                self.account_title.configure(text=title)
+                self.account_name_entry.configure(state="disabled" if identity else "normal")
+                self.account_save_button.configure(state="disabled" if identity else "normal")
+                self.account_feedback.set("Negative = debt · Blank = unknown")
+                self._set_account_selection(identity)
+            setattr(self, "_clean_" + kind, clean)
+            self._active_edit = None
+            self._draft_redo = None
+        finally:
+            self._loading = False
+        (self._sync_flow_draft if kind == "flow" else self._sync_account_draft)()
+
+    def _remember_draft(self, kind):
+        if hasattr(self, "view_history"):
+            self.view_history.remember("draft:" + kind)
+
+    def _unadded_draft(self, kind):
+        if not hasattr(self, "view_history") or self._draft_identity(kind):
+            return None
+        state = self._draft_state(kind)
+        values = self._account_snapshot() if kind == "account" else state[1]
+        if values != state[2] or state[3] == "Repeat Flow":
+            return state
+
+    def _record_discarded_draft(self, kind, before):
+        if before is not None:
+            self.view_history.record("draft:" + kind, "Discard new " + kind, before=before)
+
+    def _record_draft(self, kind, args=()):
+        if self._draft_identity(kind) or not hasattr(self, "view_history"):
+            return
+        variables = self.form_vars if kind == "flow" else self.account_vars
+        key = next((key for key, variable in variables.items()
+                    if args and str(variable) == args[0]), "notes")
+        self.view_history.record("draft:" + kind, "Type " + kind, merge=key)
+
+    def _put_filter(self, choice, values):
+        choice.set_selected(values)
+        self.refresh_ledger()
+
+    def _put_choice_query(self, choice, text):
+        choice.query_variable.set(text)
+        choice._restore_query = choice.popup is None
+
+    def _open_filter_query(self, choice):
+        if not choice._restore_query:
+            with self.view_history.suspended():
+                choice.query_variable.set("")
+        choice._restore_query = False
+        key = next(key for key, widget in self.ledger_filters.items() if widget is choice)
+        self.view_history.remember("query:" + key)
+
+    def _ledger_filter_changed(self, key):
+        self.refresh_ledger()
+        if hasattr(self, "view_history"):
+            self.view_history.record("filter:" + key, key + " filter")
+
+    def _search_changed(self, *args):
+        self.refresh_ledger()
+        if hasattr(self, "view_history"):
+            self.view_history.record("search", "Ledger search", merge="typing")
+
+    def _put_search(self, value):
+        self.search_var.set(value)
+        self.refresh_ledger()
+
+    def _put_date_filters(self, values):
+        self.filter_start.set(values[0])
+        self.filter_end.set(values[1])
+        self.refresh_ledger()
+
+    def _put_sort(self, value):
+        self.sort_column, self.sort_reverse = value
+        self.refresh_ledger()
+
+    def _prepare_column_move(self, kind):
+        self._finish_existing(kind)
+        editor = self.ledger_editor if kind == "flow" else self.account_cell_editor
+        editor.close(commit=False)
+        self._close_popups()
+
+    def _put_column_order(self, tree, order):
+        editor = self.ledger_editor if tree is self.ledger else self.account_cell_editor
+        editor.close(commit=False)
+        tree.configure(displaycolumns=order)
+
+    def _columns_moved(self, key, before):
+        if hasattr(self, "view_history"):
+            self.view_history.record("columns:" + key, "Move columns", before=before)
+
+    def _put_column_widths(self, tree, widths):
+        editor = self.ledger_editor if tree is self.ledger else self.account_cell_editor
+        editor.close(commit=False)
+        for key, width in widths:
+            tree.column(key, width=width)
+
+    def _columns_resized(self, key, before):
+        if hasattr(self, "view_history"):
+            self.view_history.record("widths:" + key, "Resize columns", before=before)
+
+    def _bind_history_popup(self, popup):
+        popup.bind("<Control-z>", self.undo)
+        popup.bind("<Control-y>", self.redo)
+
     def _confirm_changes(self, kind):
         """Finish an existing edit; new drafts may be replaced without a prompt."""
         return self._finish_existing(kind)
@@ -288,6 +464,9 @@ class FlowApp(tk.Tk):
                     elif key == "date":
                         before = saved["opening_at"]
             self._active_edit = token + (before,)
+            self._active_edit_history = self.history.undo_token
+            if hasattr(self, "view_history"):
+                self.view_history.begin()
 
     def _defer_field_finish(self, widget, kind, key):
         identity = self._draft_identity(kind)
@@ -341,7 +520,9 @@ class FlowApp(tk.Tk):
 
     def _draft_is_dirty(self):
         token = self._active_edit
-        return bool(token and token[2] == self._draft_identity(token[0]) and
+        return bool(token and token[2] is not None and
+                    self._active_edit_history is self.history.undo_token and
+                    token[2] == self._draft_identity(token[0]) and
                     self._field_value(token[0], token[1]) != token[3])
 
     def _update_history_buttons(self):
@@ -351,7 +532,10 @@ class FlowApp(tk.Tk):
             if identity != self._draft_identity(kind) or self._field_value(kind, key) != before:
                 self._draft_redo = None
         self.undo_button.configure(state="normal" if draft or self.history.can_undo else "disabled")
-        self.redo_button.configure(state="normal" if not draft and (self._draft_redo or self.history.can_redo) else "disabled")
+        redo = bool(self._draft_redo or self.history.can_redo)
+        if draft and self.history.redo_affects_records:
+            redo = False
+        self.redo_button.configure(state="normal" if redo else "disabled")
 
     def _reload_current(self, kind):
         if kind == "flow":
@@ -369,7 +553,7 @@ class FlowApp(tk.Tk):
 
     def _undo_draft(self):
         token = self._active_edit
-        if token and token[2] == self._draft_identity(token[0]):
+        if self._draft_is_dirty():
             kind, key, identity, before = token
             after = self._field_value(kind, key)
             if after != before:
@@ -385,7 +569,13 @@ class FlowApp(tk.Tk):
             return self.grab_current() is None
         top = str(self.tk.call("winfo", "toplevel", str(event.widget)))
         notes = getattr(self, "notes_dialog", None)
-        return self.grab_current() is None and top in (str(self), str(notes))
+        allowed = {str(self), str(notes)}
+        for attribute in ("_flow_check_filter", "_flow_filter_combo", "_flow_calendar"):
+            control = getattr(self, attribute, None)
+            popup = getattr(control, "popup", None)
+            if popup is not None:
+                allowed.add(str(popup))
+        return self.grab_current() is None and top in allowed
 
     def undo(self, event=None):
         if not self._history_event_allowed(event):
@@ -405,32 +595,41 @@ class FlowApp(tk.Tk):
                 self.status_message.set("Redid typing")
                 self._update_history_buttons()
                 return "break"
-        if self._draft_is_dirty():
+        if self._draft_is_dirty() and self.history.redo_affects_records:
             return "break"
         return self._history_step(True)
 
     def _history_step(self, redo):
         if not (self.history.can_redo if redo else self.history.can_undo):
             return "break"
-        # Close views of a draft before restoring records, with no implicit save.
+        records = self.history.redo_affects_records if redo else self.history.undo_affects_records
+        action_label = self.history.redo_label if redo else self.history.undo_label
+        self.view_history.begin()
+        # Restoring a view must not reload or save a record's unfinished fields.
         self._committing = True
         try:
-            self.ledger_editor.close(commit=False)
-            self.account_cell_editor.close(commit=False)
-            self._close_notes_editor(commit=False)
-            self._close_popups()
+            if records:
+                self.ledger_editor.close(commit=False)
+                self.account_cell_editor.close(commit=False)
+                self._close_notes_editor(commit=False)
+                self._close_popups()
+            elif action_label in ("Remove suggestion", "Restore suggestion"):
+                self._close_popups()
             label = self.history.redo() if redo else self.history.undo()
             if label is not None:
-                self.refresh_all()
-                if self.editing_id:
-                    self._reload_current("flow")
-                if self.account_editing:
-                    self._reload_current("account")
+                if records:
+                    self.refresh_all()
+                    if self.editing_id:
+                        self._reload_current("flow")
+                    if self.account_editing:
+                        self._reload_current("account")
+                    self._active_edit = None
                 self._restore_draft_row()
                 self._restore_account_draft_row()
+                self._sync_flow_draft()
+                self._sync_account_draft()
                 self.refresh_suggestions()
                 self.status_message.set(("Redid: " if redo else "Undid: ") + label)
-            self._active_edit = None
             self._update_history_buttons()
         except (ValueError, sqlite3.Error, OSError) as exc:
             self._feedback(str(exc), True)
@@ -510,12 +709,15 @@ class FlowApp(tk.Tk):
         if name != self.current_view:
             old_view = self.current_view
             if old_view in {"flows", "accounts"}:
-                if not self._confirm_changes("flow" if old_view == "flows" else "account"):
+                kind = "flow" if old_view == "flows" else "account"
+                before = self._unadded_draft(kind)
+                if not self._confirm_changes(kind):
                     return False
                 if old_view == "flows":
                     self.new_flow(focus=False, confirm=False)
                 else:
                     self.new_account(focus=False, confirm=False)
+                self._record_discarded_draft(kind, before)
             self.focus_set()
         self._close_popups()
         self.current_view = name
@@ -731,7 +933,7 @@ class FlowApp(tk.Tk):
         top.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         ttk.Label(top, text="Flow Ledger", style="Section.TLabel").pack(side="left")
         self.search_var = tk.StringVar(self)
-        self.search_var.trace_add("write", lambda *args: self.refresh_ledger())
+        self.search_var.trace_add("write", self._search_changed)
         self.filter_start = tk.StringVar(self)
         self.filter_end = tk.StringVar(self)
         self.ledger_filters = {}
@@ -742,12 +944,13 @@ class FlowApp(tk.Tk):
         primary.grid(row=0, column=0, sticky="ew")
         primary.columnconfigure(1, weight=1)
         ttk.Label(primary, text="Search", style="CardMuted.TLabel").grid(row=0, column=0, padx=(0, 8))
-        ttk.Entry(primary, textvariable=self.search_var, width=18).grid(row=0, column=1, sticky="ew")
+        self.search_entry = ttk.Entry(primary, textvariable=self.search_var, width=18)
+        self.search_entry.grid(row=0, column=1, sticky="ew")
         for col, key, label, values in ((2, "Status", "Statuses", STATUSES),
                                         (3, "Category", "Categories", ()),
                                         (4, "Tag", "Tags", ())):
             choice = CheckFilter(primary, label=label, values=values,
-                                 on_change=self.refresh_ledger)
+                                 on_change=lambda k=key: self._ledger_filter_changed(k))
             choice.grid(row=0, column=col, padx=(10, 0))
             self.ledger_filters[key] = choice
         ttk.Button(primary, text="Dates…", style="Small.TButton", command=self.edit_date_filters).grid(row=0, column=5, padx=(10, 0))
@@ -784,6 +987,11 @@ class FlowApp(tk.Tk):
         self.ledger_tooltip = TreeTooltip(self.ledger, self.flow_tooltip)
         self.ledger_editor = LedgerEditor(self, _NotesPeer,
             font=FONT, background="#fbfcfa", foreground=INK)
+        self.ledger_column_drag = ColumnDrag(self.ledger,
+            prepare=lambda: self._prepare_column_move("flow"),
+            changed=lambda before: self._columns_moved("ledger", before),
+            resized=lambda before: self._columns_resized("ledger", before),
+            click=self.sort_ledger)
         actions = ttk.Frame(ledger_card, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 8))
         for label, command in [("Repeat", self.repeat_selected), ("Void", self.void_selected), ("History", self.show_history), ("Record JSON", self.show_flow_json)]:
@@ -799,8 +1007,10 @@ class FlowApp(tk.Tk):
         """Empty ledger space starts a fresh entry; headings still sort/resize."""
         if (self.ledger.identify_region(event.x, event.y) == "nothing"
                 and not self.ledger.identify_row(event.y)):
+            before = self._unadded_draft("flow")
             self._finish_existing("flow")
             self.new_flow(confirm=False)
+            self._record_discarded_draft("flow", before)
             self.status_message.set("Ready")
             return "break"
 
@@ -838,9 +1048,8 @@ class FlowApp(tk.Tk):
                     normalized[1] = normalized[1][:11] + "23:59:59"
                 if all(normalized) and normalized[0] > normalized[1]:
                     raise ValueError("End must be on or after start.")
-                self.filter_start.set(values[0])
-                self.filter_end.set(values[1])
-                self.refresh_ledger()
+                self._put_date_filters(values)
+                self.view_history.record("dates", "Ledger dates")
                 dialog.destroy()
             except ValueError as exc:
                 error.set(str(exc))
@@ -858,6 +1067,7 @@ class FlowApp(tk.Tk):
         self.form_feedback.set(text if error else "From, To, and Amount required")
 
     def new_flow(self, focus=True, confirm=True, clear_selection=True):
+        before = self._draft_state("flow") if hasattr(self, "view_history") and not self.editing_id else None
         if confirm and not self._finish_existing("flow"):
             return False
         if focus and not self.show_view("flows"):
@@ -884,6 +1094,9 @@ class FlowApp(tk.Tk):
                 self._set_flow_selection(None)
         finally:
             self._loading = False
+        if confirm and before is not None:
+            self.view_history.record("draft:flow", "Clear new flow", before=before)
+        self._remember_draft("flow")
         if focus:
             self.form_widgets["date"].focus_set()
             self._begin_field("flow", "date")
@@ -936,6 +1149,7 @@ class FlowApp(tk.Tk):
             token = self._active_edit
             if token and token[0] == kind and token[2] == self._draft_identity(kind):
                 self._active_edit = token[:3] + (self._field_value(kind, token[1]),)
+                self._active_edit_history = self.history.undo_token
             self._draft_redo = None
             self.refresh_all()
             self.status_message.set(message)
@@ -1000,6 +1214,7 @@ class FlowApp(tk.Tk):
                 self._set_flow_selection(flow["flow_id"])
         finally:
             self._loading = False
+        self._remember_draft("flow")
         self._active_edit = None
         self._close_popups()
         self._begin_focused_field()
@@ -1011,6 +1226,7 @@ class FlowApp(tk.Tk):
         selected = selection[0] if selection else None
         if selected == self._flow_selection:
             return
+        before = self._unadded_draft("flow")
         old = self._flow_selection
         if not self._finish_existing("flow"):
             self._set_flow_selection(old)
@@ -1022,6 +1238,7 @@ class FlowApp(tk.Tk):
             self._load_form(flow)
         else:
             self.new_flow(focus=False, confirm=False)
+        self._record_discarded_draft("flow", before)
 
     def repeat_selected(self):
         selected = self.ledger.selection()
@@ -1029,7 +1246,9 @@ class FlowApp(tk.Tk):
             return
         flow = self.repo.get_flow(selected[0])
         if flow:
+            before = self._draft_state("flow")
             self._load_form(flow, repeat=True)
+            self.view_history.record("draft:flow", "Repeat flow", before=before)
 
     def void_selected(self):
         flow = self._selected()
@@ -1062,6 +1281,8 @@ class FlowApp(tk.Tk):
         self.sort_reverse = not self.sort_reverse if self.sort_column == key else False
         self.sort_column = key
         self.refresh_ledger()
+        if hasattr(self, "view_history"):
+            self.view_history.record("sort", "Sort ledger")
 
     @staticmethod
     def _flow_row_values(flow):
@@ -1082,6 +1303,7 @@ class FlowApp(tk.Tk):
         """Render the selected form draft without changing stored flow data."""
         if self._loading:
             return
+        self._record_draft("flow", args)
         self._update_history_buttons()
         row = self.editing_id
         if not row or not self.ledger.exists(row):
@@ -1288,6 +1510,10 @@ class FlowApp(tk.Tk):
         self.accounts_tree.bind("<<TreeviewSelect>>", self._select_account)
         self.accounts_tree.bind("<Triple-1>", self._repeat_row_click)
         self.account_cell_editor = AccountEditor(self, font=FONT, background=CARD, foreground=INK)
+        self.account_column_drag = ColumnDrag(self.accounts_tree,
+            prepare=lambda: self._prepare_column_move("account"),
+            changed=lambda before: self._columns_moved("accounts", before),
+            resized=lambda before: self._columns_resized("accounts", before))
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda name: "Starting balance immediately before " + self.repo.get_account(name)["opening_at"] if self.repo.get_account(name) else None)
         ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date · Changes save automatically", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
@@ -1309,6 +1535,7 @@ class FlowApp(tk.Tk):
         """Preview only starting values; calculated balances remain saved values."""
         if self._loading:
             return
+        self._record_draft("account", args)
         self._update_history_buttons()
         name = self.account_editing
         if not name or not self.accounts_tree.exists(name):
@@ -1352,6 +1579,7 @@ class FlowApp(tk.Tk):
         name = selection[0] if selection else None
         if name == self._account_selection:
             return
+        before = self._unadded_draft("account")
         if not self._finish_existing("account"):
             self._set_account_selection(self._account_selection)
             return
@@ -1363,6 +1591,7 @@ class FlowApp(tk.Tk):
             self._load_account(account)
         else:
             self.new_account(focus=False, confirm=False)
+        self._record_discarded_draft("account", before)
 
     def _load_account(self, account):
         self._loading = True
@@ -1382,9 +1611,11 @@ class FlowApp(tk.Tk):
             self._draft_redo = None
         finally:
             self._loading = False
+        self._remember_draft("account")
         self._begin_focused_field()
 
     def new_account(self, focus=True, confirm=True):
+        before = self._draft_state("account") if hasattr(self, "view_history") and not self.account_editing else None
         if confirm and not self._finish_existing("account"):
             return False
         self._loading = True
@@ -1405,6 +1636,9 @@ class FlowApp(tk.Tk):
             self._set_account_selection(None)
         finally:
             self._loading = False
+        if confirm and before is not None:
+            self.view_history.record("draft:account", "Clear new account", before=before)
+        self._remember_draft("account")
         if focus:
             self.account_name_entry.focus_set()
             self._begin_field("account", "name")
@@ -1464,10 +1698,10 @@ class FlowApp(tk.Tk):
         self.chart_accounts.configure(yscrollcommand=account_scroll.set)
         account_buttons = ttk.Frame(controls, style="Card.TFrame")
         account_buttons.grid(row=3, column=0, sticky="ew", pady=(0, 12))
-        ttk.Button(account_buttons, text="All", width=5, style="Small.TButton", command=lambda: self.chart_accounts.selection_set(0, "end")).pack(side="left", padx=5)
-        ttk.Button(account_buttons, text="None", width=5, style="Small.TButton", command=lambda: self.chart_accounts.selection_clear(0, "end")).pack(side="left")
+        ttk.Button(account_buttons, text="All", width=5, style="Small.TButton", command=lambda: self._select_graph_accounts(True)).pack(side="left", padx=5)
+        ttk.Button(account_buttons, text="None", width=5, style="Small.TButton", command=lambda: self._select_graph_accounts(False)).pack(side="left")
         self.chart_basis = tk.StringVar(self, "Confirmed")
-        self._field(controls, "Balance basis", self.chart_basis, 4, kind="choice", values=("Confirmed", "Including Pending", "Including Planned"))
+        self.chart_basis_widget = self._field(controls, "Balance basis", self.chart_basis, 4, kind="choice", values=("Confirmed", "Including Pending", "Including Planned"))
         self.chart_start = tk.StringVar(self, "2026-10-01")
         self.chart_end = tk.StringVar(self, "2027-01-01")
         for label, variable, row, attribute in (
@@ -1481,7 +1715,7 @@ class FlowApp(tk.Tk):
             setattr(self, attribute, picker)
         self.chart_combined = tk.BooleanVar(self, False)
         ttk.Checkbutton(controls, text="Combine selected accounts", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
-        ttk.Button(controls, text="Update Graph", style="Primary.TButton", command=self.draw_chart).grid(row=8, column=0, sticky="ew", pady=(14, 0))
+        ttk.Button(controls, text="Update Graph", style="Primary.TButton", command=self.update_chart).grid(row=8, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(controls, text="Export Graph…", command=self.export_chart).grid(row=9, column=0, sticky="ew", pady=(8, 0))
         chart_card = self._card(page)
         chart_card.grid(row=0, column=1, sticky="nsew")
@@ -1519,6 +1753,7 @@ class FlowApp(tk.Tk):
         self.chart_series = {}
         self.chart_tooltip = None
         self.chart_inspection_context = None
+        self._chart_rendered_controls = None
 
     def _fit_chart_canvas(self, event=None):
         """Fit the mapped figure after Tk applies its display scaling."""
@@ -1531,6 +1766,72 @@ class FlowApp(tk.Tk):
                                         height / self.figure.dpi, forward=False)
             self.canvas.draw_idle()
 
+    def _graph_controls(self):
+        return (tuple(self.chart_accounts.get(i) for i in self.chart_accounts.curselection()),
+                self.chart_basis.get(), self.chart_start.get(), self.chart_end.get(),
+                self.chart_combined.get())
+
+    def _put_graph_controls(self, values):
+        names, basis, start, end, combined = values
+        self.chart_accounts.selection_clear(0, "end")
+        for index in range(self.chart_accounts.size()):
+            if self.chart_accounts.get(index) in names:
+                self.chart_accounts.selection_set(index)
+        self.chart_basis.set(basis)
+        self.chart_start.set(start)
+        self.chart_end.set(end)
+        self.chart_combined.set(combined)
+
+    def _graph_state(self):
+        visible = tuple((line.get_label(), line.get_visible()) for line in self.chart_series)
+        limits = (tuple(self.axes.get_xlim()), tuple(self.axes.get_ylim()))
+        return self._graph_controls(), self._chart_rendered_controls, visible, limits
+
+    def _put_graph_state(self, state):
+        controls, rendered, visible, limits = state
+        self._put_graph_controls(rendered or controls)
+        self.draw_chart()
+        visibility = dict(visible)
+        for legend, line in self.chart_line_map.items():
+            line.set_visible(visibility.get(line.get_label(), True))
+            legend.set_alpha(1 if line.get_visible() else .25)
+        self.axes.set_xlim(limits[0])
+        self.axes.set_ylim(limits[1])
+        self._put_graph_controls(controls)
+        self._chart_rendered_controls = rendered
+        self.canvas.draw_idle()
+
+    def _graph_accounts_changed(self, event=None):
+        if hasattr(self, "view_history"):
+            self.view_history.record("graph", "Graph accounts")
+
+    def _select_graph_accounts(self, all_accounts):
+        if all_accounts:
+            self.chart_accounts.selection_set(0, "end")
+        else:
+            self.chart_accounts.selection_clear(0, "end")
+        self._graph_accounts_changed()
+
+    def update_chart(self):
+        before = self._graph_state()
+        self.draw_chart()
+        self.view_history.record("graph", "Update graph", before=before)
+
+    def _watch_chart_limits(self):
+        for signal in ("xlim_changed", "ylim_changed"):
+            self.axes.callbacks.connect(signal, self._chart_limits_changed)
+
+    def _chart_limits_changed(self, axes):
+        view = self.view_history
+        if view.depth or self._loading or self._committing:
+            return
+        if self._chart_limit_pending is None:
+            self._chart_limit_pending = self.after_idle(self._record_chart_limits)
+
+    def _record_chart_limits(self):
+        self._chart_limit_pending = None
+        self.view_history.record("graph", "Pan or zoom graph", merge="limits")
+
     def refresh_chart_accounts(self):
         if not hasattr(self, "chart_accounts"):
             return
@@ -1542,8 +1843,22 @@ class FlowApp(tk.Tk):
             self.chart_accounts.insert("end", account["name"])
             if account["name"] in selected or (initial and index == 0):
                 self.chart_accounts.selection_set(index)
+        if hasattr(self, "view_history"):
+            self.view_history.remember("graph")
 
     def draw_chart(self):
+        if hasattr(self, "view_history"):
+            with self.view_history.suspended():
+                self._draw_chart()
+            self._watch_chart_limits()
+            self.view_history.remember("graph")
+        else:
+            self._draw_chart()
+        self._chart_rendered_controls = self._graph_controls()
+        if hasattr(self, "view_history"):
+            self.view_history.remember("graph")
+
+    def _draw_chart(self):
         from matplotlib import dates as mdates, ticker
         self._hide_chart_tooltip()
         self.chart_tooltip = None
@@ -1729,6 +2044,7 @@ class FlowApp(tk.Tk):
             line.set_visible(not line.get_visible())
             event.artist.set_alpha(1 if line.get_visible() else .25)
             self.canvas.draw_idle()
+            self.view_history.record("graph", "Show or hide graph line")
 
     def export_chart(self):
         self._hide_chart_tooltip()

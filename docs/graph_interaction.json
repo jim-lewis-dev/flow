@@ -17,36 +17,36 @@
   "maps": [
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame4.!calendarentry.!toplevel",
-      "geometry": "294x226+32+451",
+      "geometry": "280x208+32+400",
       "override": true
     },
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame5.!calendarentry.!toplevel",
-      "geometry": "294x226+32+519",
+      "geometry": "280x208+32+463",
       "override": true
     },
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame4.!calendarentry.!toplevel2",
-      "geometry": "294x226+32+451",
+      "geometry": "280x208+32+400",
       "override": true
     },
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame5.!calendarentry.!toplevel2",
-      "geometry": "294x226+32+519",
+      "geometry": "280x208+32+463",
       "override": true
     },
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame4.!calendarentry.!toplevel3",
-      "geometry": "294x226+32+451",
+      "geometry": "280x208+32+400",
       "override": true
     },
     {
       "path": ".!frame2.!frame3.!frame.!scrollframe.!canvas.!frame.!frame.!frame5.!calendarentry.!toplevel3",
-      "geometry": "294x226+32+519",
+      "geometry": "280x208+32+463",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-p39dqscq/demo.sqlite3",
+  "database": "/tmp/flow-real-input-7jmgb7hc/demo.sqlite3",
   "limitations": [
     "Xvfb has no window manager or physical monitor layout; this audit does not verify fullscreen placement across real monitors."
   ]

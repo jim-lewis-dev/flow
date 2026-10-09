@@ -35,17 +35,17 @@
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x109+203+175",
+      "geometry": "300x109+263+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
-      "geometry": "300x109+422+175",
+      "geometry": "300x109+474+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
-      "geometry": "300x109+940+175",
+      "geometry": "300x109+974+175",
       "override": true
     },
     {
@@ -55,7 +55,7 @@
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x109+203+175",
+      "geometry": "300x109+263+175",
       "override": true
     },
     {
@@ -94,5 +94,5 @@
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-d5xk2a4c/demo.sqlite3"
+  "database": "/tmp/flow-real-input-0lags0g9/demo.sqlite3"
 }
