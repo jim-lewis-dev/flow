@@ -99,6 +99,44 @@ class SessionHistoryTests(unittest.TestCase):
         self.history.redo()
         self.assertEqual(self.repo.get_account("Checking")["opening_cents"], -12500)
 
+    def test_external_typing_merges_before_and_latest_after_without_touching_records(self):
+        state = [""]
+        for text in ("s", "se", "sea"):
+            before = state[0]
+            self.history.perform_external("Search", lambda t=text: state.__setitem__(0, t) or True,
+                lambda v=before: state.__setitem__(0, v),
+                lambda v=text: state.__setitem__(0, v), merge_key=("search", 1))
+        self.assertFalse(self.history.undo_affects_records)
+        self.history.undo()
+        self.assertEqual(state, [""])
+        self.assertFalse(self.history.can_undo)
+        self.assertFalse(self.history.redo_affects_records)
+        self.history.redo()
+        self.assertEqual(state, ["sea"])
+        self.assertEqual(self.repo.list_flows(), [])
+
+    def test_merge_does_not_cross_record_action_or_an_undone_branch(self):
+        state = [""]
+        def type_value(text):
+            before = state[0]
+            self.history.perform_external("Search", lambda: state.__setitem__(0, text) or True,
+                lambda: state.__setitem__(0, before), lambda: state.__setitem__(0, text),
+                merge_key="same field")
+        type_value("first")
+        flow = self.add()
+        type_value("second")
+        self.history.undo()
+        self.assertEqual(state, ["first"])
+        self.assertTrue(self.history.undo_affects_records)
+        self.history.undo()
+        type_value("new branch")
+        self.assertFalse(self.history.can_redo)
+        self.history.undo()
+        self.assertEqual(state, ["first"])
+        self.history.undo()
+        self.assertEqual(state, [""])
+        self.assertIsNone(self.repo.get_flow(flow["flow_id"]))
+
     def test_batch_import_is_one_step_and_redo_keeps_generated_ids(self):
         before = self.state()
         preview = preview_import(self.repo, [self.flow(), self.flow(name="Dinner", amount_cents=4100)])

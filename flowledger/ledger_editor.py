@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from .core import STATUSES
 from .widgets import FilterCombo
+from .table_columns import displayed_columns, field_at
 
 
 class LedgerEditor:
@@ -40,7 +41,7 @@ class LedgerEditor:
         row = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
         if row and column:
-            key = self.tree["columns"][int(column[1:]) - 1]
+            key = field_at(self.tree, event.x)
             self.open(row, key)
             return "break"
 
@@ -52,7 +53,7 @@ class LedgerEditor:
 
     @property
     def editable_columns(self):
-        return tuple(self.tree["columns"])
+        return displayed_columns(self.tree)
 
     @property
     def draft_id(self):

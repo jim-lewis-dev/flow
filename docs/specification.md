@@ -40,7 +40,7 @@ Date/Time, From, To, Amount, Status, Name, Notes, Category, Tags. Defaults: toda
 
 Existing records save on Enter, Tab or leaving a field. Ctrl+S finishes existing edits and leaves new drafts untouched. Notes: Enter adds a line; Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error; Escape restores the saved value.
 
-New Flow clears; Add Flow inserts; Repeat copies every value. Empty ledger space deselects and clears, saving valid edits and discarding invalid or unadded drafts. Row/page changes discard new drafts. Ctrl+Z / Ctrl+Y undo and redo this session.
+New Flow clears; Add Flow inserts; Repeat copies every value. Empty ledger space deselects and clears, saving valid edits and discarding invalid/unadded drafts. Row/page changes discard new drafts; undo restores them. Drag table titles to move columns; cell editing and Tab follow their visible order.
 
 Repository-generated objects and rows: examples/record_objects.json and examples/review.sql. Launching and controls: README.md. Source walkthrough: docs/model_review.md. Forecast collections and simulation controls are deferred.
 
@@ -63,7 +63,7 @@ Category/tag tables retain choices; flow_tags preserves assignments and order. a
 
 ### Save and calculate
 
-GUI draft -> Repository.save_flow() -> validate -> write choices, flow, tags and audit in one transaction -> return the saved dictionary. Failed saves roll back together. history.py records changed rows for session undo/redo using temporary capture tables. Undo appends audit events; closing the app or restoring a database clears undo. No persistent schema additions.
+GUI draft -> Repository.save_flow() -> validate -> write flow, choices, tags and audit atomically. Failed saves roll back. Ctrl+Z / Ctrl+Y undo records, drafts, filters, searches, dates, sorting, graph controls and column changes in action order. history.py captures changed rows; view_history.py keeps UI snapshots in memory. Record undo appends audit; closing/restoring clears history. No new stored fields.
 
 An account receives +amount when To and -amount when From. Confirmed includes Complete; Including Pending adds Pending; Including Planned also adds Planned. Void contributes zero. Settle Pending by editing that record; a refund is a new reverse flow.
 

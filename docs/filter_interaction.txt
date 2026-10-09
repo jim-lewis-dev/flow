@@ -1,3 +1,6 @@
+Flow 0.5.12: native X11 XTest mouse and keyboard audit
+PASS: 8 workflows; 0 callback exceptions.
+
 PASS Select multiple categories through filtered checkbox lists; hidden selections survive search
 PASS Multiple statuses, categories, and exact tags combine correctly; metrics follow visible rows
 PASS Ledger text search combines with the selected groups and updates as typed
@@ -6,5 +9,3 @@ PASS Add Flow stores a new flow hidden by current filters and immediately clears
 PASS Entry suggestions and checkbox filters are mutually exclusive; Escape and outside click dismiss
 PASS All clears each restriction; every observed custom dropdown first maps at its final position
 PASS Search, all three filters, dates, and ledger columns fit a 1280-pixel-wide window
-PASS 8 filter interaction checks; no callback exceptions.
-Report: docs/filter_interaction.json

@@ -1,6 +1,5 @@
-Flow 0.5.11 - 9 October 2026
-Native X11 mouse/keyboard interaction check
-PASS: 19 workflows; no callback exceptions.
+Flow 0.5.12: native X11 XTest mouse and keyboard audit
+PASS: 19 workflows; 0 callback exceptions.
 
 PASS Mouse-select suggestion closes cleanly
 PASS Add Flow creates one full record and clears the form and suggestions

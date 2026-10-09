@@ -2,6 +2,7 @@
 from tkinter import ttk
 
 from .ledger_editor import LedgerEditor
+from .table_columns import displayed_columns
 
 
 class AccountEditor(LedgerEditor):
@@ -9,7 +10,10 @@ class AccountEditor(LedgerEditor):
 
     view_name = "accounts"
     default_field = "balance"
-    editable_columns = ("balance", "anchor")
+    @property
+    def editable_columns(self):
+        return tuple(key for key in displayed_columns(self.tree)
+                     if key in ("balance", "anchor"))
 
     def __init__(self, app, *, font, background, foreground):
         super().__init__(app, None, tree=app.accounts_tree, font=font,

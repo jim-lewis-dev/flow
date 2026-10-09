@@ -445,6 +445,11 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertNotIn("Boat", self.app.form_widgets["category"].values)
         self.app.undo()
         self.pump()
+        self.assertEqual(self.app.form_vars["category"].get(), "Draft category")
+        self.assertIn("Boat", combo.values)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.app.undo()
+        self.pump()
         self.assertEqual(self.app.form_vars["category"].get(), "Boat")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
 

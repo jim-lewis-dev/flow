@@ -620,7 +620,8 @@ class GuiIntegrationTests(unittest.TestCase):
                 self.pump()
                 self.assertEqual(editor.get(), before)
                 self.assertEqual(self.repo.list_flows(), [saved])
-                self.assertFalse(self.app.history.can_redo)
+                self.assertTrue(self.app.history.can_redo)
+                self.assertEqual(self.app.history.redo_label, "Type flow")
 
     def test_desktop_layout_uses_full_width_and_all_columns(self):
         for height in (1200, 1080):

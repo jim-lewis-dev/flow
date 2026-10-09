@@ -100,6 +100,8 @@ class CalendarEntry(ttk.Frame):
         self._selected_date = self._initial_date()
         self._year, self._month = self._selected_date.year, self._selected_date.month
         self.popup = tk.Toplevel(self)
+        if hasattr(top, "_bind_history_popup"):
+            top._bind_history_popup(self.popup)
         # Build and position while withdrawn. update() here would risk mapping
         # an unpositioned window and running callbacks during construction.
         self.popup.withdraw()

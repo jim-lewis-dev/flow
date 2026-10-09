@@ -1,3 +1,6 @@
+Flow 0.5.12: native X11 XTest mouse and keyboard audit
+PASS: 10 workflows; 0 callback exceptions.
+
 PASS Startup requests fullscreen and a native Escape key returns to windowed mode
 PASS A flow at the graph's first midnight preserves the opening value and the resulting balance
 PASS Native hover shows exact account balances, opening value, and both ends of a vertical change
@@ -8,5 +11,3 @@ PASS Typed month/day values without leading zeros normalize and graph successful
 PASS Invalid dates and reversed ranges display visible errors and clear stale graph contents
 PASS Both calendars select dates; month navigation, Escape, switching calendars, and outside click work without origin flashing
 PASS Resized graphs keep the date controls and edge hover labels visible
-PASS 10 graph interaction checks; no callback exceptions.
-Report: docs/graph_interaction.json

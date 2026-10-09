@@ -1,6 +1,5 @@
-Flow 0.5.11 - 9 October 2026
-Native X11 mouse/keyboard interaction check
-PASS: 12 workflows; no callback exceptions.
+Flow 0.5.12: native X11 XTest mouse and keyboard audit
+PASS: 12 workflows; 0 callback exceptions.
 
 PASS Unused starting balances stay off Accounts, suggestions and graph choices
 PASS Correcting one From endpoint retains an account still referenced by To
