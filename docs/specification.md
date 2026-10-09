@@ -1,10 +1,10 @@
 # Flow software specification
 
-Version 0.5 | 8 October 2026
+Version 0.5 | 9 October 2026
 
 ## Objects and editing
 
-01 / Flow 0.5 - 8 October 2026
+01 / Flow 0.5 - 9 October 2026
 
 A flow subtracts from one named account and adds to another. The application uses Python dictionaries and one SQLite repository. These are the actual objects returned by Repository.get_account() and get_flow().
 
@@ -30,17 +30,17 @@ A flow subtracts from one named account and adds to another. The application use
 | Representation | Meaning |
 | --- | --- |
 | Account name | Its identity. Starting balance is integer cents, negative for debt, or null when unknown. New endpoint accounts start unknown. |
-| Amount / flow ID | 1200 means $12.00; exact integer arithmetic. UUID preserves identity during edits/imports. Repeat creates a new UUID. |
-| Date | 2026-10-02 or 2026-10-02 12:30:00. Time is optional; entered time normalizes to seconds. A date alone means midnight for calculations. No separate flag. |
+| Amount / flow ID | Input .50 means 50 cents; stored 1200 means $12.00. Exact integer arithmetic. UUID preserves identity during edits/imports. Repeat creates a new UUID. |
+| Date | One Date/Time entry, in 24-hour format. Leading zeros optional. Missing month/day = 1; missing hour/minute/second = 0. Example: 2026-10-9 7:5 becomes 2026-10-09 07:05:00. |
 | Category / tags | One category and a list of tag names. Shared tags can connect split purchases. Nine flow fields plus ID; no scenario field. |
 
 ### The GUI edits these objects
 
-Date, From, To, Amount, Status, Name, Notes, Category, Tags. Defaults: today, blank time, Complete and Uncategorized. Accounts has Name, Starting Balance and Starting Date, with optional time.
+Date/Time, From, To, Amount, Status, Name, Notes, Category, Tags. Defaults: today, Complete and Uncategorized. Accounts has Name, Starting Balance and Starting Date/Time. No separate Time control.
 
-Existing records save completed fields on Enter, Tab or leaving the field. Notes shares one buffer: Enter adds a line; Ctrl+Enter or leaving/closing the editor saves. Invalid edits stay unsaved; Escape restores the saved value.
+Existing records save on Enter, Tab or leaving a field. Ctrl+S finishes existing edits and leaves new drafts untouched. Notes: Enter adds a line; Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error; Escape restores the saved value.
 
-New Flow clears; Add Flow inserts. Repeat copies every field, including date/time/status. Selecting another row/page discards an unfinished new draft. Ctrl+Z / Ctrl+Y undo and redo this session. Record JSON shows saved values.
+New Flow clears; Add Flow inserts; Repeat copies every value. Empty ledger space deselects and clears, saving valid edits and discarding invalid or unadded drafts. Row/page changes discard new drafts. Ctrl+Z / Ctrl+Y undo and redo this session.
 
 Repository-generated objects and rows: examples/record_objects.json and examples/review.sql. Launching and controls: README.md. Source walkthrough: docs/model_review.md. Forecast collections and simulation controls are deferred.
 
@@ -59,7 +59,7 @@ Named keys are name.strip().casefold(): AmEx becomes amex. They provide case-ins
 | flow_tags | flow_id, tag_key, position |
 | audit | audit_id, changed_at, entity, entity_key, action, before_json, after_json |
 
-Category/tag tables retain choices; flow_tags preserves assignments and order. audit stores saved before/after values; audit_id is its sequence. Data > View Schema reads the live definitions. Constraints and indexes: flowledger/schema.sql.
+Category/tag tables retain choices; flow_tags preserves assignments and order. audit stores before/after values. Account lists show only names used in saved From/To fields, including Void flows. Unreferenced starting balances remain stored for reuse/undo. Schema: flowledger/schema.sql.
 
 ### Save and calculate
 

@@ -21,6 +21,8 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.repo = Repository(Path(self.directory.name) / "accounts.sqlite3")
         self.repo.save_account("Checking", 100000, "2026-10-01 13:45:12")
         self.repo.save_account("AmEx", -30000, "2026-10-01")
+        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+                                 to_account="AmEx", amount="1", status="Void"))
         self.errors = []
         errors = self.errors
 
@@ -121,7 +123,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.accounts_tree.focus(), "")
         self.assertEqual(self.app.account_title.cget("text"), "New Account")
         self.assertEqual(str(self.app.account_name_entry.cget("state")), "normal")
-        for field in ("name", "opening", "time"):
+        for field in ("name", "opening"):
             self.assertEqual(self.app.account_vars[field].get(), "", field)
         self.assertEqual(self.app.account_vars["date"].get(), "2026-10-01")
         self.assert_closed()
@@ -133,7 +135,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.account_editing, "AmEx")
         self.assertEqual(self.app.accounts_tree.selection(), ("AmEx",))
         self.assertEqual(self.app.account_cell_editor.field, "anchor")
-        self.assertEqual(self.app.account_cell_editor.input.get(), "2026-10-01")
+        self.assertEqual(self.app.account_cell_editor.input.get(), "2026-10-01 00:00:00")
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
         self.assertEqual(self.repo.list_accounts(), originals)
 
@@ -156,7 +158,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-08")
         self.finish_cell()
         self.assertEqual(self.repo.get_account("Checking"),
-                         {**original, "opening_cents": 4123, "opening_at": "2026-10-08 13:45:12"})
+                         {**original, "opening_cents": 4123, "opening_at": "2026-10-08 00:00:00"})
         self.assertEqual(len(self.repo.list_accounts()), 2)
         self.assertEqual(self.app.account_editing, "Checking")
         self.assertEqual(self.app.accounts_tree.selection(), ("Checking",))
@@ -175,12 +177,12 @@ class AccountInlineEditingTests(unittest.TestCase):
                 self.assertEqual(len(self.repo.list_accounts()), 2)
                 self.assertEqual(self.app.account_editing, "Checking")
 
-    def test_date_only_changes_preserve_seconds_and_full_timestamp_replaces_time(self):
+    def test_date_only_changes_reset_time_and_full_timestamp_keeps_seconds(self):
         self.replace_cell("Checking", "anchor", "2026-10-09")
         self.app.account_cell_editor.close()
-        self.assertEqual(self.app.account_vars["time"].get(), "13:45:12")
+        self.assertEqual(self.app.account_vars["date"].get(), "2026-10-09")
         self.assertTrue(self.app.save_account())
-        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-09 13:45:12")
+        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-09 00:00:00")
         self.replace_cell("Checking", "anchor", "2026-10-10T08:09:10")
         self.assertTrue(self.app.save_account())
         self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-10 08:09:10")
@@ -211,11 +213,11 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.repo.save_account("AmEx", -30000, "2026-10-01 08:09:00")
         self.app.refresh_all()
         self.click_cell("AmEx")
-        self.app.account_vars["time"].set("08:09")
+        self.app.account_vars["date"].set("2026-10-01 08:09")
         self.assertTrue(self.app.new_account())
         self.assert_new_form()
         original = self.repo.get_account("AmEx")
-        for field, invalid in (("date", "2026-02-30"), ("time", "08:99")):
+        for field, invalid in (("date", "2026-02-30"), ("date", "2026-10-01 08:99")):
             with self.subTest(field=field):
                 self.click_cell("AmEx")
                 self.app._begin_field("account", field)
@@ -299,13 +301,12 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.settle()
         self.assertFalse(entry.winfo_exists())
         self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 20000)
-        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-07 13:45:12")
+        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-07 00:00:00")
         self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$200.00")
         self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-07")
         self.assert_new_form()
         self.click_cell("AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
-        self.assertEqual(self.app.account_vars["time"].get(), "")
 
     def test_dirty_row_change_saves_correct_account_without_confirmation(self):
         checking = self.repo.get_account("Checking")
@@ -341,7 +342,7 @@ class AccountInlineEditingTests(unittest.TestCase):
     def test_invalid_money_and_dates_can_be_corrected_without_partial_writes(self):
         for column, invalid, correct, stored_field, expected in (
                 ("balance", "12.345", "12.34", "opening_cents", 1234),
-                ("anchor", "2026-02-30", "2026-10-07", "opening_at", "2026-10-07 13:45:12"),
+                ("anchor", "2026-02-30", "2026-10-07", "opening_at", "2026-10-07 00:00:00"),
                 ("anchor", "2026-10-08 25:00:00", "2026-10-08 06:07:08", "opening_at", "2026-10-08 06:07:08")):
             with self.subTest(column=column, value=invalid):
                 before = self.repo.get_account("Checking")
@@ -377,7 +378,7 @@ class AccountInlineEditingTests(unittest.TestCase):
                 self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-07")
                 self.assertEqual(self.repo.get_account("Checking"),
                                  {**original, "opening_cents": 12345 + index,
-                                  "opening_at": "2026-10-07 13:45:12"})
+                                  "opening_at": "2026-10-07 00:00:00"})
 
     def test_view_change_finishes_existing_account_without_reopening_editor(self):
         original = self.repo.get_account("Checking")
@@ -395,6 +396,8 @@ class AccountInlineEditingTests(unittest.TestCase):
         original = self.repo.get_account("Checking")
         for index in range(45):
             self.repo.save_account(f"Extra {index:02}", 0, "2026-10-01")
+            self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+                                     to_account=f"Extra {index:02}", amount="1", status="Void"))
         self.app.refresh_all()
         self.pump()
         self.replace_cell("Checking", "balance", "33.00")
@@ -424,8 +427,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.account_editing, "AmEx")
         self.assertEqual(self.app.account_vars["name"].get(), "AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
-        self.assertEqual(self.app.account_vars["date"].get(), "2026-10-01")
-        self.assertEqual(self.app.account_vars["time"].get(), "")
+        self.assertEqual(self.app.account_vars["date"].get(), "2026-10-01 00:00:00")
         self.assertEqual(self.app.account_cell_editor.field, "balance")
         self.app.new_account()
         self.settle()

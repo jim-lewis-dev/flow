@@ -40,5 +40,5 @@ class AccountEditor(LedgerEditor):
 
     def _finish_field(self, field):
         if field == "anchor":
-            self.app._split_account_date()
+            self.app._normalize_date_field("account")
         return self.app._finish_existing("account")

@@ -19,6 +19,8 @@ class GraphUiTests(unittest.TestCase):
         self.repo.save_account("Checking", 100000, "2026-10-01")
         self.repo.save_account("Savings", 50000, "2026-10-01")
         self.repo.save_account("Unknown", None, "2026-10-01")
+        self.repo.save_flow(dict(date="2026-10-01", from_account="Savings",
+                                 to_account="Unknown", amount="1", status="Void"))
         self.repo.save_flow(dict(date="2026-10-01", from_account="Checking", to_account="Shop",
                                  amount="12.00", status="Complete", name="Lunch"))
         self.errors = []
@@ -155,6 +157,8 @@ class GraphUiTests(unittest.TestCase):
 
     def test_single_instant_and_negative_balance_hover(self):
         self.repo.save_account("Debt", -12345, "2026-10-01")
+        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+                                 to_account="Debt", amount="1", status="Void"))
         self.app.refresh_chart_accounts()
         self.app.chart_start.set("2026-10-01 12:00:00")
         self.app.chart_end.set("2026-10-01 12:00:00")
@@ -164,6 +168,8 @@ class GraphUiTests(unittest.TestCase):
 
     def test_overlapping_accounts_both_report_exact_value(self):
         self.repo.save_account("Twin", 98800, "2026-10-01")
+        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+                                 to_account="Twin", amount="1", status="Void"))
         self.app.refresh_chart_accounts()
         self.select("Checking", "Twin")
         text = self.hover("2026-10-02", 988)

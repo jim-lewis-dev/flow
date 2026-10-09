@@ -34,6 +34,8 @@ class LedgerEditor:
 
     def _double_click(self, event):
         if self.tree.identify_region(event.x, event.y) != "cell":
+            if self.view_name == "flows":
+                return self.app._ledger_background_click(event)
             return
         row = self.tree.identify_row(event.y)
         column = self.tree.identify_column(event.x)
@@ -254,7 +256,7 @@ class LedgerEditor:
 
     def _finish_field(self, field):
         if field == "date":
-            self.app._split_flow_date()
+            self.app._normalize_date_field("flow")
         return self.app._finish_existing("flow")
 
     def refresh_suggestions(self):

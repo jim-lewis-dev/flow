@@ -15,7 +15,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from . import __version__
-from .core import (STATUSES, ledger_balance_at, parse_money,
+from .core import (STATUSES, ledger_balance_at, normalize_flow_date, parse_money,
                    format_money, normalize_date)
 from .exchange import read_import, preview_import, commit_import, export_flows
 from .suggestions import SuggestionPreferences
@@ -58,6 +58,9 @@ class FlowApp(tk.Tk):
     suggestion_fields = SUGGESTION_KINDS
     def __init__(self, repo, demo=False):
         super().__init__()
+        # Tk's own entry/dialog bindings can ring too. Silence this app's
+        # interpreter only; leave the desktop's sound settings alone.
+        self.tk.eval("proc bell {args} {}")
         self.repo = repo
         self.history = SessionHistory(repo)
         self._committing = False
@@ -80,7 +83,7 @@ class FlowApp(tk.Tk):
         self._flow_selection = None
         self._account_selection = None
         self._confirming = False
-        self.form_vars = {k: tk.StringVar(self) for k in ("date", "time", "from_account", "to_account", "amount", "status", "name", "category", "tags")}
+        self.form_vars = {k: tk.StringVar(self) for k in ("date", "from_account", "to_account", "amount", "status", "name", "category", "tags")}
         self.form_widgets = {}
         self.ledger_rows = {}
         self.sort_column = "date"
@@ -219,17 +222,12 @@ class FlowApp(tk.Tk):
             # Compare instants, so pasting the existing timestamp or adding
             # optional zero seconds does not invent an unsaved change.
             values[2] = normalize_date(self._account_when())
-            values[3] = ""
         except ValueError:
             pass  # Invalid input still differs and remains available to fix.
         return tuple(values)
 
     def _account_when(self):
-        raw = self.account_vars["date"].get().strip()
-        time_value = self.account_vars["time"].get().strip()
-        if len(raw) == 10 and time_value:
-            raw += " " + time_value
-        return raw
+        return self.account_vars["date"].get().strip()
 
     def _confirm_changes(self, kind):
         """Finish an existing edit; new drafts may be replaced without a prompt."""
@@ -261,8 +259,6 @@ class FlowApp(tk.Tk):
         if kind == "flow" and key == "notes":
             return self.notes_text.get("1.0", "end-1c")
         variables = self.form_vars if kind == "flow" else self.account_vars
-        if key == "date":
-            return variables["date"].get(), variables["time"].get()
         return variables[key].get()
 
     def _put_field_value(self, kind, key, value):
@@ -271,11 +267,7 @@ class FlowApp(tk.Tk):
             self.notes_text.insert("1.0", value)
             return
         variables = self.form_vars if kind == "flow" else self.account_vars
-        if key == "date":
-            variables["date"].set(value[0])
-            variables["time"].set(value[1])
-        else:
-            variables[key].set(value)
+        variables[key].set(value)
 
     def _begin_field(self, kind, key):
         if self._loading or self._committing:
@@ -287,15 +279,14 @@ class FlowApp(tk.Tk):
             if identity and kind == "flow" and hasattr(self, "_clean_flow"):
                 values = dict(zip(self.form_vars, self._clean_flow))
                 before = (self._clean_flow[-1] if key == "notes" else
-                          (values["date"], values["time"]) if key == "date" else values[key])
+                          values[key])
             elif identity and kind == "account":
                 saved = self.repo.get_account(identity)
                 if saved:
                     if key == "opening":
                         before = "" if saved["opening_cents"] is None else format_money(saved["opening_cents"]).replace(",", "")
                     elif key == "date":
-                        time = saved["opening_at"][11:]
-                        before = (saved["opening_at"][:10], "" if time == "00:00:00" else time)
+                        before = saved["opening_at"]
             self._active_edit = token + (before,)
 
     def _defer_field_finish(self, widget, kind, key):
@@ -312,12 +303,14 @@ class FlowApp(tk.Tk):
                 return
             if key == "notes" and getattr(self, "notes_dialog", None) is not None:
                 return
+            if key == "date":
+                self._normalize_date_field(kind)
             self._finish_existing(kind)
         self.after_idle(finish)
 
     def _field_enter(self, kind, key):
         if key == "date":
-            (self._split_flow_date if kind == "flow" else self._split_account_date)()
+            self._normalize_date_field(kind)
         self._finish_existing(kind)
         return "break"
 
@@ -481,10 +474,13 @@ class FlowApp(tk.Tk):
     def _shortcut_save(self, event=None):
         if self.grab_current() is not None:
             return "break"
-        if self.current_view == "flows":
-            self.save_flow()
-        elif self.current_view == "accounts":
-            self.save_account()
+        # Ledger writes already commit immediately. Saving must never turn an
+        # unadded draft into a record or validate it as though Add was pressed.
+        self._close_popups()
+        kind = {"flows": "flow", "accounts": "account"}.get(self.current_view)
+        if kind and not self._finish_existing(kind):
+            return "break"
+        self.status_message.set("Saved")
         return "break"
 
     def _shortcut_new(self, event=None):
@@ -530,11 +526,12 @@ class FlowApp(tk.Tk):
             self.draw_chart()
         return True
 
-    @staticmethod
-    def _repeat_row_click(event):
+    def _repeat_row_click(self, event):
         """A rapid second click must select its row, just like a first click."""
         tree = event.widget
         row = tree.identify_row(event.y)
+        if not row and tree is self.ledger:
+            return self._ledger_background_click(event)
         if row:
             tree.focus_set()
             tree.focus(row)
@@ -590,68 +587,13 @@ class FlowApp(tk.Tk):
                 parent.columnconfigure(col, weight=weights[index] if columns == len(cells) else 1, uniform="fields")
         parent.bind("<Configure>", arrange, add="+")
 
-    def _split_flow_date(self, event=None):
-        """Keep the Date and Time controls consistent after a full timestamp."""
-        raw = self.form_vars["date"].get().strip()
-        if len(raw) <= 10:
-            return
+    def _normalize_date_field(self, kind):
+        variables = self.form_vars if kind == "flow" else self.account_vars
         try:
-            when = normalize_date(raw)
+            when = normalize_flow_date(variables["date"].get().strip())
         except ValueError:
-            return  # Save reports invalid input without changing the draft.
-        self.form_vars["date"].set(when[:10])
-        self.form_vars["time"].set(when[11:])
-
-    def _split_account_date(self, event=None):
-        """A pasted timestamp replaces Time; a date alone keeps its seconds."""
-        raw = self.account_vars["date"].get().strip()
-        if len(raw) <= 10:
-            return
-        try:
-            when = normalize_date(raw)
-        except ValueError:
-            return  # Save leaves invalid input visible for correction.
-        self.account_vars["date"].set(when[:10])
-        self.account_vars["time"].set("" if when[11:] == "00:00:00" else when[11:])
-
-    def edit_time(self, variable, title="Flow Time"):
-        if variable is self.form_vars["time"]:
-            self._split_flow_date()
-        elif variable is self.account_vars["time"]:
-            self._split_account_date()
-        self._prepare_dialog()
-        dialog = tk.Toplevel(self)
-        dialog.title(title)
-        dialog.transient(self)
-        body = ttk.Frame(dialog, padding=18)
-        body.pack(fill="both", expand=True)
-        ttk.Label(body, text="Time (optional)", font=(FONT, 11, "bold")).pack(anchor="w")
-        value = tk.StringVar(dialog, variable.get())
-        entry = ttk.Entry(body, textvariable=value, width=20)
-        entry.pack(fill="x", pady=10)
-        ttk.Label(body, text="HH:MM or HH:MM:SS · Blank leaves time unspecified.", style="Muted.TLabel").pack(anchor="w")
-        error = tk.StringVar(dialog)
-        ttk.Label(body, textvariable=error, foreground="#a44545").pack(anchor="w", pady=5)
-        def accept():
-            raw = value.get().strip()
-            try:
-                if raw:
-                    normalize_date("2026-10-01 " + raw)
-                variable.set(raw)
-                kind = "flow" if variable is self.form_vars["time"] else "account"
-                if self._finish_existing(kind):
-                    dialog.destroy()
-            except ValueError:
-                error.set("Use a valid time, for example 14:30.")
-        buttons = ttk.Frame(body)
-        buttons.pack(fill="x", pady=(8, 0))
-        ttk.Button(buttons, text="Clear", command=lambda: value.set("")).pack(side="left")
-        ttk.Button(buttons, text="Apply", style="Primary.TButton", command=accept).pack(side="right")
-        ttk.Button(buttons, text="Cancel", command=dialog.destroy).pack(side="right", padx=8)
-        entry.bind("<Return>", lambda event: accept())
-        dialog.bind("<Escape>", lambda event: dialog.destroy())
-        dialog.grab_set()
-        entry.focus_set()
+            return  # Leave invalid input for the ordinary visible validation.
+        variables["date"].set(when)
 
     @staticmethod
     def _scroll_notes(event, direction=None):
@@ -746,14 +688,14 @@ class FlowApp(tk.Tk):
         self.form_title.pack(side="left")
         self.form_feedback = tk.StringVar(self, "From, To, and Amount required")
         ttk.Label(header, textvariable=self.form_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
-        self.save_button = ttk.Button(header, text="Add Flow  ·  Ctrl+S", style="Primary.TButton", command=self.save_flow)
+        self.save_button = ttk.Button(header, text="Add Flow", style="Primary.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
         self.new_flow_button = ttk.Button(header, text="New Flow", style="Small.TButton", command=self.new_flow)
         self.new_flow_button.pack(side="right")
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
         cells = []
-        for key, label, kind in (("date", "Date", "entry"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
+        for key, label, kind in (("date", "Date/Time", "entry"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
                                  ("amount", "Amount · USD", "entry"), ("status", "Status", "choice"), ("name", "Name", "suggest"),
                                  ("category", "Category", "suggest"), ("tags", "Tags", "suggest"), ("notes", "Notes", "notes")):
             cell, heading, widget = self._entry_cell(form, label, self.form_vars.get(key), kind, STATUSES if key == "status" else ())
@@ -769,14 +711,9 @@ class FlowApp(tk.Tk):
             if key in SUGGESTION_KINDS:
                 widget.on_remove = lambda value, field=key: self._remove_suggestion(field, value)
                 widget.on_accept = lambda field=key: self._accept_suggestion(field)
-            if key == "date":
-                widget.bind("<FocusOut>", self._split_flow_date, add="+")
-                self.time_button = tk.Button(heading, text="Time", command=lambda: self.edit_time(self.form_vars["time"]), font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0)
-                self.time_button.pack(side="right")
-                self.form_vars["time"].trace_add("write", lambda *args: self.time_button.configure(text=self.form_vars["time"].get() or "Time"))
         self.form_widgets["tags"].multi_value = True
         self.flow_cells = cells
-        self._reflow_cells(form, cells, [12, 16, 16, 11, 11, 19, 14, 16, 21])
+        self._reflow_cells(form, cells, [17, 16, 16, 11, 11, 19, 14, 16, 21])
         metrics = ttk.Frame(page, padding=(2, 12))
         metrics.grid(row=1, column=0, sticky="ew")
         self.metric_vars = []
@@ -842,6 +779,7 @@ class FlowApp(tk.Tk):
         self.ledger.tag_configure("Planned", foreground="#396f9f")
         self.ledger.tag_configure("Void", foreground="#92a098")
         self.ledger.bind("<<TreeviewSelect>>", self._select_flow)
+        self.ledger.bind("<Button-1>", self._ledger_background_click)
         self.ledger.bind("<Triple-1>", self._repeat_row_click)
         self.ledger_tooltip = TreeTooltip(self.ledger, self.flow_tooltip)
         self.ledger_editor = LedgerEditor(self, _NotesPeer,
@@ -856,6 +794,15 @@ class FlowApp(tk.Tk):
         self.selection_detail = tk.StringVar(self, "Click a row · Double-click a cell to edit · Changes save automatically")
         self.selection_label = ttk.Label(ledger_card, textvariable=self.selection_detail, style="CardMuted.TLabel", width=1)
         self.selection_label.grid(row=4, column=0, sticky="ew")
+
+    def _ledger_background_click(self, event):
+        """Empty ledger space starts a fresh entry; headings still sort/resize."""
+        if (self.ledger.identify_region(event.x, event.y) == "nothing"
+                and not self.ledger.identify_row(event.y)):
+            self._finish_existing("flow")
+            self.new_flow(confirm=False)
+            self.status_message.set("Ready")
+            return "break"
 
     def flow_tooltip(self, item):
         flow = self.ledger_rows.get(item)
@@ -885,7 +832,7 @@ class FlowApp(tk.Tk):
         ttk.Label(body, textvariable=error, foreground="#a44545").pack(anchor="w", pady=6)
         def accept():
             try:
-                values = [v.get().strip() for v in variables]
+                values = [normalize_flow_date(v.get().strip()) if v.get().strip() else "" for v in variables]
                 normalized = [normalize_date(v) if v else None for v in values]
                 if normalized[1] and len(values[1]) == 10:
                     normalized[1] = normalized[1][:11] + "23:59:59"
@@ -909,8 +856,6 @@ class FlowApp(tk.Tk):
     def _feedback(self, text, error=False):
         self.status_message.set(text)
         self.form_feedback.set(text if error else "From, To, and Amount required")
-        if error:
-            self.bell()
 
     def new_flow(self, focus=True, confirm=True, clear_selection=True):
         if confirm and not self._finish_existing("flow"):
@@ -926,12 +871,12 @@ class FlowApp(tk.Tk):
             self.editing_id = None
             self._active_edit = None
             self._draft_redo = None
-            defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "time": "", "from_account": "", "to_account": "", "amount": "", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
+            defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "from_account": "", "to_account": "", "amount": "", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
             for key, value in defaults.items():
                 self.form_vars[key].set(value)
             self.notes_text.delete("1.0", "end")
             self.form_title.configure(text="New Flow")
-            self.save_button.configure(text="Add Flow  ·  Ctrl+S", state="normal")
+            self.save_button.configure(text="Add Flow", state="normal")
             self.form_widgets["status"].configure(values=STATUSES)
             self.form_feedback.set("From, To, and Amount required")
             self._clean_flow = self._flow_snapshot()
@@ -945,10 +890,7 @@ class FlowApp(tk.Tk):
         return True
 
     def _flow_data(self):
-        data = {key: var.get().strip() for key, var in self.form_vars.items() if key != "time"}
-        time_value = self.form_vars["time"].get().strip()
-        if len(data["date"]) == 10 and time_value:
-            data["date"] += " " + time_value
+        data = {key: var.get().strip() for key, var in self.form_vars.items()}
         data["amount_cents"] = parse_money(data.pop("amount"))
         try:
             data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
@@ -969,12 +911,11 @@ class FlowApp(tk.Tk):
         try:
             self._committing = True
             if kind == "flow":
-                self._split_flow_date()
                 data = self._flow_data()
                 result = self.history.perform("Edit flow", lambda: self.repo.save_flow(data))
                 self._loading = True
                 try:
-                    for key in ("from_account", "to_account", "name", "category", "status"):
+                    for key in ("date", "from_account", "to_account", "name", "category", "status"):
                         self.form_vars[key].set(result[key])
                     self.form_vars["amount"].set(format_money(result["amount_cents"]).replace(",", ""))
                 finally:
@@ -983,7 +924,6 @@ class FlowApp(tk.Tk):
                 self.form_feedback.set("Edits save automatically")
                 message = "Updated: " + result["name"]
             else:
-                self._split_account_date()
                 raw = self.account_vars["opening"].get().strip()
                 cents = parse_money(raw, allow_negative=True) if raw else None
                 when = normalize_date(self._account_when())
@@ -1007,7 +947,6 @@ class FlowApp(tk.Tk):
             else:
                 self.account_feedback.set(str(exc))
                 self.status_message.set(str(exc))
-                self.bell()
             return False
         finally:
             self._committing = False
@@ -1046,16 +985,13 @@ class FlowApp(tk.Tk):
         self._loading = True
         try:
             self.editing_id = None if repeat else flow["flow_id"]
-            for key in ("from_account", "to_account", "name", "category", "status"):
+            for key in ("date", "from_account", "to_account", "name", "category", "status"):
                 self.form_vars[key].set(flow[key])
             self.form_vars["amount"].set(format_money(flow["amount_cents"]).replace(",", ""))
             tag_stream = io.StringIO()
             csv.writer(tag_stream, lineterminator="").writerow(flow.get("tags", []))
             self.form_vars["tags"].set(tag_stream.getvalue())
             self.notes_text.insert("1.0", flow.get("notes", ""))
-            parts = flow["date"].split(" ")
-            self.form_vars["date"].set(parts[0])
-            self.form_vars["time"].set(parts[1] if len(parts) > 1 else "")
             self.form_title.configure(text="Repeat Flow" if repeat else "Edit Flow")
             self.save_button.configure(state="normal" if repeat else "disabled")
             self.form_feedback.set("New copy · Click Add Flow" if repeat else "Edits save automatically")
@@ -1181,9 +1117,11 @@ class FlowApp(tk.Tk):
         tags = {value.casefold() for value in self.ledger_filters["Tag"].get()}
         statuses = set(self.ledger_filters["Status"].get())
         try:
-            date_start = normalize_date(self.filter_start.get()) if self.filter_start.get().strip() else None
-            date_end = normalize_date(self.filter_end.get()) if self.filter_end.get().strip() else None
-            if date_end and len(self.filter_end.get().strip()) == 10:
+            start_text = normalize_flow_date(self.filter_start.get()) if self.filter_start.get().strip() else ""
+            end_text = normalize_flow_date(self.filter_end.get()) if self.filter_end.get().strip() else ""
+            date_start = normalize_date(start_text) if start_text else None
+            date_end = normalize_date(end_text) if end_text else None
+            if date_end and len(end_text) == 10:
                 date_end = date_end[:11] + "23:59:59"
             if date_start and date_end and date_end < date_start:
                 raise ValueError("Filter end must be on or after its start.")
@@ -1261,7 +1199,7 @@ class FlowApp(tk.Tk):
 
     def refresh_suggestions(self):
         """Apply entry preferences while retaining all data in other views."""
-        accounts = self.repo.list_accounts()
+        accounts = self.repo.list_accounts(referenced_only=True)
         names = [account["name"] for account in accounts]
         # Most-used values remain first; both directions still accept every name.
         flows = self.repo.list_flows()
@@ -1310,21 +1248,16 @@ class FlowApp(tk.Tk):
         ttk.Button(header, text="Record JSON", style="Small.TButton", command=self.show_account_json).pack(side="right", padx=8)
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
-        self.account_vars = {key: tk.StringVar(self) for key in ("name", "opening", "date", "time")}
+        self.account_vars = {key: tk.StringVar(self) for key in ("name", "opening", "date")}
         self.account_vars["date"].set("2026-10-01")
         self.account_widgets = {}
         cells = []
-        for key, label in (("name", "Account Name"), ("opening", "Starting Balance · USD"), ("date", "Starting Date")):
+        for key, label in (("name", "Account Name"), ("opening", "Starting Balance · USD"), ("date", "Starting Date/Time")):
             cell, heading, widget = self._entry_cell(form, label, self.account_vars[key])
             self.account_widgets[key] = widget
             cells.append(cell)
             if key == "name":
                 self.account_name_entry = widget
-            if key == "date":
-                widget.bind("<FocusOut>", self._split_account_date, add="+")
-                button = tk.Button(heading, text="Time", command=lambda: self.edit_time(self.account_vars["time"], "Starting Time"), font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0)
-                button.pack(side="right")
-                self.account_vars["time"].trace_add("write", lambda *args: button.configure(text=self.account_vars["time"].get() or "Time"))
         self.account_cells = cells
         self._reflow_cells(form, cells, [40, 30, 30], threshold=700)
         card = self._card(page)
@@ -1396,7 +1329,7 @@ class FlowApp(tk.Tk):
         self.account_tooltip.hide()
         selected = self._account_selection
         self.accounts_tree.delete(*self.accounts_tree.get_children())
-        accounts = self.repo.list_accounts()
+        accounts = self.repo.list_accounts(referenced_only=True)
         flows = self.repo.list_flows()
         now = self._now()
         def money(cents):
@@ -1405,8 +1338,11 @@ class FlowApp(tk.Tk):
             confirmed = ledger_balance_at(account, flows, now, ("Complete",))
             pending = ledger_balance_at(account, flows, now, ("Complete", "Pending"))
             self.accounts_tree.insert("", "end", iid=account["name"], values=(account["name"], money(account["opening_cents"]), account["opening_at"][:10], money(confirmed), money(pending)), tags=("odd" if index % 2 else "even",))
-        self._set_account_selection(selected)
-        self._sync_account_draft()
+        if self.account_editing and not self.accounts_tree.exists(self.account_editing):
+            self.new_account(focus=False, confirm=False)
+        else:
+            self._set_account_selection(selected)
+            self._sync_account_draft()
         self.account_summary.set(f"{len(accounts)} accounts")
 
     def _select_account(self, event=None):
@@ -1437,8 +1373,7 @@ class FlowApp(tk.Tk):
             self.account_vars["name"].set(name)
             self.account_name_entry.configure(state="disabled")
             self.account_vars["opening"].set("" if account["opening_cents"] is None else format_money(account["opening_cents"]).replace(",", ""))
-            self.account_vars["date"].set(account["opening_at"][:10])
-            self.account_vars["time"].set(account["opening_at"][11:] if account["opening_at"][11:] != "00:00:00" else "")
+            self.account_vars["date"].set(account["opening_at"])
             self.account_title.configure(text="Edit Account")
             self.account_save_button.configure(state="disabled")
             self.account_feedback.set("Edits save automatically · Blank = unknown")
@@ -1461,7 +1396,7 @@ class FlowApp(tk.Tk):
             self._active_edit = None
             self._draft_redo = None
             self.account_name_entry.configure(state="normal")
-            for key, value in {"name": "", "opening": "", "date": "2026-10-01", "time": ""}.items():
+            for key, value in {"name": "", "opening": "", "date": "2026-10-01"}.items():
                 self.account_vars[key].set(value)
             self.account_title.configure(text="New Account")
             self.account_save_button.configure(state="normal")
@@ -1484,20 +1419,22 @@ class FlowApp(tk.Tk):
             cents = parse_money(raw, allow_negative=True) if raw else None
             at = normalize_date(self._account_when())
             name = self.account_vars["name"].get().strip()
-            if self.repo.get_account(name):
-                raise ValueError("That account already exists. Select it to edit.")
+            existing = self.repo.get_account(name)
+            if existing:
+                if self.accounts_tree.exists(existing["name"]):
+                    raise ValueError("That account already exists. Select it to edit.")
+                raise ValueError("That account already exists. Use it in a flow to show it here.")
             account = self.history.perform("Add account", lambda: self.repo.save_account(name, opening_cents=cents, opening_at=at))
             self.new_account(focus=False, confirm=False)
             self.refresh_all()
-            self.status_message.set(f"Added account: {account['name']}")
-            self.accounts_tree.see(account["name"])
+            self.status_message.set(f"Saved: {account['name']} · Appears when used in a flow")
             self.account_name_entry.focus_set()
             self._begin_field("account", "name")
             self._update_history_buttons()
             return True
         except (ValueError, sqlite3.Error) as exc:
             self.account_feedback.set(str(exc))
-            self.bell()
+            self.status_message.set(str(exc))
             return False
 
     def _build_charts(self):
@@ -1599,7 +1536,7 @@ class FlowApp(tk.Tk):
             return
         selected = {self.chart_accounts.get(i) for i in self.chart_accounts.curselection()}
         initial = self.chart_accounts.size() == 0
-        accounts = self.repo.list_accounts()
+        accounts = self.repo.list_accounts(referenced_only=True)
         self.chart_accounts.delete(0, "end")
         for index, account in enumerate(accounts):
             self.chart_accounts.insert("end", account["name"])
@@ -1702,7 +1639,6 @@ class FlowApp(tk.Tk):
             self.chart_message_label.grid()
             self.axes.text(.5, .5, "Unable to draw graph\nCheck the dates above.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
             self.chart_note.set("")
-            self.bell()
         self.canvas.draw_idle()
 
     def _hide_chart_tooltip(self, event=None):

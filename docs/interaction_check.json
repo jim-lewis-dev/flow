@@ -1,0 +1,129 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "Mouse-select suggestion closes cleanly",
+    "Add Flow creates one full record and clears the form and suggestions",
+    "Undo and redo preserve all fields of the added flow and its identity",
+    "Expanded Notes saves on close; compact Notes saves on click-away and keeps multiline navigation visible",
+    "Date, midnight and seconds auto-save through one Date/Time field",
+    "Selecting an existing row loads all fields without a dropdown",
+    "Top fields auto-save endpoints, amount, category, tags, notes, optional time and status on the existing ID",
+    "Selecting the next row replaces all fields without old edits carrying over",
+    "Ctrl+S from an open dropdown completes the edit without reopening suggestions",
+    "Page navigation dismisses flow suggestions",
+    "Account auto-save, New Account and same-row reselection work",
+    "Row switching saves the completed field without a prompt; undo and redo target the changed record",
+    "Void clears the form without confirmation and supports session undo/redo",
+    "Invalid Add Flow retains the draft without side effects; correcting the amount creates the record",
+    "Selecting an existing row silently drops an unfinished new-flow draft",
+    "Suggestion X removes only the choice; session undo and redo restore visibility without changing records",
+    "Filtering away an edited record saves the correct ID without a stale cell or record switch",
+    "Graph selection and exact inspection still work after form and account edits",
+    "No callback errors or custom dropdowns first appearing at the top-left corner"
+  ],
+  "errors": [],
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x109+474+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
+      "geometry": "300x109+974+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel",
+      "geometry": "300x109+1224+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel",
+      "geometry": "300x81+1408+175",
+      "override": true
+    },
+    {
+      "path": ".!toplevel",
+      "geometry": "650x350+0+0",
+      "override": false
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel2",
+      "geometry": "300x109+474+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel2",
+      "geometry": "300x109+1224+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel2",
+      "geometry": "300x109+1408+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel2",
+      "geometry": "300x109+974+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel4",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel3",
+      "geometry": "300x109+1224+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel5",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel3",
+      "geometry": "300x109+474+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel3",
+      "geometry": "300x109+974+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel4",
+      "geometry": "300x109+1224+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel4",
+      "geometry": "300x109+974+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel5",
+      "geometry": "300x109+1224+175",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-t9bs4t66/demo.sqlite3"
+}

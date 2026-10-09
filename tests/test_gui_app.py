@@ -219,7 +219,6 @@ class GuiIntegrationTests(unittest.TestCase):
 
     def test_defaults_new_vocabulary_and_dropdown_filtering(self):
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
-        self.assertEqual(self.app.form_vars["time"].get(), "")
         self.assertEqual(self.app.form_vars["status"].get(), "Complete")
         self.enter(from_account="AmEx", to_account="Boat store", amount="12.34", category="Boat")
         rows = self.repo.list_flows()
@@ -344,7 +343,7 @@ class GuiIntegrationTests(unittest.TestCase):
         row = self.seed_flow(status="Pending")
         self.assertEqual([v.get() for v in self.app.metric_vars], ["0", "1", "1"])
         self.select(row)
-        self.enter(status="Complete", amount="24.00", time="13:14:15")
+        self.enter(status="Complete", amount="24.00", date="2026-10-02 13:14:15")
         updated = self.repo.get_flow(row["flow_id"])
         self.assertEqual(len(self.repo.list_flows()), 1)
         self.assertEqual(updated["status"], "Complete")
@@ -380,6 +379,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.save_account()
         self.pump()
         self.assertIsNone(self.repo.get_account("Savings")["opening_cents"])
+        self.seed_flow(to_account="Savings")
         self.select_chart("Checking", "Savings")
         self.app.chart_combined.set(True)
         self.app.draw_chart()
@@ -414,6 +414,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.report_summary.get(), "Complete · $0.00 flow volume")
 
     def test_account_gui_and_graph_do_not_infer_ownership(self):
+        self.seed_flow()
         self.assertFalse(hasattr(self.app, "account_mine"))
         self.assertFalse(hasattr(self.app, "account_archived"))
         self.assertEqual(set(self.repo.get_account("Checking")), {"name", "opening_cents", "opening_at"})
@@ -427,12 +428,11 @@ class GuiIntegrationTests(unittest.TestCase):
     def test_blank_and_explicit_times_survive_edit_and_hover(self):
         row = self.seed_flow(date="2026-10-02")
         self.select(row)
-        self.assertEqual(self.app.form_vars["time"].get(), "")
         self.assertIn("2026-10-02", self.app.flow_tooltip(row["flow_id"]))
         self.enter(name="Date only edited")
         self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-02")
         self.select(self.repo.get_flow(row["flow_id"]))
-        self.enter(time="00:00")
+        self.enter(date="2026-10-02 00:00")
         saved = self.repo.get_flow(row["flow_id"])
         self.assertEqual(saved["date"], "2026-10-02 00:00:00")
         self.assertNotIn("time_specified", saved)
@@ -440,10 +440,9 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertIn("00:00:00", self.app.flow_tooltip(row["flow_id"]))
         self.app.new_flow(focus=False)
         self.select(saved)
-        self.assertEqual(self.app.form_vars["time"].get(), "00:00:00")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02 00:00:00")
         self.app.repeat_selected()
-        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02")
-        self.assertEqual(self.app.form_vars["time"].get(), "00:00:00")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02 00:00:00")
         self.app.save_button.invoke()
         self.pump()
         self.assertEqual([flow["date"] for flow in self.repo.list_flows()],
@@ -458,8 +457,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertIn("disabled", self.app.save_button.state())
         self.app.repeat_selected()
         self.pump()
-        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02")
-        self.assertEqual(self.app.form_vars["time"].get(), "01:02:03")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02 01:02:03")
         self.assertEqual(self.app.form_vars["status"].get(), "Planned")
         self.assertIsNone(self.app.editing_id)
         self.assertEqual(self.app.ledger.selection(), ())
@@ -510,13 +508,13 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
         self.assertEqual(self.app.editing_id, original["flow_id"])
 
-    def test_time_dialog_undo_does_not_undo_an_unrelated_saved_record(self):
+    def test_filter_dialog_undo_does_not_undo_an_unrelated_saved_record(self):
         import tkinter as tk
         from tkinter import ttk
         self.enter(from_account="Checking", to_account="Shop", amount="20.00")
         original = self.repo.list_flows()[0]
         self.select(original)
-        self.app.time_button.invoke()
+        self.app.edit_date_filters()
         self.pump()
         dialog = next(widget for widget in self.app.winfo_children() if isinstance(widget, tk.Toplevel))
         def descendants(parent):
@@ -648,32 +646,20 @@ class GuiIntegrationTests(unittest.TestCase):
             self.assertLessEqual(cell.winfo_rootx() + cell.winfo_width(), 1280)
 
 
-    def test_time_button_sets_an_explicit_time(self):
-        import tkinter as tk
-        from tkinter import ttk
-        self.app.time_button.invoke()
-        self.pump()
-        dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
-        def descendants(widget):
-            for child in widget.winfo_children():
-                yield child
-                yield from descendants(child)
-        widgets = list(descendants(dialog))
-        entry = next(w for w in widgets if isinstance(w, ttk.Entry))
-        entry.insert(0, "14:35")
-        next(w for w in widgets if isinstance(w, ttk.Button) and w.cget("text") == "Apply").invoke()
-        self.pump()
-        self.assertEqual(self.app.form_vars["time"].get(), "14:35")
-        self.enter(from_account="Checking", to_account="Shop", amount="3")
+    def test_single_datetime_field_sets_an_explicit_time(self):
+        self.assertNotIn("time", self.app.form_vars)
+        self.assertNotIn("time", self.app.account_vars)
+        self.assertFalse(hasattr(self.app, "time_button"))
+        self.enter(date="2026-10-9 7:5", from_account="Checking", to_account="Shop", amount="3")
         row = self.repo.list_flows()[0]
         self.assertNotIn("time_specified", row)
-        self.assertTrue(row["date"].endswith("14:35:00"))
+        self.assertEqual(row["date"], "2026-10-09 07:05:00")
 
     def test_date_dialog_accepts_timed_start_with_same_date_end(self):
         import tkinter as tk
         from tkinter import ttk
-        self.app.filter_start.set("2026-10-02 12:00")
-        self.app.filter_end.set("2026-10-02")
+        self.app.filter_start.set("2026-10-2 12")
+        self.app.filter_end.set("2026-10-2")
         self.app.edit_date_filters()
         self.pump()
         dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
@@ -706,49 +692,27 @@ class GuiIntegrationTests(unittest.TestCase):
         for entered, expected in (("2026-10-03 17:18:19", "2026-10-03 17:18:19"),
                                   ("2026-10-04T01:02:03", "2026-10-04 01:02:03")):
             self.select(self.repo.get_flow(row["flow_id"]))
-            self.assertNotEqual(self.app.form_vars["time"].get(), "")
             self.enter(date=entered)
             self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], expected)
             self.assertEqual(len(self.repo.list_flows()), 1)
 
-    def test_date_focusout_and_time_dialog_keep_the_same_timestamp(self):
-        import tkinter as tk
-        from tkinter import ttk
+    def test_datetime_field_focusout_and_enter_keep_the_whole_timestamp(self):
         row = self.seed_flow(date="2026-10-02 08:09:10")
         self.select(row)
         date_widget = self.app.form_widgets["date"]
         date_widget.focus_force()
         self.pump()
-        self.app.form_vars["date"].set("2026-10-03T17:18:19")
+        self.app.form_vars["date"].set("2026-10-3T17:18:19")
         self.app.notes_text.focus_set()
         self.pump()
-        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-03")
-        self.assertEqual(self.app.form_vars["time"].get(), "17:18:19")
-        # Invoking Time before another FocusOut must synchronize as well.
-        self.app.form_vars["date"].set("2026-10-04 20:21:22")
-        self.app.time_button.invoke()
-        self.pump()
-        dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
-        def descendants(parent):
-            for child in parent.winfo_children():
-                yield child
-                yield from descendants(child)
-        controls = list(descendants(dialog))
-        time_entry = next(w for w in controls if isinstance(w, ttk.Entry))
-        self.assertEqual(time_entry.get(), "20:21:22")
-        time_entry.delete(0, "end")
-        time_entry.insert(0, "09:00:01")
-        next(w for w in controls if isinstance(w, ttk.Button) and w.cget("text") == "Apply").invoke()
-        self.pump()
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-04 09:00:01")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-03 17:18:19")
+        self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-03 17:18:19")
         date_widget.focus_force()
         self.pump()
-        self.app.form_vars["date"].set("2026-02-31 12:00:00")
-        self.app.notes_text.focus_set()
+        self.app.form_vars["date"].set("2026-10-4 9")
+        date_widget.event_generate("<Return>")
         self.pump()
-        self.assertEqual(self.app.form_vars["date"].get(), "2026-02-31 12:00:00")
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-04 09:00:01")
-        self.assertTrue(self.app.form_feedback.get())
+        self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-04 09:00:00")
 
     def test_graph_map_and_resize_fit_scaled_canvas_and_date_labels(self):
         original_scaling = float(self.app.tk.call("tk", "scaling"))
@@ -793,6 +757,10 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.filter_end.set("2026-10-02")
         self.app.refresh_ledger()
         self.assertEqual(set(self.app.ledger_rows), {date_only["flow_id"], first["flow_id"], later["flow_id"]})
+        self.app.filter_start.set("2026-10-2")
+        self.app.filter_end.set("2026-10-2")
+        self.app.refresh_ledger()
+        self.assertEqual(set(self.app.ledger_rows), {date_only["flow_id"], first["flow_id"], later["flow_id"]})
         self.app.chart_start.set("2026-10-01")
         self.app.chart_basis.set("Confirmed")
         self.select_chart("Checking")
@@ -812,14 +780,14 @@ class GuiIntegrationTests(unittest.TestCase):
             self.assertEqual(list(self.app.ledger_rows), [row["flow_id"]])
 
 
-    def test_closing_time_and_notes_dialogs_does_not_reopen_previous_dropdown(self):
+    def test_closing_notes_dialog_does_not_reopen_previous_dropdown(self):
         import tkinter as tk
         from tkinter import ttk
         def children(widget):
             for child in widget.winfo_children():
                 yield child
                 yield from children(child)
-        for button in (self.app.time_button, self.app.notes_button):
+        for button in (self.app.notes_button,):
             combo = self.app.form_widgets["category"]
             combo.entry.focus_force()
             self.pump()
@@ -829,7 +797,7 @@ class GuiIntegrationTests(unittest.TestCase):
             self.pump()
             self.assertIsNone(combo.popup)
             dialog = next(w for w in self.app.winfo_children() if isinstance(w, tk.Toplevel))
-            close_label = "Close" if button is self.app.notes_button else "Cancel"
+            close_label = "Close"
             next(w for w in children(dialog) if isinstance(w, ttk.Button) and w.cget("text") == close_label).invoke()
             self.app.after(180, self.app.quit)
             self.app.mainloop()

@@ -103,8 +103,8 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.ledger.selection(), ())
         self.assertEqual(self.app.ledger.focus(), "", "A cleared editor must not retain a focused ledger row")
         self.assertEqual(self.app.form_title.cget("text"), "New Flow")
-        self.assertEqual(self.app.save_button.cget("text"), "Add Flow  ·  Ctrl+S")
-        for key in ("time", "from_account", "to_account", "amount", "name", "tags"):
+        self.assertEqual(self.app.save_button.cget("text"), "Add Flow")
+        for key in ("from_account", "to_account", "amount", "name", "tags"):
             self.assertEqual(self.app.form_vars[key].get(), "", key)
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
         self.assertEqual(self.app.form_vars["category"].get(), "Uncategorized")
@@ -119,7 +119,7 @@ class GuiEditingStateTests(unittest.TestCase):
                                notes="Keep the original receipt.", status="Pending")
         second = self.seed_flow(name="Coffee", to_account="Cafe", amount="4.50")
         self.click_flow(first)
-        expected = {"date": "2026-10-02", "time": "13:45:12", "from_account": "AmEx",
+        expected = {"date": "2026-10-02 13:45:12", "from_account": "AmEx",
                     "to_account": "Marina", "amount": "38.20", "name": "Boat parts",
                     "category": "Boat", "status": "Pending"}
         self.assertEqual(self.app.editing_id, first["flow_id"])
@@ -131,7 +131,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.editing_id, second["flow_id"])
         self.assertEqual(self.app.form_vars["from_account"].get(), "Checking")
         self.assertEqual(self.app.form_vars["to_account"].get(), "Cafe")
-        for key in ("time", "tags"):
+        for key in ("tags",):
             self.assertEqual(self.app.form_vars[key].get(), "", key)
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
         self.assertEqual(self.app.form_vars["status"].get(), "Complete")
@@ -163,7 +163,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.app.new_flow_button.invoke()
         self.pump()
         values = {
-            "date": "2026-10-03", "time": "12:34:56", "from_account": "AmEx",
+            "date": "2026-10-03 12:34:56", "from_account": "AmEx",
             "to_account": "Marina", "amount": "42.01", "status": "Pending",
             "name": "Boat parts", "category": "Boat", "tags": "Trailer, Fall",
         }
@@ -289,11 +289,12 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_account_refresh_preserves_field_and_completion_keeps_selected_account(self):
+        self.seed_flow(to_account="AmEx", status="Void")
         self.app.show_view("accounts")
         self.pump()
         self.click_row(self.app.accounts_tree, "Checking")
         self.app.account_vars["opening"].set("1234.56")
-        self.app.account_vars["time"].set("08:09:10")
+        self.app.account_vars["date"].set("2026-10-01 08:09:10")
         before = self.app._account_snapshot()
         self.app.refresh_all()
         self.pump()
@@ -305,7 +306,6 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(set(saved), {"name", "opening_cents", "opening_at"})
         self.assertEqual(self.app.account_editing, "AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "0.00")
-        self.assertEqual(self.app.account_vars["time"].get(), "")
 
     def test_restore_discards_editors_bound_to_replaced_database(self):
         backup = Path(self.directory.name) / "before.sqlite3"
@@ -328,7 +328,6 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.accounts_tree.selection(), ())
         self.assertEqual(self.app.account_vars["name"].get(), "")
         self.assertEqual(self.app.account_vars["opening"].get(), "")
-        self.assertEqual(self.app.account_vars["time"].get(), "")
 
 
 if __name__ == "__main__":

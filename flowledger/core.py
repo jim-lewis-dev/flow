@@ -54,7 +54,7 @@ def _cents(value: Any, label: str = "Amount", *, positive: bool = False) -> int:
 def parse_money(text: Any, allow_negative: bool = False) -> int:
     """Parse a dollar value exactly; refuse fractional cents and binary floats.
 
-    Dollar signs and correctly grouped thousands commas are accepted. Zero is
+    Dollar signs, omitted leading zeros and correctly grouped commas are accepted. Zero is
     valid for opening balances; save_flow separately requires a positive amount.
     Exponent notation, NaN, infinity and ambiguous commas are rejected.
     """
@@ -65,7 +65,7 @@ def parse_money(text: Any, allow_negative: bool = False) -> int:
         value = value[1:].strip()
     elif value.startswith(("-$", "+$")):
         value = value[0] + value[2:].strip()
-    if not re.fullmatch(r"[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?", value):
+    if not re.fullmatch(r"[+-]?(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?|\.\d+)", value):
         raise ValueError("Enter dollars and cents, such as 12.34.")
     try:
         with localcontext() as context:
@@ -91,10 +91,11 @@ def format_money(cents: int) -> str:
 
 
 def normalize_date(value: Any) -> str:
-    """Normalize a local date/time; omitted time means midnight.
+    """Normalize a year-first local point in time, filling omitted components.
 
-    Accept YYYY-MM-DD [HH:MM[:SS]] or the equivalent ISO T separator. Reject
-    offsets and fractional seconds to avoid silently losing time information.
+    Month/day default to 1; hour/minute/second default to 0. Leading zeros are
+    optional, time uses 24-hour notation, and a space or T separates date/time.
+    Offsets and fractional seconds are rejected rather than silently lost.
     """
     if isinstance(value, datetime):
         if value.tzinfo is not None or value.microsecond:
@@ -102,12 +103,16 @@ def normalize_date(value: Any) -> str:
         return value.isoformat(sep=" ", timespec="seconds")
     if isinstance(value, Date):
         return value.isoformat() + " 00:00:00"
-    if not isinstance(value, str) or not re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?", value.strip()
-    ):
-        raise ValueError("Use YYYY-MM-DD and optionally HH:MM or HH:MM:SS.")
+    match = re.fullmatch(
+        r"([0-9]{4})(?:-([0-9]{1,2})(?:-([0-9]{1,2})"
+        r"(?:[ T]([0-9]{1,2})(?::([0-9]{1,2})(?::([0-9]{1,2}))?)?)?)?)?",
+        value.strip() if isinstance(value, str) else "")
+    if match is None:
+        raise ValueError("Use YYYY-MM-DD with optional 24-hour time. Leading zeros and trailing components are optional.")
     try:
-        parsed = datetime.fromisoformat(value.strip())
+        year, month, day, hour, minute, second = match.groups()
+        parsed = datetime(int(year), int(month or 1), int(day or 1),
+                          int(hour or 0), int(minute or 0), int(second or 0))
     except ValueError as error:
         raise ValueError("Invalid calendar date or time.") from error
     return parsed.isoformat(sep=" ", timespec="seconds")
@@ -117,7 +122,7 @@ def normalize_flow_date(value: Any) -> str:
     """Preserve a date-only value; normalize an entered time to whole seconds."""
     when = normalize_date(value)
     has_time = isinstance(value, datetime) or (
-        isinstance(value, str) and len(value.strip()) > 10)
+        isinstance(value, str) and bool(re.search(r"[ T]", value.strip())))
     return when if has_time else when[:10]
 
 
@@ -324,8 +329,17 @@ class Repository:
         return {"name": row["name"], "opening_cents": row["opening_cents"],
                 "opening_at": row["opening_at"]}
 
-    def list_accounts(self) -> list[dict]:
-        return [self._account(row) for row in self.conn.execute("SELECT * FROM accounts ORDER BY account_key")]
+    def list_accounts(self, *, referenced_only: bool = False) -> list[dict]:
+        """List stored anchors, optionally limited to endpoints in saved flows.
+
+        Displayed account lists use referenced_only. Unreferenced starting
+        balances remain stored for reuse and undo; ledger filters and flow
+        statuses do not change whether an endpoint is referenced.
+        """
+        query = "SELECT * FROM accounts"
+        if referenced_only:
+            query += " WHERE account_key IN (SELECT from_key FROM flows UNION SELECT to_key FROM flows)"
+        return [self._account(row) for row in self.conn.execute(query + " ORDER BY account_key")]
 
     def get_account(self, name: str) -> dict | None:
         return self._account(self.conn.execute("SELECT * FROM accounts WHERE account_key=?", (_key(name),)).fetchone())

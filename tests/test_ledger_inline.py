@@ -147,7 +147,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
         self.assertEqual(self.app.form_vars["status"].get(), "Complete")
         self.assertEqual(self.app.form_vars["category"].get(), "Uncategorized")
-        for field in ("time", "from_account", "to_account", "amount", "name", "tags"):
+        for field in ("from_account", "to_account", "amount", "name", "tags"):
             self.assertEqual(self.app.form_vars[field].get(), "", field)
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
         self.assert_closed()
@@ -167,7 +167,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
 
     def test_every_field_shares_top_form_and_completion_saves_the_existing_record(self):
         flow = self.seed(date="2026-10-02 13:45:12")
-        changes = [("date", "2026-10-07", "date", "date", "2026-10-07 13:45:12"),
+        changes = [("date", "2026-10-07", "date", "date", "2026-10-07"),
                    ("from_account", "AmEx", "from_account", "from_account", "AmEx"),
                    ("to_account", "Marina", "to_account", "to_account", "Marina"),
                    ("amount_cents", "38.20", "amount", "amount_cents", 3820),
@@ -194,7 +194,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), notes)
         self.finish_cell()
         saved = self.repo.get_flow(flow["flow_id"])
-        self.assertEqual(saved, {**flow, "date": "2026-10-07 13:45:12",
+        self.assertEqual(saved, {**flow, "date": "2026-10-07",
                                 "from_account": "AmEx", "to_account": "Marina",
                                 "amount_cents": 3820, "status": "Pending",
                                 "name": "Boat parts corrected", "category": "Boat",
@@ -226,13 +226,13 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertFalse(expanded.winfo_exists())
         self.assertEqual(self.app.editing_id, flow["flow_id"])
 
-    def test_date_only_edits_preserve_seconds_and_full_timestamp_replaces_time(self):
+    def test_date_only_edits_reset_time_and_full_timestamp_keeps_seconds(self):
         flow = self.seed(date="2026-10-02 13:45:12")
         self.replace_cell(flow, "date", "2026-10-09")
         self.app.ledger_editor.close()
-        self.assertEqual(self.app.form_vars["time"].get(), "13:45:12")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-09")
         self.assertTrue(self.app.save_flow())
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["date"], "2026-10-09 13:45:12")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["date"], "2026-10-09")
         self.replace_cell(flow, "date", "2026-10-10 08:09:10")
         self.assertTrue(self.app.save_flow())
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["date"], "2026-10-10 08:09:10")
@@ -395,6 +395,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_suggestions_return_and_tab_save_existing_fields(self):
+        self.seed(from_account="AmEx", to_account="Checking", status="Void")
         flow = self.seed()
         entry = self.replace_cell(flow, "from_account", "am")
         combo = self.app.ledger_editor.widget
@@ -418,7 +419,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
         self.assertEqual(self.app.ledger_editor.field, "category")
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "New name")
-        self.assertEqual(len(self.repo.list_flows()), 1)
+        self.assertEqual(len(self.repo.list_flows()), 2)
 
     def test_suggestion_x_does_not_change_record_or_accept_current_cell(self):
         flow = self.seed(category="Boat")

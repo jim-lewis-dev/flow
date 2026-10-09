@@ -39,7 +39,7 @@ def clean_new():
     assert app.ledger.selection() == () and app.ledger.focus() == ""
     assert app._flow_snapshot() == app._clean_flow
     assert app.focus_get() is app.form_widgets["date"]
-    for field in ("from_account", "to_account", "amount", "name", "tags", "time"):
+    for field in ("from_account", "to_account", "amount", "name", "tags"):
         assert app.form_vars[field].get() == "", field
     assert app.form_vars["category"].get() == "Uncategorized"
     assert app.form_vars["status"].get() == "Complete"

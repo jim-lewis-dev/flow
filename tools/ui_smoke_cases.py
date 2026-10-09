@@ -12,7 +12,7 @@ def enter(key_name, text):
 
 def cleared():
     assert app.editing_id is None
-    for field in ('from_account', 'to_account', 'amount', 'name', 'tags', 'time'):
+    for field in ('from_account', 'to_account', 'amount', 'name', 'tags'):
         assert app.form_vars[field].get() == '', field
     assert app.form_vars['category'].get() == 'Uncategorized'
     assert app.form_vars['status'].get() == 'Complete'
@@ -47,12 +47,9 @@ enter('name', 'Audit Flow Alpha')
 enter('category', 'Audit Category')
 enter('tags', 'First tag, Second tag')
 replace(app.notes_text, 'New record notes')
-click(app.time_button)
-dialog = modal()
-time_entry = next(w for w in widgets(dialog) if w.winfo_class() == 'TEntry')
-replace(time_entry, '13:47:26')
-click_text('Apply', dialog)
-assert app.form_vars['time'].get() == '13:47:26'
+enter('date', '2026-10-9 13:47:26')
+key('Return')
+assert app.form_vars['date'].get() == '2026-10-09 13:47:26'
 count_before = len(repo.list_flows())
 assert str(app.save_button.cget('text')).startswith('Add Flow')
 click(app.save_button)
@@ -105,19 +102,15 @@ row(app.ledger, a['flow_id'])
 enter('date', '2026-10-03 17:18:19')
 key('Return')
 assert repo.get_flow(a['flow_id'])['date'] == '2026-10-03 17:18:19'
-click(app.time_button)
-dialog = modal()
-time_entry = next(w for w in widgets(dialog) if w.winfo_class() == 'TEntry')
-replace(time_entry, '00:00:00')
-click_text('Apply', dialog)
+enter('date', '2026-10-3 0')
+key('Return')
 assert repo.get_flow(a['flow_id'])['date'].endswith(' 00:00:00')
-click(app.time_button)
-dialog = modal()
-click_text('Clear', dialog)
-click_text('Apply', dialog)
+enter('date', '2026-10-3')
+key('Return')
 assert len(repo.get_flow(a['flow_id'])['date']) == 10
-assert app.form_vars['time'].get() == ''
-ok('Date, midnight and seconds auto-save correctly through the Date and optional Time controls')
+assert app.form_vars['date'].get() == '2026-10-03'
+assert 'time' not in app.form_vars and not hasattr(app, 'time_button')
+ok('Date, midnight and seconds auto-save through one Date/Time field')
 
 # Existing record edits never create a duplicate or need a save prompt.
 f = flow_named('October electricity')
@@ -130,10 +123,8 @@ enter('amount', '99.25')
 enter('category', 'Edited Category')
 enter('tags', 'Edited tag')
 replace(app.notes_text, 'Edited record notes')
-click(app.time_button)
-dialog = modal()
-click_text('Clear', dialog)
-click_text('Apply', dialog)
+enter('date', f['date'][:10])
+key('Return')
 click(app.form_widgets['status'])
 key('Up')
 key('Return')
@@ -151,7 +142,7 @@ row(app.ledger, b['flow_id'])
 assert app.form_vars['from_account'].get() == 'Cash'
 assert app.form_vars['category'].get() == 'Boat'
 assert app.form_vars['tags'].get() == 'Weekend project'
-assert app.form_vars['time'].get() == '10:30:00'
+assert app.form_vars['date'].get() == b['date']
 assert app.notes_text.get('1.0', 'end-1c') == 'Illustrative demo record.'
 clean_popups('Selecting the next row replaces all fields without old edits carrying over')
 
