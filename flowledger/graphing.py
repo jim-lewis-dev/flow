@@ -1,36 +1,17 @@
 """Graph presentation helpers; the stored ledger and balance rules stay unchanged."""
 from __future__ import annotations
 
-from datetime import datetime
-import re
 from typing import Iterable
 
-from .core import ledger_timeline, normalize_date
+from .core import ledger_timeline, normalize_date, normalize_flow_date
 
 
 def normalize_graph_date(text: str) -> str:
-    """Accept a year-first graph date with optional whole-second local time.
-
-    Month, day, hour, minute and second may omit their leading zero. A date-only
-    input stays date-only so the caller can interpret Through as the whole day.
-    Explicit times normalize to YYYY-MM-DD HH:MM:SS. This permissiveness is only
-    for graph controls; record validation and stored dates are unchanged.
-    """
-    message = (f"Invalid graph date {text!r}. Use YYYY-MM-DD, optionally followed "
-               "by HH:MM or HH:MM:SS; leading zeros are optional.")
-    match = re.fullmatch(
-        r"([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:[ T]([0-9]{1,2}):([0-9]{1,2})(?::([0-9]{1,2}))?)?",
-        text.strip() if isinstance(text, str) else "",
-    )
-    if match is None:
-        raise ValueError(message)
-    year, month, day, hour, minute, second = match.groups()
+    """Use the same date/time entry rules as flows and account starting values."""
     try:
-        parsed = datetime(int(year), int(month), int(day), int(hour or 0),
-                          int(minute or 0), int(second or 0))
+        return normalize_flow_date(text)
     except ValueError as error:
-        raise ValueError(message + " Check the calendar date and time.") from error
-    return parsed.date().isoformat() if hour is None else parsed.isoformat(sep=" ", timespec="seconds")
+        raise ValueError(f"Invalid graph date {text!r}. Use YYYY-MM-DD with optional 24-hour time; leading zeros and trailing components are optional.") from error
 
 
 def graph_timeline(accounts: list[dict], flows: list[dict], start: str, end: str,

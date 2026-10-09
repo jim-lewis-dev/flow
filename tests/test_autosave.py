@@ -208,6 +208,7 @@ class AutosaveTests(unittest.TestCase):
                 self.assertEqual(copies[0], {**original, "flow_id": copies[0]["flow_id"]})
 
     def test_account_change_undo_redo_uses_same_keyboard_and_refreshes_values(self):
+        self.seed()
         self.app.show_view("accounts")
         self.app.accounts_tree.selection_set("Checking")
         self.pump()
@@ -340,7 +341,7 @@ class AutosaveTests(unittest.TestCase):
         self.app.account_vars["name"].set("Cash")
         self.app.account_vars["opening"].set("15.00")
         self.app.account_vars["date"].set("2026-10-03")
-        self.app.account_vars["time"].set("12:34:56")
+        self.app.account_vars["date"].set("2026-10-03 12:34:56")
         self.app.account_widgets["opening"].focus_force()
         self.pump()
         self.app.account_widgets["opening"].event_generate("<Return>")
@@ -356,6 +357,58 @@ class AutosaveTests(unittest.TestCase):
         self.shortcut("<Control-y>", self.app.accounts_tree)
         self.assertEqual(self.repo.get_account("Cash"), saved)
 
+    def test_ctrl_s_preserves_new_and_repeated_drafts_without_validating_or_adding(self):
+        saved = self.seed()
+        for fields in ({}, {"from_account": "Checking"},
+                       {"from_account": "Checking", "to_account": "Shop", "amount": ".50"},
+                       {"date": "invalid", "amount": "invalid"}):
+            with self.subTest(fields=fields):
+                self.app.new_flow()
+                for key, value in fields.items():
+                    self.app.form_vars[key].set(value)
+                before = self.app._flow_snapshot()
+                history = self.repo.history()
+                self.shortcut("<Control-s>", self.app.form_widgets["date"])
+                self.assertEqual(self.app._flow_snapshot(), before)
+                self.assertEqual(self.repo.list_flows(), [saved])
+                self.assertEqual(self.repo.history(), history)
+                self.assertEqual(self.app.status_message.get(), "Saved")
+        self.select(saved)
+        self.app.repeat_selected()
+        before = self.app._flow_snapshot()
+        self.shortcut("<Control-s>")
+        self.assertEqual(self.app._flow_snapshot(), before)
+        self.assertEqual(self.repo.list_flows(), [saved])
+        reopened = Repository(self.path)
+        try:
+            self.assertEqual(reopened.list_flows(), [saved])
+        finally:
+            reopened.close()
+
+    def test_ctrl_s_preserves_unadded_account_draft(self):
+        self.seed()
+        self.app.show_view("accounts")
+        for fields in ({}, {"name": "Unadded"}, {"name": "Unadded", "opening": ".50"}):
+            with self.subTest(fields=fields):
+                self.app.new_account()
+                for key, value in fields.items():
+                    self.app.account_vars[key].set(value)
+                before = self.app._account_snapshot()
+                self.shortcut("<Control-s>", self.app.account_name_entry)
+                self.assertEqual(self.app._account_snapshot(), before)
+                self.assertIsNone(self.repo.get_account("Unadded"))
+                self.assertEqual(self.app.status_message.get(), "Saved")
+
+    def test_ctrl_s_invalid_existing_edit_keeps_saved_value_and_visible_error(self):
+        saved = self.seed()
+        self.select(saved)
+        entry = self.field("amount", "invalid")
+        self.shortcut("<Control-s>", entry)
+        self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
+        self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
+        self.assertIn("dollars and cents", self.app.form_feedback.get())
+        self.assertNotEqual(self.app.status_message.get(), "Saved")
+
     def test_new_and_add_reset_undo_baseline_when_date_keeps_focus(self):
         self.app.new_flow()
         date = self.app.form_widgets["date"]
@@ -370,7 +423,8 @@ class AutosaveTests(unittest.TestCase):
         self.assertEqual(date.get(), default_date)
         for key, value in dict(from_account="Checking", to_account="Shop", amount="33.00").items():
             self.app.form_vars[key].set(value)
-        self.shortcut("<Control-s>", date)
+        self.app.save_button.invoke()
+        self.pump()
         saved, = self.repo.list_flows()
         self.assertIs(self.app.focus_get(), date)
         date.delete(0, "end")

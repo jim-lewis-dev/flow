@@ -1,27 +1,10 @@
-Warning: getifaddrs returns Operation not permitted
-Warning: getifaddrs returns Operation not permitted
-The XKEYBOARD keymap compiler (xkbcomp) reports:
-> Warning:          Could not resolve keysym XF86CameraAccessEnable
-> Warning:          Could not resolve keysym XF86CameraAccessDisable
-> Warning:          Could not resolve keysym XF86CameraAccessToggle
-> Warning:          Could not resolve keysym XF86NextElement
-> Warning:          Could not resolve keysym XF86PreviousElement
-> Warning:          Could not resolve keysym XF86AutopilotEngageToggle
-> Warning:          Could not resolve keysym XF86MarkWaypoint
-> Warning:          Could not resolve keysym XF86Sos
-> Warning:          Could not resolve keysym XF86NavChart
-> Warning:          Could not resolve keysym XF86FishingChart
-> Warning:          Could not resolve keysym XF86SingleRangeRadar
-> Warning:          Could not resolve keysym XF86DualRangeRadar
-> Warning:          Could not resolve keysym XF86RadarOverlay
-> Warning:          Could not resolve keysym XF86TraditionalSonar
-> Warning:          Could not resolve keysym XF86ClearvuSonar
-> Warning:          Could not resolve keysym XF86SidevuSonar
-> Warning:          Could not resolve keysym XF86NavInfo
-Errors from xkbcomp are not fatal to the X server
+Flow 0.5.11 - 9 October 2026
+Command: python3 -m unittest discover -s tests -v
+Run with a graphical display; no skipped GUI tests.
+
 test_account_names_and_computed_balance_columns_are_read_only (test_account_inline.AccountInlineEditingTests.test_account_names_and_computed_balance_columns_are_read_only) ... ok
 test_cells_and_upper_fields_share_values_and_completed_fields_save (test_account_inline.AccountInlineEditingTests.test_cells_and_upper_fields_share_values_and_completed_fields_save) ... ok
-test_date_only_changes_preserve_seconds_and_full_timestamp_replaces_time (test_account_inline.AccountInlineEditingTests.test_date_only_changes_preserve_seconds_and_full_timestamp_replaces_time) ... ok
+test_date_only_changes_reset_time_and_full_timestamp_keeps_seconds (test_account_inline.AccountInlineEditingTests.test_date_only_changes_reset_time_and_full_timestamp_keeps_seconds) ... ok
 test_dirty_row_change_saves_correct_account_without_confirmation (test_account_inline.AccountInlineEditingTests.test_dirty_row_change_saves_correct_account_without_confirmation) ... ok
 test_double_click_selects_the_clicked_account_and_correct_cell (test_account_inline.AccountInlineEditingTests.test_double_click_selects_the_clicked_account_and_correct_cell) ... ok
 test_equivalent_time_is_clean_but_invalid_date_or_time_keeps_editing (test_account_inline.AccountInlineEditingTests.test_equivalent_time_is_clean_but_invalid_date_or_time_keeps_editing) ... ok
@@ -41,8 +24,24 @@ test_failed_upgrade_rolls_back_all_tables_and_version (test_account_migration.Ac
 test_new_accounts_have_only_anchor_fields_and_no_hidden_visibility (test_account_migration.AccountMigrationTests.test_new_accounts_have_only_anchor_fields_and_no_hidden_visibility) ... ok
 test_restore_v3_preserves_source_forecasts_and_current_data_safety_copy (test_account_migration.AccountMigrationTests.test_restore_v3_preserves_source_forecasts_and_current_data_safety_copy) ... ok
 test_v2_and_v3_upgrade_keep_actual_flows_and_recover_hypothetical_collections (test_account_migration.AccountMigrationTests.test_v2_and_v3_upgrade_keep_actual_flows_and_recover_hypothetical_collections) ... ok
+test_add_account_prepares_anchor_without_a_visible_unused_row (test_account_references.AccountVisibilityGuiTests.test_add_account_prepares_anchor_without_a_visible_unused_row) ... ok
+test_empty_ledger_click_clears_selection_and_saves_valid_edit_once (test_account_references.AccountVisibilityGuiTests.test_empty_ledger_click_clears_selection_and_saves_valid_edit_once) ... ok
+test_empty_ledger_click_closes_invalid_inline_edit_without_writing_it (test_account_references.AccountVisibilityGuiTests.test_empty_ledger_click_closes_invalid_inline_edit_without_writing_it) ... ok
+test_empty_ledger_click_discards_repeat_and_new_drafts (test_account_references.AccountVisibilityGuiTests.test_empty_ledger_click_discards_repeat_and_new_drafts) ... ok
+test_endpoint_correction_and_undo_redo_refresh_all_account_lists (test_account_references.AccountVisibilityGuiTests.test_endpoint_correction_and_undo_redo_refresh_all_account_lists) ... ok
+test_filters_and_unsaved_typing_do_not_change_account_visibility (test_account_references.AccountVisibilityGuiTests.test_filters_and_unsaved_typing_do_not_change_account_visibility) ... ok
+test_heading_click_sorts_without_clearing_selected_flow (test_account_references.AccountVisibilityGuiTests.test_heading_click_sorts_without_clearing_selected_flow) ... ok
+test_hidden_selected_account_clears_form_when_last_flow_is_undone (test_account_references.AccountVisibilityGuiTests.test_hidden_selected_account_clears_form_when_last_flow_is_undone) ... ok
+test_reusing_hidden_name_restores_saved_starting_balance (test_account_references.AccountVisibilityGuiTests.test_reusing_hidden_name_restores_saved_starting_balance) ... ok
+test_validation_reports_errors_without_sound (test_account_references.AccountVisibilityGuiTests.test_validation_reports_errors_without_sound) ... ok
+test_both_directions_all_statuses_and_canonical_names_count (test_account_references.ReferencedAccountsTests.test_both_directions_all_statuses_and_canonical_names_count) ... ok
+test_last_reference_in_either_direction_controls_visibility (test_account_references.ReferencedAccountsTests.test_last_reference_in_either_direction_controls_visibility) ... ok
+test_starting_balance_alone_is_hidden_but_not_lost (test_account_references.ReferencedAccountsTests.test_starting_balance_alone_is_hidden_but_not_lost) ... ok
 test_account_change_undo_redo_uses_same_keyboard_and_refreshes_values (test_autosave.AutosaveTests.test_account_change_undo_redo_uses_same_keyboard_and_refreshes_values) ... ok
 test_add_and_void_are_reversible_without_confirmations (test_autosave.AutosaveTests.test_add_and_void_are_reversible_without_confirmations) ... ok
+test_ctrl_s_invalid_existing_edit_keeps_saved_value_and_visible_error (test_autosave.AutosaveTests.test_ctrl_s_invalid_existing_edit_keeps_saved_value_and_visible_error) ... ok
+test_ctrl_s_preserves_new_and_repeated_drafts_without_validating_or_adding (test_autosave.AutosaveTests.test_ctrl_s_preserves_new_and_repeated_drafts_without_validating_or_adding) ... ok
+test_ctrl_s_preserves_unadded_account_draft (test_autosave.AutosaveTests.test_ctrl_s_preserves_unadded_account_draft) ... ok
 test_enter_tab_and_blur_save_existing_fields_without_extra_records (test_autosave.AutosaveTests.test_enter_tab_and_blur_save_existing_fields_without_extra_records) ... ok
 test_expanded_notes_global_undo_does_not_run_tk_local_undo_twice (test_autosave.AutosaveTests.test_expanded_notes_global_undo_does_not_run_tk_local_undo_twice) ... ok
 test_import_batch_is_one_undo_and_redo_preserves_ids (test_autosave.AutosaveTests.test_import_batch_is_one_undo_and_redo_preserves_ids) ... ok
@@ -82,6 +81,8 @@ test_saved_multiline_unicode_name_and_notes_roundtrip_csv_and_json (test_core.Re
 test_unknown_balance_remains_unknown (test_core.RepositoryTests.test_unknown_balance_remains_unknown) ... ok
 test_local_dates_preserve_times_and_reject_lossy_inputs (test_core.ValidationTests.test_local_dates_preserve_times_and_reject_lossy_inputs) ... ok
 test_money_is_exact_and_rejects_fractional_cents (test_core.ValidationTests.test_money_is_exact_and_rejects_fractional_cents) ... ok
+test_partial_date_defaults_do_not_accept_invalid_calendar_or_time_values (test_core.ValidationTests.test_partial_date_defaults_do_not_accept_invalid_calendar_or_time_values) ... ok
+test_partial_dates_and_24_hour_times_fill_only_missing_components (test_core.ValidationTests.test_partial_dates_and_24_hour_times_fill_only_missing_components) ... ok
 test_demo_confirmed_and_pending_totals (test_demo.DemoIntegrationTests.test_demo_confirmed_and_pending_totals) ... ok
 test_export_reimport_is_safe_and_restore_preserves_flows (test_demo.DemoIntegrationTests.test_export_reimport_is_safe_and_restore_preserves_flows) ... ok
 test_planned_flows_are_plain_records_selected_by_status (test_demo.DemoIntegrationTests.test_planned_flows_are_plain_records_selected_by_status) ... ok
@@ -158,15 +159,16 @@ test_add_and_new_reestablish_typing_undo_when_date_keeps_focus (test_gui_app.Gui
 test_blank_and_explicit_times_survive_edit_and_hover (test_gui_app.GuiIntegrationTests.test_blank_and_explicit_times_survive_edit_and_hover) ... ok
 test_category_and_tag_filters_are_exact_not_text_mentions (test_gui_app.GuiIntegrationTests.test_category_and_tag_filters_are_exact_not_text_mentions) ... ok
 test_category_tag_and_name_x_leave_ledger_filters_and_records_intact (test_gui_app.GuiIntegrationTests.test_category_tag_and_name_x_leave_ledger_filters_and_records_intact) ... ok
-test_closing_time_and_notes_dialogs_does_not_reopen_previous_dropdown (test_gui_app.GuiIntegrationTests.test_closing_time_and_notes_dialogs_does_not_reopen_previous_dropdown) ... ok
+test_closing_notes_dialog_does_not_reopen_previous_dropdown (test_gui_app.GuiIntegrationTests.test_closing_notes_dialog_does_not_reopen_previous_dropdown) ... ok
 test_confirmed_and_pending_graphs_use_saved_flow_values (test_gui_app.GuiIntegrationTests.test_confirmed_and_pending_graphs_use_saved_flow_values) ... ok
 test_date_dialog_accepts_timed_start_with_same_date_end (test_gui_app.GuiIntegrationTests.test_date_dialog_accepts_timed_start_with_same_date_end) ... ok
-test_date_focusout_and_time_dialog_keep_the_same_timestamp (test_gui_app.GuiIntegrationTests.test_date_focusout_and_time_dialog_keep_the_same_timestamp) ... ok
+test_datetime_field_focusout_and_enter_keep_the_whole_timestamp (test_gui_app.GuiIntegrationTests.test_datetime_field_focusout_and_enter_keep_the_whole_timestamp) ... ok
 test_defaults_new_vocabulary_and_dropdown_filtering (test_gui_app.GuiIntegrationTests.test_defaults_new_vocabulary_and_dropdown_filtering) ... ok
 test_desktop_layout_uses_full_width_and_all_columns (test_gui_app.GuiIntegrationTests.test_desktop_layout_uses_full_width_and_all_columns) ... ok
 test_empty_redo_keeps_the_current_inline_edit (test_gui_app.GuiIntegrationTests.test_empty_redo_keeps_the_current_inline_edit) ... ok
 test_exact_enter_restores_account_without_saving_a_flow (test_gui_app.GuiIntegrationTests.test_exact_enter_restores_account_without_saving_a_flow) ... ok
 test_failed_suggestion_removal_keeps_row_and_draft (test_gui_app.GuiIntegrationTests.test_failed_suggestion_removal_keeps_row_and_draft) ... ok
+test_filter_dialog_undo_does_not_undo_an_unrelated_saved_record (test_gui_app.GuiIntegrationTests.test_filter_dialog_undo_does_not_undo_an_unrelated_saved_record) ... ok
 test_filter_refresh_preserves_active_edit_and_filters_survive_autosave (test_gui_app.GuiIntegrationTests.test_filter_refresh_preserves_active_edit_and_filters_survive_autosave) ... ok
 test_full_datetime_in_date_field_replaces_previous_time (test_gui_app.GuiIntegrationTests.test_full_datetime_in_date_field_replaces_previous_time) ... ok
 test_graph_date_only_end_includes_afternoon_flows (test_gui_app.GuiIntegrationTests.test_graph_date_only_end_includes_afternoon_flows) ... ok
@@ -185,10 +187,9 @@ test_repeat_copies_every_field_and_add_is_one_undoable_action (test_gui_app.GuiI
 test_saving_while_search_or_status_filter_hides_new_row_is_safe (test_gui_app.GuiIntegrationTests.test_saving_while_search_or_status_filter_hides_new_row_is_safe) ... ok
 test_second_boundaries_in_ledger_and_graph_filters (test_gui_app.GuiIntegrationTests.test_second_boundaries_in_ledger_and_graph_filters) ... ok
 test_selecting_original_discards_repeat_draft_without_prompt (test_gui_app.GuiIntegrationTests.test_selecting_original_discards_repeat_draft_without_prompt) ... ok
+test_single_datetime_field_sets_an_explicit_time (test_gui_app.GuiIntegrationTests.test_single_datetime_field_sets_an_explicit_time) ... ok
 test_suggestion_x_can_be_undone_and_redone_without_changing_records (test_gui_app.GuiIntegrationTests.test_suggestion_x_can_be_undone_and_redone_without_changing_records) ... ok
 test_tag_enter_restores_only_last_csv_token (test_gui_app.GuiIntegrationTests.test_tag_enter_restores_only_last_csv_token) ... ok
-test_time_button_sets_an_explicit_time (test_gui_app.GuiIntegrationTests.test_time_button_sets_an_explicit_time) ... ok
-test_time_dialog_undo_does_not_undo_an_unrelated_saved_record (test_gui_app.GuiIntegrationTests.test_time_dialog_undo_does_not_undo_an_unrelated_saved_record) ... ok
 test_unknown_opening_remains_unknown_in_explicit_combined_graph (test_gui_app.GuiIntegrationTests.test_unknown_opening_remains_unknown_in_explicit_combined_graph) ... ok
 test_account_refresh_preserves_field_and_completion_keeps_selected_account (test_gui_state.GuiEditingStateTests.test_account_refresh_preserves_field_and_completion_keeps_selected_account) ... ok
 test_completing_account_field_keeps_record_selected_without_reopening_popup (test_gui_state.GuiEditingStateTests.test_completing_account_field_keeps_record_selected_without_reopening_popup) ... ok
@@ -248,7 +249,7 @@ test_new_action_discards_redo_but_failed_action_does_not (test_history.SessionHi
 test_noop_including_rewritten_tag_rows_keeps_stacks (test_history.SessionHistoryTests.test_noop_including_rewritten_tag_rows_keeps_stacks) ... ok
 test_unrecorded_change_to_affected_row_blocks_without_overwriting (test_history.SessionHistoryTests.test_unrecorded_change_to_affected_row_blocks_without_overwriting) ... ok
 test_void_flow_restored_with_same_id (test_history.SessionHistoryTests.test_void_flow_restored_with_same_id) ... ok
-test_date_only_edits_preserve_seconds_and_full_timestamp_replaces_time (test_ledger_inline.LedgerInlineEditingTests.test_date_only_edits_preserve_seconds_and_full_timestamp_replaces_time) ... ok
+test_date_only_edits_reset_time_and_full_timestamp_keeps_seconds (test_ledger_inline.LedgerInlineEditingTests.test_date_only_edits_reset_time_and_full_timestamp_keeps_seconds) ... ok
 test_dirty_row_change_saves_to_correct_flow_without_prompt (test_ledger_inline.LedgerInlineEditingTests.test_dirty_row_change_saves_to_correct_flow_without_prompt) ... ok
 test_double_click_selects_the_clicked_row_and_opens_the_correct_cell (test_ledger_inline.LedgerInlineEditingTests.test_double_click_selects_the_clicked_row_and_opens_the_correct_cell) ... ok
 test_escape_reverts_unfinished_cell_and_control_s_finishes_without_duplicate (test_ledger_inline.LedgerInlineEditingTests.test_escape_reverts_unfinished_cell_and_control_s_finishes_without_duplicate) ... ok
@@ -354,8 +355,6 @@ test_entry_dropdown_closes_first_then_escape_exits_fullscreen (test_window.Windo
 test_escape_reverts_existing_field_then_exits_fullscreen (test_window.WindowTests.test_escape_reverts_existing_field_then_exits_fullscreen) ... ok
 test_filter_button_without_popup_does_not_swallow_escape (test_window.WindowTests.test_filter_button_without_popup_does_not_swallow_escape) ... ok
 test_startup_requests_fullscreen_escape_preserves_draft (test_window.WindowTests.test_startup_requests_fullscreen_escape_preserves_draft) ... ok
-
 ----------------------------------------------------------------------
-Ran 335 tests in 59.902s
-
+Ran 353 tests in 63.113s
 OK

@@ -41,7 +41,7 @@ That is the full flow object: the nine agreed fields plus its ID. No `scenario` 
 | --- | --- |
 | Account name | Identity; no generated account ID. A starting balance is integer cents, negative for debt, or `null` when unknown. |
 | Flow ID | UUID preserves identity during edits/imports. Repeat creates a new record with a new ID. |
-| Amount | `1200` means $12.00, calculated with exact integer arithmetic. The form displays dollars. |
+| Amount | `1200` means $12.00, calculated with exact integer arithmetic. Entry uses dollars and accepts `.50` for 50 cents or `.05` for 5 cents. Starting balances use the same parser. |
 | Date | `2026-10-02` or `2026-10-02 12:30:00`. Entered time normalizes to seconds. A date alone evaluates to midnight without adding a flag. |
 | Category / tags | One category name and a list of tag names. Shared tags can connect split purchases. |
 
@@ -49,17 +49,21 @@ Every date denotes a point in local time; a date-only value is not an all-day in
 
 ## GUI to stored record
 
-The nine form fields populate one draft. Double-clicking a ledger cell uses the same StringVar as the upper form, or the same text buffer for Notes. Upper, ledger and expanded Notes therefore share their content. Existing records save a valid completed edit on Enter, Tab or leaving the field; Notes uses Ctrl+Enter or leaving/closing its editor. Invalid edits do not write records. Calculations, filters and Record JSON update after each successful edit.
+The nine form fields populate one draft. Date/Time is one StringVar containing the date and optional time; there is no separate time variable or control. Double-clicking a ledger cell uses the same StringVar as the upper form, or the same text buffer for Notes. Upper, ledger and expanded Notes therefore share their content. Existing records save a valid completed edit on Enter, Tab or leaving the field; Notes uses Ctrl+Enter or leaving/closing its editor. Invalid edits do not write records. Calculations, filters and Record JSON update after each successful edit.
 
-New Flow clears the form. Add Flow inserts a new draft and clears the form. Repeat copies all fields, including date/time/status, but has no editing ID until Add Flow inserts the copy. Selecting another row/page discards an unfinished new or repeated draft without a prompt.
+SQLite writes commit immediately. Ctrl+S finishes existing-record edits only; it does not validate, add or clear a new/repeated draft. Add Flow and Add Account remain the explicit insertion actions. With no existing edit to finish, Ctrl+S reports Saved; a blank or unfinished draft does not prevent saving the ledger.
 
-Accounts uses the same cell editor lifecycle for Starting Balance and Starting Date, sharing the upper form variables. Existing accounts save completed edits automatically; new accounts wait for Add Account. A pasted timestamp replaces the optional time, while a date-only edit preserves it. Account names remain fixed identities. Graphs, totals, audit history and saved JSON are inspection views.
+New Flow clears the form. Add Flow inserts a new draft and clears the form. Repeat copies all fields, including date/time/status, but has no editing ID until Add Flow inserts the copy. Selecting another row/page discards an unfinished new or repeated draft without a prompt. Clicking empty ledger space deselects and clears: valid existing edits save first, invalid unfinished edits and new/repeated drafts are discarded. Validation messages remain visible when editing, but never ring an error sound.
+
+Accounts uses the same cell editor lifecycle for Starting Balance and Starting Date/Time, sharing the upper form variables. Existing accounts save completed edits automatically; new accounts wait for Add Account. Dates use year-first order, with optional leading zeros and optional 24-hour time. Missing month/day become 1; missing hour/minute/second become 0. A date-only edit therefore resets any earlier time to midnight. Account names remain fixed identities. Graphs, totals, audit history and saved JSON are inspection views.
 
 `SessionHistory` in `history.py` groups each successful user mutation into one undo action. Temporary SQLite triggers collect only changed rows in accounts, categories, tags, flows and flow_tags; temporary journal writes obey the same transaction rollbacks. Undo/redo restores those rows atomically, checks foreign keys, preserves flow IDs and appends audit events. It never rewrites earlier audit history or adds persistent tables/fields. Import is one action. Suggestion preference changes join the same action order through reversible callbacks. Unfinished form typing is reverted before saved actions. New mutations discard redo; closing the app or successfully restoring a database clears the session history. Exported files and view/filter settings are outside this record history.
 
 `save_flow(draft)` validates endpoints, amount, date and status; creates new named choices; writes the flow and tags; and appends an audit entry in one SQLite transaction. Failed saves roll back together. The method returns the saved dictionary. Clicking a ledger row loads that dictionary into the form. **Record JSON** shows saved records; **Data > View Schema** shows the actual tables.
 
-Accounts has Name, Starting Balance and Starting Date with optional time. Newly typed endpoints have unknown opening balances until supplied. Balances and graphs are calculated outputs, not extra account fields. There are no ownership or archive controls.
+Accounts has Name, Starting Balance and Starting Date/Time. Newly typed endpoints have unknown opening balances until supplied. Balances and graphs are calculated outputs, not extra account fields. There are no ownership or archive controls.
+
+The Accounts table, From/To suggestions and graph selector call `list_accounts(referenced_only=True)`. The query restricts account keys to `SELECT from_key FROM flows UNION SELECT to_key FROM flows`. Every saved status counts, including Void; view filters and unfinished text do not. The default repository query still returns stored anchors for history/import logic. Unreferenced anchors are retained for reuse and undo, but not displayed. An account prepared with Add Account becomes visible when a saved flow references it. No stored fields or schema changes are required.
 
 ## SQLite schema 4: six tables
 

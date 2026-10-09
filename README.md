@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.10 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.11 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
@@ -77,9 +77,9 @@ The full-width Flow Ledger sits below the entry form. At 1920 pixels, the nine e
 
 | Field | Behavior |
 | --- | --- |
-| Date | Today by default; optional time is blank. Hover over a saved row to see its recorded time. |
+| Date/Time | One field, defaulting to today. Optional 24-hour time, down to seconds. Hover over a saved row to see the full value. |
 | From / To | Required, different named accounts. Focus opens choices; typing filters; click a choice or press Enter to accept new text. |
-| Amount | Positive USD with exact cents. |
+| Amount | Positive USD with exact cents. Leading zero optional: `.50` = 50 cents; `.05` = 5 cents. |
 | Status | Complete, Pending, Planned, Void. Defaults to Complete. |
 | Name | Optional label; blank becomes From -> To. Earlier names are suggested. |
 | Notes | All editors share the same text. Enter adds a line; Ctrl+Enter or leaving the field saves an existing record. Up/Down follows wrapped text; the mouse wheel scrolls. |
@@ -92,23 +92,40 @@ Click **×** beside a dropdown suggestion to remove it from entry lists. From an
 
 Suggestion preferences live in `<database>.suggestions.json` beside each database. They add no fields to accounts or flows and do not change the SQLite schema. Database backups contain your records; copy this small preferences file too if you want to move the same dropdown choices to another computer.
 
-Click a ledger row to load all fields. Double-click a cell to edit it directly; **F2** starts editing the focused row. The ledger and upper form share the same values, including Notes. From, To, Name, Category and Tags use searchable suggestions; Status offers the four fixed choices. Changing Date preserves its optional time; paste a full timestamp to replace both.
+Click a ledger row to load all fields. Double-click a cell to edit it directly; **F2** starts editing the focused row. The ledger and upper form share the same values, including Notes. From, To, Name, Category and Tags use searchable suggestions; Status offers the four fixed choices. Date and optional time are entered together in one field. Omitting the time resets it to midnight.
 
-For an **existing flow**, **Enter**, **Tab**, or leaving a field saves the completed edit immediately. The same row stays selected. Notes uses Enter for a new line; **Ctrl+Enter**, leaving Notes, or closing expanded Notes saves it. Invalid values display an error and leave the saved record unchanged; correct the field or press Escape to restore its saved value. Escape closes an open dropdown first; with no unfinished existing edit, it exits fullscreen without changing a new draft. Filters, totals, graphs and Record JSON reflect successful edits immediately.
+For an **existing flow**, **Enter**, **Tab**, or leaving a field saves the completed edit immediately. The same row stays selected. Notes uses Enter for a new line; **Ctrl+Enter**, leaving Notes, or closing expanded Notes saves it. Invalid values display a silent error and leave the saved record unchanged; correct the field or press Escape to restore its saved value. Escape closes an open dropdown first; with no unfinished existing edit, it exits fullscreen without changing a new draft. Filters, totals, graphs and Record JSON reflect successful edits immediately. Flow does not play error sounds.
 
-**New Flow** clears the form. **Add Flow** or **Ctrl+S** inserts a new draft and returns to a blank form with today's date, blank time, Complete and Uncategorized. Moving between draft fields keeps what you typed. Selecting a ledger row or another page discards an unfinished new draft without a prompt. Add Flow is disabled when an existing flow is selected.
+**New Flow** clears the form. **Add Flow** inserts a new draft and returns to a blank form with today's date, Complete and Uncategorized. Moving between draft fields keeps what you typed. Selecting a ledger row or another page discards an unfinished new draft without a prompt. Add Flow is disabled when an existing flow is selected.
+
+Ledger records are saved immediately. **Ctrl+S** completes edits to an existing record and leaves new/repeated drafts untouched. A blank or unfinished New Flow does not block saving. Use **Add Flow** to add the top draft to the ledger; the Accounts form follows the same rule with **Add Account**.
+
+Click empty space below the ledger rows to deselect and return to New Flow. Valid edits to existing records save first; invalid unfinished edits and unadded drafts are discarded. The saved record remains unchanged when invalid input is discarded. Dropdowns close and entry fields return to their defaults.
 
 **Repeat** copies every field, including date, time, status, notes and tags, into a new draft. It creates a new record only when you press **Add Flow**. Selecting a ledger row discards the copy without changing the original.
 
 **Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons are also available. Completed flow/account edits, additions, Void, a whole import batch, and dropdown suggestion removal/restoration are reversible. Unfinished typing is reverted before undoing a saved change. New edits discard the redo branch. Closing the app clears undo history; saved records stay saved. Restoring a database clears undo history after the restore succeeds. Graph/filter choices and exported files are not record changes.
 
-Dates accept `YYYY-MM-DD`, optionally followed by `HH:MM` or `HH:MM:SS`; ISO `T` is accepted. Entered times normalize to seconds. Values are local wall-clock times without timezone offsets or fractional seconds. Date-only and explicit midnight are the same instant, although their stored text preserves whether time was entered.
+Dates use year-first order and optional 24-hour time in the same entry. Leading zeros are optional. Missing month/day default to 1; missing hour/minute/second default to 0. These rules apply to flows, account starting values and date filters.
+
+| Entered | Interpreted point in time |
+| --- | --- |
+| `2026` | `2026-01-01 00:00:00` |
+| `2026-10` | `2026-10-01 00:00:00` |
+| `2026-10-9` | `2026-10-09 00:00:00` |
+| `2026-10-9 7` | `2026-10-09 07:00:00` |
+| `2026-10-9 7:5` | `2026-10-09 07:05:00` |
+| `2026-10-9 7:5:6` | `2026-10-09 07:05:06` |
+
+A space or ISO `T` separates date and time. Values are local wall-clock times without timezone offsets or fractional seconds. Date-only flow text stays date-only; entered time normalizes to seconds. Both date-only and explicit midnight mean the same instant. No separate time field, button or flag is used.
 
 ## Accounts and graphs
 
-Every endpoint is an account, including merchants. Accounts has Name, Starting Balance and Starting Date, with optional time. No ownership or archive flags. Names stay fixed during editing; a different name creates a different account. Leave an unknown starting balance blank; enter zero for a known zero. Negative balances represent debt.
+Every endpoint is an account, including merchants. Accounts has Name, Starting Balance and Starting Date/Time. No ownership or archive flags. Names stay fixed during editing; a different name creates a different account. Leave an unknown starting balance blank; enter zero for a known zero. Negative balances represent debt.
 
-Accounts uses the same editing gestures as the Flow Ledger: click a row to load it, then double-click **Starting Balance** or **Starting Date** to edit directly. **F2** opens Starting Balance; **Tab** moves between those fields. Enter, Tab or leaving the field saves an existing account and updates calculated balances. **New Account** clears the form; **Add Account** inserts a new one. Starting Date accepts a full timestamp, replacing the optional time; a date-only edit preserves the time already entered. Account names remain fixed identities.
+Accounts, From/To suggestions and graph choices show only names referenced by a saved flow's From or To. Any status counts, including Void; ledger filters do not change these lists. Correcting the last reference makes an unused name disappear. Its stored starting balance remains available for reuse and undo. Add Account can prepare a starting balance, but the account appears in these lists only after a flow uses it.
+
+Accounts uses the same editing gestures as the Flow Ledger: click a row to load it, then double-click **Starting Balance** or **Starting Date** to edit directly. **F2** opens Starting Balance; **Tab** moves between those fields. Enter, Tab or leaving the field saves an existing account and updates calculated balances. **New Account** clears the form; **Add Account** inserts a new one. Starting Date/Time follows the same entry rules as flows, including midnight when time is omitted. Account names remain fixed identities.
 
 Balances are calculated from the account's one starting balance and eligible flows:
 
@@ -173,6 +190,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
 | `docs/ledger_interaction.txt` | Mouse/keyboard checks for automatic flow edits, Add, Repeat and undo/redo. |
 | `docs/account_interaction.txt` | Mouse/keyboard checks for automatic account edits, timestamps and undo/redo. |
+| `docs/account_visibility_interaction.txt` | Mouse/keyboard checks for referenced accounts, blank-space clearing, silent validation and the single Date/Time entry. |
 
 ```bash
 python3 -m unittest discover -s tests -v

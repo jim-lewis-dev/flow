@@ -1,0 +1,16 @@
+Flow 0.5.11 - 9 October 2026
+Native X11 mouse/keyboard interaction check
+PASS: 12 workflows; no callback exceptions.
+
+PASS Unused starting balances stay off Accounts, suggestions and graph choices
+PASS Correcting one From endpoint retains an account still referenced by To
+PASS Correcting the last reference hides the old account everywhere; undo and redo restore the right lists
+PASS Clicking blank ledger space saves a valid edit once and resets selection and every entry field
+PASS Blank-space clicks discard repeated/new drafts and close an open dropdown without reopening it
+PASS Invalid cell input shows a silent error; clicking blank space discards it without changing the saved flow
+PASS Reusing a hidden account retains its starting balance; undo of its last flow also clears its selected account editor
+PASS One Date/Time field accepts a year, year-month and 24-hour time through seconds without leading zeros
+PASS Inline date edits and Repeat preserve seconds; omitting time resets it to midnight and undo/redo restores the exact value
+PASS Invalid dates stay unsaved with a silent error; account cell and top Date/Time field use the same defaults and undo
+PASS Flow amounts accept .05 and .5; starting balances accept -.50 without requiring a leading zero
+PASS Ctrl+S leaves blank, partial, invalid and repeated new drafts unadded; ledger records are already saved in the database

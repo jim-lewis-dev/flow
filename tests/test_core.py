@@ -7,17 +7,49 @@ import tempfile
 import unittest
 import uuid
 
-from flowledger.core import Repository, balance_at, format_money, normalize_date, parse_money, timeline, ledger_balance_at, ledger_timeline
+from flowledger.core import Repository, balance_at, format_money, normalize_date, normalize_flow_date, parse_money, timeline, ledger_balance_at, ledger_timeline
 from flowledger.exchange import commit_import, export_flows, preview_import, read_import
 
 
 class ValidationTests(unittest.TestCase):
+    def test_partial_dates_and_24_hour_times_fill_only_missing_components(self):
+        cases = {
+            "2026": "2026-01-01 00:00:00",
+            "2026-3": "2026-03-01 00:00:00",
+            "2026-10-9": "2026-10-09 00:00:00",
+            "2026-10-9 7": "2026-10-09 07:00:00",
+            "2026-10-9 7:5": "2026-10-09 07:05:00",
+            "2026-10-9 7:5:6": "2026-10-09 07:05:06",
+            "2026-10-9T23:59:59": "2026-10-09 23:59:59",
+            "2028-2-29 0": "2028-02-29 00:00:00",
+            " 2026-1-1 0:0:0 ": "2026-01-01 00:00:00",
+        }
+        for entered, expected in cases.items():
+            with self.subTest(entered=entered):
+                self.assertEqual(normalize_date(entered), expected)
+                stored = expected if " " in entered.strip() or "T" in entered else expected[:10]
+                self.assertEqual(normalize_flow_date(entered), stored)
+
+    def test_partial_date_defaults_do_not_accept_invalid_calendar_or_time_values(self):
+        for value in ("", "26", "0000", "2026-0", "2026-13", "2026-1-0", "2026-2-29",
+                      "2026-10-9 24", "2026-10-9 7:60", "2026-10-9 7:5:60",
+                      "2026-10-9 -1", "2026-10-9 7 PM", "2026-10-9 7:",
+                      "2026-10-9 7:5:", "2026-10 7", "2026-10-9 7:5:6Z",
+                      "2026-10-9 7:5:6.1", "2026-10-9 7:5:6-05:00", None, 2026):
+            with self.subTest(entered=value), self.assertRaises(ValueError):
+                normalize_date(value)
+
     def test_money_is_exact_and_rejects_fractional_cents(self):
         self.assertEqual(parse_money("$1,234.56"), 123456)
         self.assertEqual(parse_money("-12.34", True), -1234)
         self.assertEqual(parse_money("12.340"), 1234)
+        for text, cents in ((".50", 50), (".05", 5), (".5", 50), ("$.01", 1), ("+.50", 50), (".00", 0)):
+            with self.subTest(text=text):
+                self.assertEqual(parse_money(text), cents)
+        self.assertEqual(parse_money("-.50", True), -50)
+        self.assertEqual(parse_money("-$.05", True), -5)
         self.assertEqual(format_money(-123456), "-1,234.56")
-        for value in ("0.001", "NaN", "inf", "1e3", "1,2", "-1", 1.25, True, "92233720368547758.08"):
+        for value in ("0.001", ".001", ".", "-.", "-.50", "NaN", "inf", "1e3", "1,2", "-1", 1.25, True, "92233720368547758.08"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_money(value)
 

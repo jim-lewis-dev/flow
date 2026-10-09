@@ -17,6 +17,10 @@ def seed_account_data(repo):
         repo.save_account(name, cents, date)
     for index in range(45):
         repo.save_account(f"Z reserve {index:02d}", index * 100, "2026-10-01")
+    for account in repo.list_accounts():
+        if account["name"] not in ("Checking", "AmEx", "Savings"):
+            repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+                                to_account=account["name"], amount="1", status="Void"))
     repo.save_flow(dict(date="2026-10-02 12:00:00", from_account="Checking",
                         to_account="AmEx", amount="12.34", status="Complete",
                         name="Card payment"))
@@ -89,7 +93,6 @@ def fresh_form(check_focus=True):
     assert app._account_snapshot() == app._clean_account
     assert app.account_vars["name"].get() == ""
     assert app.account_vars["opening"].get() == ""
-    assert app.account_vars["time"].get() == ""
     assert str(app.account_name_entry.cget("state")) == "normal"
     if check_focus:
         assert app.focus_get() is app.account_name_entry
@@ -200,19 +203,18 @@ try:
 
     replace_all(edit_cell("Checking", "anchor"), "2026-10-01")
     key("Return")
-    assert app.account_vars["time"].get() == "09:10:11"
-    assert saved("Checking")["opening_at"] == "2026-10-01 09:10:11"
+    assert app.account_vars["date"].get() == "2026-10-01"
+    assert saved("Checking")["opening_at"] == "2026-10-01 00:00:00"
     replace_all(edit_cell("Checking", "anchor"), "2026-10-01 08:09:10")
     key("Return")
-    assert app.account_vars["date"].get() == "2026-10-01"
-    assert app.account_vars["time"].get() == "08:09:10"
+    assert app.account_vars["date"].get() == "2026-10-01 08:09:10"
     assert saved("Checking")["opening_at"] == "2026-10-01 08:09:10"
     replace_all(app.account_widgets["date"], "2026-10-02")
     key("Return")
-    assert saved("Checking")["opening_at"] == "2026-10-02 08:09:10"
+    assert saved("Checking")["opening_at"] == "2026-10-02 00:00:00"
     chord("Control_L", "z")
     assert saved("Checking")["opening_at"] == "2026-10-01 08:09:10"
-    ok("Starting Date preserves optional time and accepts seconds; each completed date edit can be undone")
+    ok("Starting Date/Time accepts seconds, defaults omitted time to midnight, and supports undo")
 
     replace_all(edit_cell("Checking", "balance"), "2000.25")
     double_cell("AmEx", "balance")
@@ -244,7 +246,7 @@ try:
     assert saved("Checking")["opening_at"] == "2026-10-01 08:09:10"
     assert app.account_feedback.get()
     key("Escape")
-    assert app.account_vars["date"].get() == "2026-10-01"
+    assert app.account_vars["date"].get() == "2026-10-01 08:09:10"
     no_prompt()
     ok("Invalid balances and dates stay unsaved with visible errors; Escape restores their saved values")
 

@@ -1,21 +1,12 @@
-Flow 0.5.10 — native interaction audit
-
-Result: PASS
-Input: X11 XTest mouse and keyboard events; no GUI callback-invocation substitutes.
-Environment: Linux, native Tk 8.6, isolated Xvfb display, 1920x1200 window and screen.
-Data: newly seeded temporary demo database.
-Main checks passed: 19
-Tk callback exceptions: 0
-Observed popup/dialog first maps: 24
-Observed custom popup first maps: 19
-Custom popups first mapped at their final position; none at +0+0.
-Scope limit: Xvfb had no desktop window manager; desktop app-deactivation behavior was not covered.
+Flow 0.5.11 - 9 October 2026
+Native X11 mouse/keyboard interaction check
+PASS: 19 workflows; no callback exceptions.
 
 PASS Mouse-select suggestion closes cleanly
 PASS Add Flow creates one full record and clears the form and suggestions
 PASS Undo and redo preserve all fields of the added flow and its identity
 PASS Expanded Notes saves on close; compact Notes saves on click-away and keeps multiline navigation visible
-PASS Date, midnight and seconds auto-save correctly through the Date and optional Time controls
+PASS Date, midnight and seconds auto-save through one Date/Time field
 PASS Selecting an existing row loads all fields without a dropdown
 PASS Top fields auto-save endpoints, amount, category, tags, notes, optional time and status on the existing ID
 PASS Selecting the next row replaces all fields without old edits carrying over
@@ -30,15 +21,3 @@ PASS Suggestion X removes only the choice; session undo and redo restore visibil
 PASS Filtering away an edited record saves the correct ID without a stale cell or record switch
 PASS Graph selection and exact inspection still work after form and account edits
 PASS No callback errors or custom dropdowns first appearing at the top-left corner
-
-New records are created with Add Flow. Existing records save each completed field.
-Native input verified second-precise dates, explicit midnight, and clearing optional time.
-Notes shared one buffer; closing the expansion and leaving the compact field saved changes.
-Session undo/redo covered record creation, field edits, Void, account changes, and suggestion visibility.
-The stored flow retained exactly the nine agreed fields plus flow_id.
-
-Ledger-specific checks: docs/ledger_interaction.txt (19 workflows).
-Account-specific checks: docs/account_interaction.txt (10 workflows).
-
-Reproduce: see tools/README.txt. The audit accepts --report PATH for JSON evidence.
-The audit does not open the normal user database.

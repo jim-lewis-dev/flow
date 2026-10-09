@@ -22,6 +22,8 @@ def seed_ledger_data(repo):
                             from_account="Checking", to_account="Corner Shop",
                             amount="5", name=f"Earlier flow {number:02d}",
                             category="Earlier", status="Complete"))
+    repo.save_flow(dict(date="2026-09-01", from_account="Checking",
+                        to_account="Savings", amount="1", status="Void"))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text()
@@ -84,7 +86,7 @@ def fresh_form():
     assert app.editing_id is None
     assert app.ledger.selection() == ()
     assert app._flow_snapshot() == app._clean_flow, (app._flow_snapshot(), app._clean_flow)
-    for field in ("from_account", "to_account", "amount", "name", "tags", "time"):
+    for field in ("from_account", "to_account", "amount", "name", "tags"):
         assert app.form_vars[field].get() == "", field
     assert app.notes_text.get("1.0", "end-1c") == ""
 
@@ -157,8 +159,7 @@ def check_copy(flow):
     }
     for field, value in expected.items():
         assert app.form_vars[field].get() == value, (field, app.form_vars[field].get(), value)
-    assert app.form_vars["date"].get() == flow["date"][:10]
-    assert app.form_vars["time"].get() == flow["date"][11:]
+    assert app.form_vars["date"].get() == flow["date"]
     assert app.notes_text.get("1.0", "end-1c") == flow["notes"]
     assert app.form_vars["tags"].get() == ", ".join(flow["tags"])
 
@@ -271,8 +272,7 @@ try:
 
     replace_all(edit_cell(first, "date"), "2026-10-04 14:15:16")
     key("Return")
-    assert app.form_vars["date"].get() == "2026-10-04"
-    assert app.form_vars["time"].get() == "14:15:16"
+    assert app.form_vars["date"].get() == "2026-10-04 14:15:16"
     assert saved(first)["date"] == "2026-10-04 14:15:16"
     editor_closed()
     ok("A full timestamp in the Date cell saves to the second without a separate Save button")

@@ -1,5 +1,6 @@
-Ledger editing: native X11 XTest interaction audit
-PASS: 19 workflows; 0 callback exceptions.
+Flow 0.5.11 - 9 October 2026
+Native X11 mouse/keyboard interaction check
+PASS: 19 workflows; no callback exceptions.
 
 PASS Moving from suggestions to the native Status list closes the old popup without focus errors
 PASS Enter saves an existing ledger amount once; Ctrl+Z and Ctrl+Y reverse and restore the field
