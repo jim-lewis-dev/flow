@@ -1,6 +1,5 @@
-"""Real Tk checks for account cells sharing the upper form's unsaved draft.
+"""Real Tk checks for account cells sharing the upper form and saving on completion.
 
-Mouse and keyboard gestures must not write to SQLite until Save is requested.
 Names and calculated balances remain read-only; callback failures are surfaced.
 """
 
@@ -90,7 +89,8 @@ class AccountInlineEditingTests(unittest.TestCase):
         if self.app.account_editing != name:
             self.click_cell(name)
         editor = self.app.account_cell_editor
-        self.assertTrue(editor.open(name, column))
+        if editor.flow_id != name or editor.field != column or editor.input is None:
+            self.assertTrue(editor.open(name, column))
         self.pump()
         self.assertEqual(editor.field, column)
         self.assertIsNotNone(editor.input)
@@ -102,6 +102,14 @@ class AccountInlineEditingTests(unittest.TestCase):
         entry.insert(0, text)
         self.pump()
         return entry
+
+    def finish_cell(self):
+        entry = self.app.account_cell_editor.input
+        self.assertIsNotNone(entry)
+        entry.focus_force()
+        self.pump()
+        entry.event_generate("<Control-Return>" if self.app.account_cell_editor.field == "notes" else "<Return>")
+        self.settle()
 
     def assert_closed(self):
         self.assertIsNone(self.app.account_cell_editor.widget)
@@ -129,7 +137,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
         self.assertEqual(self.repo.list_accounts(), originals)
 
-    def test_cells_and_upper_fields_share_one_draft_until_explicit_save(self):
+    def test_cells_and_upper_fields_share_values_and_completed_fields_save(self):
         original = self.repo.get_account("Checking")
         entry = self.replace_cell("Checking", "balance", "38.20")
         self.assertEqual(self.app.account_vars["opening"].get(), "38.20")
@@ -137,21 +145,21 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.app.account_vars["opening"].set("41.23")
         self.pump()
         self.assertEqual(entry.get(), "41.23")
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$41.23")
+        self.assertEqual(self.repo.get_account("Checking"), original)
+        self.finish_cell()
+        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 4123)
         date = self.replace_cell("Checking", "anchor", "2026-10-07")
         self.assertEqual(self.app.account_vars["date"].get(), "2026-10-07")
         self.app.account_vars["date"].set("2026-10-08")
         self.pump()
         self.assertEqual(date.get(), "2026-10-08")
         self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-08")
-        self.assertEqual(self.repo.get_account("Checking"), original)
-        self.app.account_save_button.invoke()
-        self.settle()
+        self.finish_cell()
         self.assertEqual(self.repo.get_account("Checking"),
-                         {**original, "opening_cents": 4123,
-                          "opening_at": "2026-10-08 13:45:12"})
+                         {**original, "opening_cents": 4123, "opening_at": "2026-10-08 13:45:12"})
         self.assertEqual(len(self.repo.list_accounts()), 2)
-        self.assert_new_form()
+        self.assertEqual(self.app.account_editing, "Checking")
+        self.assertEqual(self.app.accounts_tree.selection(), ("Checking",))
 
     def test_negative_zero_and_blank_balances_are_saved_without_extra_accounts(self):
         for raw, cents, preview in (("-$1,234.56", -123456, "$-1,234.56"),
@@ -162,11 +170,10 @@ class AccountInlineEditingTests(unittest.TestCase):
                 self.replace_cell("Checking", "balance", raw)
                 self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), preview)
                 self.assertEqual(self.repo.get_account("Checking"), before)
-                self.assertTrue(self.app.save_account())
-                self.settle()
+                self.finish_cell()
                 self.assertEqual(self.repo.get_account("Checking")["opening_cents"], cents)
                 self.assertEqual(len(self.repo.list_accounts()), 2)
-                self.assert_new_form()
+                self.assertEqual(self.app.account_editing, "Checking")
 
     def test_date_only_changes_preserve_seconds_and_full_timestamp_replaces_time(self):
         self.replace_cell("Checking", "anchor", "2026-10-09")
@@ -186,13 +193,12 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.app.account_vars["date"].set("2026-10-12 11:22:33")
         self.assertTrue(self.app.save_account())
         self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-12 11:22:33")
-        self.assert_new_form()
+        self.assertEqual(self.app.account_editing, "Checking")
 
     def test_pasting_the_existing_midnight_timestamp_does_not_create_an_unsaved_change(self):
         original = self.repo.get_account("AmEx")
         self.replace_cell("AmEx", "anchor", "2026-10-01 00:00:00")
-        # Resolve the draft while its cell is still open: normalization on
-        # close must not be needed to avoid a false Save changes prompt.
+        # Equivalent midnight text must remain a no-op when the cell closes.
         self.assertTrue(self.app.new_account())
         self.assert_new_form()
         self.replace_cell("AmEx", "anchor", "2026-10-01T00:00:00")
@@ -201,7 +207,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assert_new_form()
         self.assertEqual(self.repo.get_account("AmEx"), original)
 
-    def test_equivalent_time_is_clean_but_invalid_date_or_time_remains_a_dirty_draft(self):
+    def test_equivalent_time_is_clean_but_invalid_date_or_time_keeps_editing(self):
         self.repo.save_account("AmEx", -30000, "2026-10-01 08:09:00")
         self.app.refresh_all()
         self.click_cell("AmEx")
@@ -212,14 +218,15 @@ class AccountInlineEditingTests(unittest.TestCase):
         for field, invalid in (("date", "2026-02-30"), ("time", "08:99")):
             with self.subTest(field=field):
                 self.click_cell("AmEx")
+                self.app._begin_field("account", field)
                 self.app.account_vars[field].set(invalid)
-                with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-                    self.assertFalse(self.app.new_account())
-                self.assertEqual(prompt.call_count, 1)
+                self.assertFalse(self.app.new_account())
                 self.assertEqual(self.app.account_editing, "AmEx")
                 self.assertEqual(self.app.account_vars[field].get(), invalid)
                 self.assertEqual(self.repo.get_account("AmEx"), original)
-                self.app.account_cancel_button.invoke()
+                self.assertTrue(self.app.account_feedback.get())
+                self.app.undo()
+                self.assertTrue(self.app.new_account())
                 self.assert_new_form()
 
     def test_account_names_and_computed_balance_columns_are_read_only(self):
@@ -237,7 +244,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.repo.get_account("Checking"), original)
         self.assertIsNone(self.repo.get_account("Accidental new account"))
 
-    def test_keyboard_navigation_skips_read_only_columns_and_enter_does_not_save(self):
+    def test_keyboard_navigation_skips_read_only_columns_and_completes_edits(self):
         original = self.repo.get_account("Checking")
         self.click_cell("Checking")
         tree = self.app.accounts_tree
@@ -252,6 +259,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         entry.event_generate("<Tab>")
         self.pump()
         self.assertEqual(self.app.account_cell_editor.field, "anchor")
+        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 5500)
         self.app.account_cell_editor.input.event_generate("<Shift-Tab>")
         self.pump()
         self.assertEqual(self.app.account_cell_editor.field, "balance")
@@ -259,13 +267,13 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.pump()
         self.assert_closed()
         self.assertEqual(self.app.account_vars["opening"].get(), "55.00")
-        self.assertEqual(self.repo.get_account("Checking"), original)
+        self.assertEqual(self.repo.get_account("Checking"), {**original, "opening_cents": 5500})
         self.open_cell("Checking", "anchor").event_generate("<Tab>")
         self.pump()
         self.assert_closed()
         self.assertIs(self.app.focus_get(), tree)
 
-    def test_escape_keeps_the_draft_and_control_s_is_an_explicit_save(self):
+    def test_escape_reverts_unfinished_field_and_control_s_finishes_edit(self):
         original = self.repo.get_account("Checking")
         entry = self.replace_cell("Checking", "balance", "44.00")
         entry.focus_force()
@@ -273,63 +281,53 @@ class AccountInlineEditingTests(unittest.TestCase):
         entry.event_generate("<Escape>")
         self.pump()
         self.assert_closed()
-        self.assertEqual(self.app.account_vars["opening"].get(), "44.00")
+        self.assertEqual(self.app.account_vars["opening"].get(), "1000.00")
         self.assertEqual(self.repo.get_account("Checking"), original)
-        entry = self.open_cell("Checking", "balance")
+        entry = self.replace_cell("Checking", "balance", "44.00")
         entry.focus_force()
         self.pump()
         entry.event_generate("<Control-s>")
         self.settle()
         self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 4400)
-        self.assert_new_form()
+        self.assertEqual(self.app.account_editing, "Checking")
+        self.assertEqual(len(self.repo.list_accounts()), 2)
 
-    def test_cancel_restores_saved_values_and_clears_the_editor_and_row_focus(self):
-        original = self.repo.get_account("Checking")
+    def test_new_finishes_existing_edit_and_clears_editor_and_row_focus(self):
         entry = self.replace_cell("Checking", "balance", "200.00")
         self.app.account_vars["date"].set("2026-10-07")
-        self.app.account_cancel_button.invoke()
+        self.app.new_account()
         self.settle()
         self.assertFalse(entry.winfo_exists())
-        self.assertEqual(self.repo.get_account("Checking"), original)
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$1,000.00")
-        self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-01")
+        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 20000)
+        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-07 13:45:12")
+        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$200.00")
+        self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-07")
         self.assert_new_form()
         self.click_cell("AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
         self.assertEqual(self.app.account_vars["time"].get(), "")
 
-    def test_dirty_row_change_cancel_no_and_yes_always_target_the_right_account(self):
+    def test_dirty_row_change_saves_correct_account_without_confirmation(self):
         checking = self.repo.get_account("Checking")
         amex = self.repo.get_account("AmEx")
         self.replace_cell("Checking", "balance", "123.45")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-            self.click_cell("AmEx")
-        self.assertEqual(prompt.call_count, 1)
-        self.assertEqual(prompt.call_args.args[1], "Save changes to this account?")
-        self.assertEqual(self.app.account_editing, "Checking")
-        self.assertEqual(self.app.accounts_tree.selection(), ("Checking",))
-        self.assertEqual(self.app.account_vars["opening"].get(), "123.45")
-        self.assertEqual(self.repo.get_account("Checking"), checking)
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False):
-            self.click_cell("AmEx")
+        self.click_cell("AmEx")
         self.assertEqual(self.app.account_editing, "AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "-300.00")
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$1,000.00")
+        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$123.45")
+        self.assertEqual(self.repo.get_account("Checking"), {**checking, "opening_cents": 12345})
         self.replace_cell("AmEx", "balance", "-222.22")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True):
-            self.click_cell("Checking")
+        self.click_cell("Checking")
         self.settle()
         self.assertEqual(self.repo.get_account("AmEx"), {**amex, "opening_cents": -22222})
-        self.assertEqual(self.repo.get_account("Checking"), checking)
         self.assertEqual(self.app.account_editing, "Checking")
-        self.assertEqual(self.app.account_vars["opening"].get(), "1000.00")
+        self.assertEqual(self.app.account_vars["opening"].get(), "123.45")
         self.assert_closed()
 
-    def test_row_switch_with_yes_and_invalid_draft_retains_the_original_account(self):
+    def test_row_switch_with_invalid_field_retains_original_account_without_prompt(self):
         originals = self.repo.list_accounts()
         self.replace_cell("Checking", "balance", "12.345")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True):
-            self.click_cell("AmEx")
+        self.click_cell("AmEx")
         self.pump()
         self.assertEqual(self.app.account_editing, "Checking")
         self.assertEqual(self.app.accounts_tree.selection(), ("Checking",))
@@ -358,13 +356,14 @@ class AccountInlineEditingTests(unittest.TestCase):
                 self.replace_cell("Checking", column, correct)
                 self.assertTrue(self.app.save_account())
                 self.assertEqual(self.repo.get_account("Checking")[stored_field], expected)
-                self.assert_new_form()
+                self.assertEqual(self.app.account_editing, "Checking")
 
-    def test_refresh_closes_the_overlay_but_keeps_draft_and_table_preview(self):
+    def test_refresh_completes_overlay_and_keeps_values_in_table(self):
         original = self.repo.get_account("Checking")
-        for refresh in (self.app.refresh_accounts, self.app.refresh_all):
+        for index, refresh in enumerate((self.app.refresh_accounts, self.app.refresh_all)):
             with self.subTest(refresh=refresh):
-                entry = self.replace_cell("Checking", "balance", "123.45")
+                value = f"123.{45 + index}"
+                entry = self.replace_cell("Checking", "balance", value)
                 self.app.account_vars["date"].set("2026-10-07")
                 before = self.app._account_snapshot()
                 refresh()
@@ -374,32 +373,25 @@ class AccountInlineEditingTests(unittest.TestCase):
                 self.assertEqual(self.app._account_snapshot(), before)
                 self.assertEqual(self.app.account_editing, "Checking")
                 self.assertEqual(self.app.accounts_tree.selection(), ("Checking",))
-                self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$123.45")
+                self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$" + value)
                 self.assertEqual(self.app.accounts_tree.set("Checking", "anchor"), "2026-10-07")
-                self.assertEqual(self.repo.get_account("Checking"), original)
-        self.app.account_cancel_button.invoke()
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$1,000.00")
+                self.assertEqual(self.repo.get_account("Checking"),
+                                 {**original, "opening_cents": 12345 + index,
+                                  "opening_at": "2026-10-07 13:45:12"})
 
-    def test_view_change_cancel_keeps_draft_then_no_discards_without_reopening_editor(self):
+    def test_view_change_finishes_existing_account_without_reopening_editor(self):
         original = self.repo.get_account("Checking")
         self.replace_cell("Checking", "balance", "250.00")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None):
-            self.assertFalse(self.app.show_view("flows"))
-        self.assertEqual(self.app.current_view, "accounts")
-        self.assertEqual(self.app.account_editing, "Checking")
-        self.assertEqual(self.app.account_vars["opening"].get(), "250.00")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False) as prompt:
-            self.assertTrue(self.app.show_view("flows"))
-        self.assertEqual(prompt.call_count, 1)
+        self.assertTrue(self.app.show_view("flows"))
         self.settle()
         self.assert_new_form()
-        self.assertEqual(self.repo.get_account("Checking"), original)
+        self.assertEqual(self.repo.get_account("Checking"), {**original, "opening_cents": 25000})
         self.assertTrue(self.app.show_view("accounts"))
         self.settle()
         self.assert_new_form()
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$1,000.00")
+        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$250.00")
 
-    def test_resize_repositions_the_editor_and_scrolling_dismisses_it_without_saving(self):
+    def test_resize_repositions_editor_and_scrolling_finishes_it(self):
         original = self.repo.get_account("Checking")
         for index in range(45):
             self.repo.save_account(f"Extra {index:02}", 0, "2026-10-01")
@@ -419,14 +411,14 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertFalse(widget.winfo_exists())
         self.assert_closed()
         self.assertEqual(self.app.account_vars["opening"].get(), "33.00")
-        self.assertEqual(self.repo.get_account("Checking"), original)
+        self.assertEqual(self.repo.get_account("Checking"), {**original, "opening_cents": 3300})
 
     def test_save_then_edit_another_account_does_not_carry_over_old_draft_or_time(self):
         self.replace_cell("Checking", "anchor", "2026-10-10 08:09:10")
         self.replace_cell("Checking", "balance", "987.65")
-        self.assertTrue(self.app.save_account())
-        self.settle()
-        self.assert_new_form()
+        self.finish_cell()
+        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 98765)
+        self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-10 08:09:10")
         self.click_cell("AmEx", "balance", twice=True)
         self.settle()
         self.assertEqual(self.app.account_editing, "AmEx")
@@ -435,7 +427,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.account_vars["date"].get(), "2026-10-01")
         self.assertEqual(self.app.account_vars["time"].get(), "")
         self.assertEqual(self.app.account_cell_editor.field, "balance")
-        self.app.account_cancel_button.invoke()
+        self.app.new_account()
         self.settle()
         self.assert_new_form()
 

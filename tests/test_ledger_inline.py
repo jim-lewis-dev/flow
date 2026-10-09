@@ -1,7 +1,6 @@
-"""Ledger cells and the top form edit one unsaved flow through real Tk widgets.
+"""Real Tk checks for shared fields and automatic completed-field persistence.
 
-Run with DISPLAY set. Repository assertions ensure entry gestures never bypass
-Save. Callback errors and unexpected dialogs are treated as test failures.
+Callback failures and unexpected confirmation dialogs are test failures.
 """
 
 from datetime import datetime
@@ -103,7 +102,9 @@ class LedgerInlineEditingTests(unittest.TestCase):
     def open_cell(self, flow, column):
         if self.app.editing_id != flow["flow_id"]:
             self.click_cell(flow)
-        self.assertTrue(self.app.ledger_editor.open(flow["flow_id"], column))
+        editor = self.app.ledger_editor
+        if editor.flow_id != flow["flow_id"] or editor.field != column or editor.input is None:
+            self.assertTrue(editor.open(flow["flow_id"], column))
         self.pump()
         self.assertEqual(self.app.ledger_editor.flow_id, flow["flow_id"])
         self.assertEqual(self.app.ledger_editor.field, column)
@@ -123,6 +124,14 @@ class LedgerInlineEditingTests(unittest.TestCase):
             entry.insert(0, text)
         self.pump()
         return entry
+
+    def finish_cell(self):
+        entry = self.app.ledger_editor.input
+        self.assertIsNotNone(entry)
+        entry.focus_force()
+        self.pump()
+        entry.event_generate("<Control-Return>" if self.app.ledger_editor.field == "notes" else "<Return>")
+        self.settle()
 
     def assert_closed(self):
         self.assertIsNone(self.app.ledger_editor.widget)
@@ -156,41 +165,42 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
         self.assertEqual(self.repo.get_flow(second["flow_id"]), second)
 
-    def test_every_field_uses_the_top_draft_and_only_save_changes_the_record(self):
+    def test_every_field_shares_top_form_and_completion_saves_the_existing_record(self):
         flow = self.seed(date="2026-10-02 13:45:12")
-        changes = [("date", "2026-10-07", "date"),
-                   ("from_account", "AmEx", "from_account"),
-                   ("to_account", "Marina", "to_account"),
-                   ("amount_cents", "38.20", "amount"),
-                   ("status", "Pending", "status"),
-                   ("name", "Boat parts", "name"),
-                   ("category", "Boat", "category"),
-                   ("tags", 'Fall, "Trailer, repair"', "tags")]
-        for column, value, top_field in changes:
+        changes = [("date", "2026-10-07", "date", "date", "2026-10-07 13:45:12"),
+                   ("from_account", "AmEx", "from_account", "from_account", "AmEx"),
+                   ("to_account", "Marina", "to_account", "to_account", "Marina"),
+                   ("amount_cents", "38.20", "amount", "amount_cents", 3820),
+                   ("status", "Pending", "status", "status", "Pending"),
+                   ("name", "Boat parts", "name", "name", "Boat parts corrected"),
+                   ("category", "Boat", "category", "category", "Boat"),
+                   ("tags", 'Fall, "Trailer, repair"', "tags", "tags", ["Fall", "Trailer, repair"])]
+        for column, value, top_field, stored_field, expected in changes:
             with self.subTest(field=column):
                 entry = self.replace_cell(flow, column, value)
                 self.assertEqual(self.app.form_vars[top_field].get(), value)
                 other_value = value + " corrected" if top_field == "name" else value
                 self.app.form_vars[top_field].set(other_value)
-                self.assertEqual(entry.get(), other_value)
-                self.app.ledger_editor.close()
-                self.pump()
-                self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+                if column != "status":
+                    self.assertEqual(entry.get(), other_value)
+                    self.finish_cell()
+                else:
+                    self.assertFalse(entry.winfo_exists())
+                self.assertEqual(self.repo.get_flow(flow["flow_id"])[stored_field], expected)
+                self.assertEqual(self.app.editing_id, flow["flow_id"])
+                self.assertEqual(len(self.repo.list_flows()), 1)
         notes = "  Receipt note\n\nSecond line  \n"
         self.replace_cell(flow, "notes", notes)
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), notes)
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertTrue(self.app.save_flow())
-        self.settle()
+        self.finish_cell()
         saved = self.repo.get_flow(flow["flow_id"])
         self.assertEqual(saved, {**flow, "date": "2026-10-07 13:45:12",
                                 "from_account": "AmEx", "to_account": "Marina",
                                 "amount_cents": 3820, "status": "Pending",
                                 "name": "Boat parts corrected", "category": "Boat",
                                 "tags": ["Fall", "Trailer, repair"], "notes": notes})
-        self.assertEqual(len(self.repo.list_flows()), 1)
-        self.assert_new_form()
-        self.assertIs(self.app.focus_get(), self.app.form_widgets["date"])
+        self.assertEqual(self.app.ledger.selection(), (flow["flow_id"],))
+        self.assert_closed()
 
     def test_notes_cell_compact_and_expanded_views_share_content_immediately(self):
         flow = self.seed(notes="Initial\nSecond")
@@ -201,7 +211,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         expanded = self.app.expanded_notes_text
         self.assertEqual(expanded.get("1.0", "end-1c"), "Initial\nSecond\nCell addition")
         expanded.insert("end-1c", "\nExpanded addition")
-        # No event pump: copied buffers would lose edits on an immediate Save.
+        # No event pump: copied buffers would lose edits on immediate completion.
         self.assertEqual(cell.get("1.0", "end-1c"),
                          "Initial\nSecond\nCell addition\nExpanded addition")
         self.app.notes_text.insert("end-1c", "\nTop addition")
@@ -209,12 +219,12 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(cell.get("1.0", "end-1c"), expected)
         self.assertEqual(expanded.get("1.0", "end-1c"), expected)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertTrue(self.app.save_flow())
+        self.app._close_notes_editor()
         self.settle()
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], expected)
         self.assertFalse(cell.winfo_exists())
         self.assertFalse(expanded.winfo_exists())
-        self.assert_new_form()
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
 
     def test_date_only_edits_preserve_seconds_and_full_timestamp_replaces_time(self):
         flow = self.seed(date="2026-10-02 13:45:12")
@@ -231,56 +241,48 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertTrue(self.app.save_flow())
         self.assertEqual(self.repo.get_flow(no_time["flow_id"])["date"], "2026-10-11")
 
-    def test_cancel_restores_original_table_values_and_destroys_inline_edit(self):
+    def test_new_finishes_cell_then_clears_editor_and_row_focus(self):
         flow = self.seed()
-        entry = self.replace_cell(flow, "name", "Discard this")
-        self.app.cancel_button.invoke()
+        entry = self.replace_cell(flow, "name", "Keep this")
+        self.app.new_flow_button.invoke()
         self.settle()
         self.assertFalse(entry.winfo_exists())
         self.assert_new_form()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertEqual(self.app.ledger.set(flow["flow_id"], "name"), "Purchase")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "Keep this")
+        self.assertEqual(self.app.ledger.set(flow["flow_id"], "name"), "Keep this")
         self.click_cell(flow)
-        self.assertEqual(self.app.form_vars["name"].get(), "Purchase")
+        self.assertEqual(self.app.form_vars["name"].get(), "Keep this")
         self.assert_closed()
 
-    def test_dirty_row_change_cancel_no_and_yes_always_target_the_right_flow(self):
+    def test_dirty_row_change_saves_to_correct_flow_without_prompt(self):
         first = self.seed(name="First")
         second = self.seed(name="Second")
-        self.replace_cell(first, "name", "First draft")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-            self.click_cell(second)
-        self.assertEqual(prompt.call_count, 1)
-        self.assertEqual(prompt.call_args.args[1], "Save changes to this flow?")
-        self.assertEqual(self.app.editing_id, first["flow_id"])
-        self.assertEqual(self.app.ledger.selection(), (first["flow_id"],))
-        self.assertEqual(self.app.form_vars["name"].get(), "First draft")
-        self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False):
-            self.click_cell(second)
+        self.replace_cell(first, "name", "First saved")
+        self.click_cell(second)
         self.assertEqual(self.app.editing_id, second["flow_id"])
         self.assertEqual(self.app.form_vars["name"].get(), "Second")
-        self.assertEqual(self.app.ledger.set(first["flow_id"], "name"), "First")
+        self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], "First saved")
+        self.assertEqual(self.app.ledger.set(first["flow_id"], "name"), "First saved")
         self.assert_closed()
         self.replace_cell(second, "name", "Second saved")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True):
-            self.click_cell(first)
+        self.click_cell(first)
         self.settle()
         self.assertEqual(self.repo.get_flow(second["flow_id"])["name"], "Second saved")
-        self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
         self.assertEqual(self.app.editing_id, first["flow_id"])
-        self.assertEqual(self.app.form_vars["name"].get(), "First")
+        self.assertEqual(self.app.form_vars["name"].get(), "First saved")
+        self.assertEqual(len(self.repo.list_flows()), 2)
         self.assert_closed()
 
-    def test_refresh_sort_and_filter_close_cell_without_losing_or_saving_draft(self):
+    def test_refresh_sort_and_filter_finish_cell_without_losing_values(self):
         first = self.seed(name="First")
         self.seed(name="Second")
-        for operation in (self.app.refresh_all,
-                          lambda: self.app.sort_ledger("name"),
-                          lambda: self.app.search_var.set("matches no flow")):
+        for index, operation in enumerate((self.app.refresh_all,
+                             lambda: self.app.sort_ledger("name"),
+                             lambda: self.app.search_var.set("matches no flow"))):
             with self.subTest(operation=operation):
                 self.app.search_var.set("")
-                entry = self.replace_cell(first, "name", "Unsaved draft")
+                value = f"Saved edit {index}"
+                entry = self.replace_cell(first, "name", value)
                 before = self.app._flow_snapshot()
                 operation()
                 self.pump()
@@ -288,32 +290,23 @@ class LedgerInlineEditingTests(unittest.TestCase):
                 self.assert_closed()
                 self.assertEqual(self.app._flow_snapshot(), before)
                 self.assertEqual(self.app.editing_id, first["flow_id"])
-                self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
+                self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], value)
         self.app.search_var.set("")
         self.pump()
-        self.assertEqual(self.app.ledger.set(first["flow_id"], "name"), "Unsaved draft")
-        self.assertTrue(self.app.save_flow())
-        self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], "Unsaved draft")
+        self.assertEqual(self.app.ledger.set(first["flow_id"], "name"), value)
 
-    def test_repeat_copy_cancel_preserves_draft_then_no_allows_original_f2_edit(self):
-        original = self.seed()
+    def test_repeat_can_be_discarded_by_selecting_original_then_f2_edits_original(self):
+        original = self.seed(date="2026-10-02 12:34:56", status="Planned")
         self.click_cell(original)
+        snapshot = self.app._flow_snapshot()
         self.app.repeat_selected()
         self.pump()
         self.assertIsNone(self.app.editing_id)
         self.assertEqual(self.app.ledger.selection(), ())
         self.assertEqual(self.app.ledger.focus(), "")
-        draft = self.app._flow_snapshot()
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-            self.click_cell(original)
-        self.assertEqual(prompt.call_count, 1)
-        self.assertEqual(self.app.ledger.selection(), ())
-        self.assertIsNone(self.app.editing_id)
-        self.assertEqual(self.app._flow_snapshot(), draft)
-        self.assertEqual(len(self.repo.list_flows()), 1)
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False) as prompt:
-            self.click_cell(original)
-        self.assertEqual(prompt.call_count, 1)
+        self.assertEqual(self.app._flow_snapshot(), snapshot)
+        self.app.form_vars["name"].set("Discarded copy")
+        self.click_cell(original)
         self.app.ledger.event_generate("<F2>")
         self.pump()
         self.assertEqual(self.app.editing_id, original["flow_id"])
@@ -321,40 +314,40 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.ledger_editor.field, "date")
         self.assertEqual(self.repo.list_flows(), [original])
 
-    def test_repeat_copy_yes_saves_copy_then_double_click_edits_original(self):
-        original = self.seed()
+    def test_repeat_add_creates_copy_then_double_click_edits_original(self):
+        original = self.seed(date="2026-10-02 12:34:56", status="Pending")
         self.click_cell(original)
         self.app.repeat_selected()
         self.app.form_vars["name"].set("Repeated purchase")
-        self.pump()
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True) as prompt:
-            # Queue the gesture together: an instant mocked Yes otherwise
-            # sorts the saved copy under the second click before it is sent.
-            self.click_cell(original, "name", twice=True, pump_between=False)
-        self.assertEqual(prompt.call_count, 1)
+        self.app.save_button.invoke()
+        self.settle()
+        self.assert_new_form()
+        self.click_cell(original, "name", twice=True, pump_between=False)
         self.assertEqual(self.app.editing_id, original["flow_id"])
         self.assertEqual(self.app.ledger_editor.flow_id, original["flow_id"])
         self.assertEqual(self.app.ledger_editor.field, "name")
         self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
         copies = [flow for flow in self.repo.list_flows() if flow["flow_id"] != original["flow_id"]]
         self.assertEqual(len(copies), 1)
-        self.assertEqual(copies[0]["name"], "Repeated purchase")
+        self.assertEqual(copies[0], {**original, "flow_id": copies[0]["flow_id"], "name": "Repeated purchase"})
 
-    def test_repeat_copy_failed_save_retains_invalid_draft_and_no_selection(self):
+    def test_repeat_invalid_add_retains_draft_until_selecting_original(self):
         original = self.seed()
         self.click_cell(original)
         self.app.repeat_selected()
         self.app.form_vars["amount"].set("invalid")
         self.pump()
         draft = self.app._flow_snapshot()
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True) as prompt:
-            self.click_cell(original)
-        self.assertEqual(prompt.call_count, 1)
+        self.assertFalse(self.app.save_flow())
         self.assertIsNone(self.app.editing_id)
         self.assertEqual(self.app.ledger.selection(), ())
         self.assertEqual(self.app._flow_snapshot(), draft)
         self.assertEqual(self.repo.list_flows(), [original])
         self.assert_closed()
+        self.click_cell(original)
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
+        self.assertEqual(self.repo.list_flows(), [original])
 
     def test_invalid_cell_values_remain_correctable_without_partial_database_changes(self):
         flow = self.seed()
@@ -374,7 +367,8 @@ class LedgerInlineEditingTests(unittest.TestCase):
                 self.replace_cell(flow, column, correct)
                 self.assertTrue(self.app.save_flow())
                 self.assertEqual(self.repo.get_flow(flow["flow_id"])[stored_field], stored)
-                self.assert_new_form()
+                self.assertEqual(self.app.editing_id, flow["flow_id"])
+                self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_status_popdown_focus_and_keyboard_selection_keep_the_cell_usable(self):
         flow = self.seed(status="Complete")
@@ -393,15 +387,14 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.app.tk.call("event", "generate", focused, "<Down>")
         self.app.tk.call("event", "generate", focused, "<Return>")
         self.pump()
-        self.assertTrue(combo.winfo_exists())
+        self.assertFalse(combo.winfo_exists())
+        self.assert_closed()
         self.assertEqual(self.app.form_vars["status"].get(), "Pending")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertTrue(self.app.save_flow())
-        self.settle()
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["status"], "Pending")
-        self.assert_new_form()
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertEqual(len(self.repo.list_flows()), 1)
 
-    def test_suggestions_return_and_tab_change_the_draft_without_saving(self):
+    def test_suggestions_return_and_tab_save_existing_fields(self):
         flow = self.seed()
         entry = self.replace_cell(flow, "from_account", "am")
         combo = self.app.ledger_editor.widget
@@ -413,24 +406,19 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
         self.assertEqual(self.app.form_vars["from_account"].get(), "AmEx")
         self.assertEqual(self.app.editing_id, flow["flow_id"])
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["from_account"], "AmEx")
         entry = self.replace_cell(flow, "to_account", "New endpoint")
         entry.event_generate("<KeyRelease>", keysym="t")
         entry.event_generate("<Return>")
         self.pump()
-        self.assertEqual(self.app.form_vars["to_account"].get(), "New endpoint")
-        self.assertIsNone(self.repo.get_account("New endpoint"))
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        entry = self.open_cell(flow, "name")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["to_account"], "New endpoint")
+        self.assertIsNotNone(self.repo.get_account("New endpoint"))
+        entry = self.replace_cell(flow, "name", "New name")
         entry.event_generate("<Tab>")
         self.pump()
         self.assertEqual(self.app.ledger_editor.field, "category")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertTrue(self.app.save_flow())
-        self.settle()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["to_account"], "New endpoint")
-        self.assertIsNotNone(self.repo.get_account("New endpoint"))
-        self.assert_new_form()
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "New name")
+        self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_suggestion_x_does_not_change_record_or_accept_current_cell(self):
         flow = self.seed(category="Boat")
@@ -454,21 +442,19 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
         self.assertNotIn("Boat", combo.values)
         self.assertNotIn("Boat", self.app.form_widgets["category"].values)
-        self.app.cancel_button.invoke()
-        self.settle()
-        self.assert_new_form()
+        self.app.undo()
+        self.pump()
+        self.assertEqual(self.app.form_vars["category"].get(), "Boat")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
 
-    def test_view_change_discards_confirmed_draft_and_no_old_editor_reopens(self):
+    def test_view_change_finishes_existing_cell_without_reopening_editor(self):
         flow = self.seed()
-        entry = self.replace_cell(flow, "to_account", "Unsaved endpoint")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False) as prompt:
-            self.assertTrue(self.app.show_view("accounts"))
-        self.assertEqual(prompt.call_count, 1)
+        entry = self.replace_cell(flow, "to_account", "Saved endpoint")
+        self.assertTrue(self.app.show_view("accounts"))
         self.settle()
         self.assertFalse(entry.winfo_exists())
         self.assert_new_form()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["to_account"], "Saved endpoint")
         self.app.show_view("flows")
         self.settle()
         self.assert_new_form()
@@ -525,9 +511,9 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertFalse(widget.winfo_exists())
         self.assert_closed()
         self.assertEqual(self.app.form_vars["amount"].get(), "33.00")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 3300)
 
-    def test_f2_and_note_newline_are_draft_gestures_without_an_implicit_save(self):
+    def test_f2_and_note_newline_keep_editing_until_control_enter(self):
         flow = self.seed(notes="First line")
         self.click_cell(flow)
         self.app.ledger.focus_force()
@@ -546,13 +532,14 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
         self.assertEqual(self.app.ledger_editor.field, "notes")
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "First line\n")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
         cell.event_generate("<Control-Return>")
         self.pump()
         self.assert_closed()
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "First line\n")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], "First line\n")
 
-    def test_escape_only_closes_the_editor_and_ctrl_s_is_the_explicit_save(self):
+    def test_escape_reverts_unfinished_cell_and_control_s_finishes_without_duplicate(self):
         flow = self.seed()
         entry = self.replace_cell(flow, "amount_cents", "44.00")
         entry.focus_force()
@@ -560,15 +547,16 @@ class LedgerInlineEditingTests(unittest.TestCase):
         entry.event_generate("<Escape>")
         self.pump()
         self.assert_closed()
-        self.assertEqual(self.app.form_vars["amount"].get(), "44.00")
+        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        entry = self.open_cell(flow, "amount_cents")
+        entry = self.replace_cell(flow, "amount_cents", "44.00")
         entry.focus_force()
         self.pump()
         entry.event_generate("<Control-s>")
         self.settle()
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 4400)
-        self.assert_new_form()
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertEqual(len(self.repo.list_flows()), 1)
 
 
 if __name__ == "__main__":

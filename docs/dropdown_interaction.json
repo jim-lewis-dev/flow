@@ -2,8 +2,8 @@
   "success": true,
   "input": "X11 XTest mouse and keyboard events",
   "passed": [
-    "Account X updates both entry lists and preserves unsaved draft, records, and balances",
-    "Save keeps the removed suggestion absent and all dropdowns closed",
+    "Finishing Amount autosaves; account X updates both entry lists without changing fields or records",
+    "Ctrl+Z and Ctrl+Y restore and remove an X suggestion without changing saved flows",
     "Filtered category X removes the correct row while historical ledger filters remain available",
     "Native wheel scrolling keeps each X aligned with its suggestion",
     "Enter restores only the final quoted CSV tag without saving or replacing earlier tags",
@@ -53,5 +53,5 @@
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-4bfrhbey/demo.sqlite3"
+  "database": "/tmp/flow-real-input-2aj30ytq/demo.sqlite3"
 }

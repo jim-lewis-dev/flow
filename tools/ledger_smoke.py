@@ -83,8 +83,7 @@ def fresh_form():
     editor_closed()
     assert app.editing_id is None
     assert app.ledger.selection() == ()
-    assert app._flow_snapshot() == app._clean_flow
-    assert app.focus_get() is app.form_widgets["date"]
+    assert app._flow_snapshot() == app._clean_flow, (app._flow_snapshot(), app._clean_flow)
     for field in ("from_account", "to_account", "amount", "name", "tags", "time"):
         assert app.form_vars[field].get() == "", field
     assert app.notes_text.get("1.0", "end-1c") == ""
@@ -105,38 +104,6 @@ def select_suggestion(combo, value):
     _, y0, _, height = bounds
     click_xy(combo.listbox.winfo_rootx() + 15,
              combo.listbox.winfo_rooty() + y0 + height / 2)
-
-
-def answer_dialog(label):
-    """Answer the native message box through an actual XTest pointer click."""
-    def send():
-        def children(path):
-            yield path
-            for child in app.tk.splitlist(app.tk.call("winfo", "children", path)):
-                yield from children(child)
-        grabs = app.tk.splitlist(app.tk.call("grab", "current"))
-        grab = str(grabs[0]) if grabs else ""
-        if not grab:
-            app.after(80, send)
-            return
-        for path in children(grab):
-            try:
-                caption = str(app.tk.call(path, "cget", "-text"))
-                if caption.casefold() != label.casefold():
-                    continue
-                if not int(app.tk.call("winfo", "viewable", path)):
-                    continue
-                px = int(app.tk.call("winfo", "rootx", path)) + int(app.tk.call("winfo", "width", path)) // 2
-                py = int(app.tk.call("winfo", "rooty", path)) + int(app.tk.call("winfo", "height", path)) // 2
-                xt.XTestFakeMotionEvent(display, 0, px, py, 0)
-                xt.XTestFakeButtonEvent(display, 1, True, 0)
-                xt.XTestFakeButtonEvent(display, 1, False, 0)
-                x.XSync(display, False)
-                return
-            except tk.TclError:
-                pass
-        raise AssertionError("Could not find native dialog button " + label)
-    app.after(180, send)
 
 
 def header(field):
@@ -177,6 +144,25 @@ def aligned_or_closed(flow_id, field):
     assert widget.winfo_rootx() + widget.winfo_width() <= app.ledger.winfo_rootx() + app.ledger.winfo_width() + 3
 
 
+def no_prompt():
+    assert not app.tk.splitlist(app.tk.call("grab", "current"))
+    assert not errors
+
+
+def check_copy(flow):
+    expected = {
+        "from_account": flow["from_account"], "to_account": flow["to_account"],
+        "amount": f'{flow["amount_cents"] / 100:.2f}', "status": flow["status"],
+        "name": flow["name"], "category": flow["category"],
+    }
+    for field, value in expected.items():
+        assert app.form_vars[field].get() == value, (field, app.form_vars[field].get(), value)
+    assert app.form_vars["date"].get() == flow["date"][:10]
+    assert app.form_vars["time"].get() == flow["date"][11:]
+    assert app.notes_text.get("1.0", "end-1c") == flow["notes"]
+    assert app.form_vars["tags"].get() == ", ".join(flow["tags"])
+
+
 audit_failure = ""
 try:
     key("Escape")
@@ -193,55 +179,9 @@ try:
     key("Down")
     key("Return")
     assert app.form_vars["status"].get() == "Pending"
-    click(app.cancel_button)
+    click(app.new_flow_button)
     fresh_form()
-    ok("Switching from account suggestions to the native Status list closes suggestions without focus errors")
-
-    row(app.ledger, first)
-    click_text("Repeat")
-    assert app.editing_id is None and app.ledger.selection() == ()
-    assert app.ledger.focus() == ""
-    replace_all(top_entry("name"), "Repeated draft")
-    repeat_draft = app._flow_snapshot()
-    original = saved(first)
-    count_before = len(repo.list_flows())
-    answer_dialog("Cancel")
-    row(app.ledger, first)
-    assert app.editing_id is None and app.ledger.selection() == ()
-    assert app._flow_snapshot() == repeat_draft
-    assert len(repo.list_flows()) == count_before and saved(first) == original
-    answer_dialog("No")
-    double_cell(first, "name")
-    assert app.editing_id == first and app.ledger_editor.flow_id == first
-    assert app.form_vars["name"].get() == "Lunch"
-    assert len(repo.list_flows()) == count_before and saved(first) == original
-    click(app.cancel_button)
-    fresh_form()
-    ok("Repeat clears the original selection; Cancel keeps its copy and No lets the original open for cell editing")
-
-    row(app.ledger, first)
-    click_text("Repeat")
-    replace_all(top_entry("name"), "Saved repeat")
-    answer_dialog("Yes")
-    double_cell(first, "name")
-    assert app.editing_id == first and app.ledger_editor.flow_id == first
-    assert saved(first) == original and len(repo.list_flows()) == count_before + 1
-    assert flow_named("Saved repeat")["flow_id"] != first
-    click(app.cancel_button)
-    fresh_form()
-    ok("Yes saves the repeated copy once before double-clicking resumes editing the original")
-
-    row(app.ledger, first)
-    click_text("Repeat")
-    answer_dialog("No")
-    row(app.ledger, first)
-    key("F2")
-    assert app.editing_id == first and app.ledger_editor.flow_id == first
-    assert app.ledger_editor.field == "date"
-    assert saved(first) == original and len(repo.list_flows()) == count_before + 1
-    click(app.cancel_button)
-    fresh_form()
-    ok("After Repeat, selecting the original and pressing F2 edits that record without saving the discarded copy")
+    ok("Moving from suggestions to the native Status list closes the old popup without focus errors")
 
     replace_all(edit_cell(first, "amount_cents"), "23.45")
     assert app.form_vars["amount"].get() == "23.45"
@@ -249,32 +189,93 @@ try:
     assert saved(first)["amount_cents"] == 1234
     key("Return")
     editor_closed()
-    assert saved(first)["amount_cents"] == 1234
-    click(app.save_button)
     assert saved(first)["amount_cents"] == 2345
-    fresh_form()
-    ok("Native double-click edits an amount in both views; Enter keeps a draft and Save persists it")
+    assert app.editing_id == first and app.ledger.selection() == (first,)
+    no_prompt()
+    chord("Control_L", "z")
+    assert saved(first)["amount_cents"] == 1234
+    chord("Control_L", "y")
+    assert saved(first)["amount_cents"] == 2345
+    ok("Enter saves an existing ledger amount once; Ctrl+Z and Ctrl+Y reverse and restore the field")
 
     row(app.ledger, first)
-    replace_all(top_entry("name"), "Lunch with friends")
-    assert preview(first, "name") == "Lunch with friends"
-    replace_all(edit_cell(first, "name"), "Friday lunch")
-    assert app.form_vars["name"].get() == "Friday lunch"
+    replace_all(top_entry("name"), "Friday lunch")
     assert saved(first)["name"] == "Lunch"
-    chord("Control_L", "s")
+    click(top_entry("amount"))
     assert saved(first)["name"] == "Friday lunch"
+    replace_all(top_entry("amount"), "24.68")
+    key("Tab")
+    assert saved(first)["amount_cents"] == 2468
+    chord("Control_L", "z")
+    assert saved(first)["amount_cents"] == 2345 and saved(first)["name"] == "Friday lunch"
+    chord("Control_L", "z")
+    assert saved(first)["name"] == "Lunch"
+    chord("Control_L", "y")
+    chord("Control_L", "y")
+    assert saved(first)["name"] == "Friday lunch" and saved(first)["amount_cents"] == 2468
+    ok("Top fields save on click-away and Tab; each completed field has one undo step")
+
+    row(app.ledger, first)
+    replace_all(top_entry("name"), "Switching rows")
+    row(app.ledger, second)
+    assert saved(first)["name"] == "Switching rows" and app.editing_id == second
+    assert app.form_vars["name"].get() == "Boat supplies"
+    no_prompt()
+    chord("Control_L", "z")
+    assert saved(first)["name"] == "Friday lunch"
+    chord("Control_L", "y")
+    assert saved(first)["name"] == "Switching rows"
+    ok("Selecting another row saves the completed existing field without a prompt or duplicate history entry")
+
+    original = saved(second)
+    count_before = len(repo.list_flows())
+    row(app.ledger, second)
+    click_text("Repeat")
+    assert app.editing_id is None and app.ledger.selection() == ()
+    check_copy(original)
+    replace_all(top_entry("name"), "Discarded repeat")
+    row(app.ledger, second)
+    assert app.editing_id == second and len(repo.list_flows()) == count_before
+    assert saved(second) == original
+    no_prompt()
+    ok("Repeat copies date, seconds, status, notes, tags and all other fields; selecting a row silently discards its draft")
+
+    click_text("Repeat")
+    check_copy(original)
+    replace_all(top_entry("name"), "Repeated boat purchase")
+    assert str(app.save_button.cget("text")).startswith("Add Flow")
+    click(app.save_button)
+    repeated = flow_named("Repeated boat purchase")
+    assert {k: v for k, v in repeated.items() if k not in ("flow_id", "name")} == {
+        k: v for k, v in original.items() if k not in ("flow_id", "name")}
+    assert repeated["flow_id"] != second and len(repo.list_flows()) == count_before + 1
     fresh_form()
-    ok("Top form edits preview immediately; cell edits share the draft; Ctrl+S saves and clears both editors")
+    chord("Control_L", "z")
+    assert len(repo.list_flows()) == count_before
+    assert not any(f["flow_id"] == repeated["flow_id"] for f in repo.list_flows())
+    chord("Control_L", "y")
+    assert saved(repeated["flow_id"]) == repeated
+    ok("Add Flow inserts a repeated draft once and resets the form; undo and redo preserve the new record's identity")
+
+    click(app.new_flow_button)
+    replace_all(top_entry("from_account"), "Unsaved account")
+    key("Return")
+    replace_all(top_entry("amount"), "123")
+    click(top_entry("name"))
+    assert app.form_vars["from_account"].get() == "Unsaved account"
+    row(app.ledger, first)
+    assert app.editing_id == first and len(repo.list_flows()) == count_before + 1
+    assert "Unsaved account" not in [a["name"] for a in repo.list_accounts()]
+    no_prompt()
+    ok("Moving between new-flow fields keeps the draft; selecting an existing row forgets it without creating records")
 
     replace_all(edit_cell(first, "date"), "2026-10-04 14:15:16")
     key("Return")
     assert app.form_vars["date"].get() == "2026-10-04"
     assert app.form_vars["time"].get() == "14:15:16"
-    assert saved(first)["date"] == "2026-10-03 12:30:15"
-    click(app.save_button)
     assert saved(first)["date"] == "2026-10-04 14:15:16"
-    fresh_form()
-    ok("Editing a full timestamp in the Date cell updates the optional time and preserves seconds on Save")
+    editor_closed()
+    ok("A full timestamp in the Date cell saves to the second without a separate Save button")
 
     replace_all(edit_cell(first, "from_account"), "Sav")
     combo = app.ledger_editor.widget
@@ -282,146 +283,154 @@ try:
     select_suggestion(combo, "Savings")
     assert app.form_vars["from_account"].get() == "Savings"
     replace_all(edit_cell(first, "to_account"), "Harbor Shop")
-    combo = app.ledger_editor.widget
     key("Return")
-    assert app.form_vars["to_account"].get() == "Harbor Shop"
-    assert saved(first)["to_account"] == "Corner Shop"
-    click(app.save_button)
     assert saved(first)["from_account"] == "Savings" and saved(first)["to_account"] == "Harbor Shop"
     assert "Harbor Shop" in app.form_widgets["to_account"].values
-    fresh_form()
-    ok("Account cells filter existing suggestions and accept new names without saving the flow early")
+    editor_closed()
+    chord("Control_L", "z")
+    assert saved(first)["to_account"] == "Corner Shop"
+    chord("Control_L", "y")
+    assert saved(first)["to_account"] == "Harbor Shop"
+    assert not popups()
+    ok("Account suggestions and new names save cleanly; undo/redo never reopens a dropdown")
 
     replace_all(edit_cell(first, "category"), "Boat maintenance")
     key("Return")
     replace_all(edit_cell(first, "tags"), 'Trip, "Boat, trailer"')
     key("Return")
-    assert app.form_vars["category"].get() == "Boat maintenance"
-    assert app.form_vars["tags"].get() == 'Trip, "Boat, trailer"'
-    assert saved(first)["category"] == "Dining"
-    click(app.save_button)
     assert saved(first)["category"] == "Boat maintenance"
     assert saved(first)["tags"] == ["Trip", "Boat, trailer"]
-    fresh_form()
-    ok("Category and quoted comma-containing tags edit through ledger suggestions and save exactly")
+    editor_closed()
+    ok("Category and comma-containing tags save through the same ledger editing gesture")
 
     status = edit_cell(first, "status")
     assert str(status.cget("state")) == "readonly"
     assert tuple(status.cget("values")) == ("Complete", "Pending", "Planned", "Void")
     click(status)
     key("Escape")
-    assert app.form_vars["status"].get() == "Complete"
-    assert app.ledger_editor.widget is status
+    assert saved(first)["status"] == "Complete"
     click(status)
     key("Down")
     key("Return")
-    assert app.form_vars["status"].get() == "Pending"
-    assert saved(first)["status"] == "Complete"
-    click(app.save_button)
+    click(top_entry("amount"))
     assert saved(first)["status"] == "Pending"
-    fresh_form()
-    ok("Status cell offers the four fixed choices and changes the saved status only on Save")
+    assert not popups()
+    ok("The native Status list saves a selected choice and does not leave a stale cell editor")
 
     notes = "First ledger line\nSecond ledger line\nThird ledger line"
     replace_all(edit_cell(first, "notes"), notes)
     assert app.notes_text.get("1.0", "end-1c") == notes
     assert saved(first)["notes"] == "First saved note"
+    chord("Control_L", "Return")
+    assert saved(first)["notes"] == notes
+    editor_closed()
     click(app.notes_button)
     assert app.expanded_notes_text.get("1.0", "end-1c") == notes
     click(app.expanded_notes_text)
     chord("Control_L", "End")
     type_text("\nExpanded fourth line")
-    notes += "\nExpanded fourth line"
+    expanded_notes = notes + "\nExpanded fourth line"
     key("Escape")
     assert app.notes_dialog is None
-    assert app.notes_text.get("1.0", "end-1c") == notes
-    click(app.cancel_button)
-    assert saved(first)["notes"] == "First saved note"
-    fresh_form()
-    ok("Ledger, top, and expanded Notes share multiline text; Cancel discards the draft without data loss")
-
-    replace_all(edit_cell(first, "notes"), notes)
-    click(app.save_button)
+    assert saved(first)["notes"] == expanded_notes
+    chord("Control_L", "z")
     assert saved(first)["notes"] == notes
-    fresh_form()
+    chord("Control_L", "y")
+    assert saved(first)["notes"] == expanded_notes
     row(app.ledger, first)
-    assert app.notes_text.get("1.0", "end-1c") == notes
     for direction in ("Up", "Up", "Down", "Down"):
         click(app.notes_text)
         key(direction)
         assert app.notes_text.bbox("insert") is not None
-    click(app.cancel_button)
-    ok("Multiline ledger Notes survive Save and row reload; compact Notes keeps the caret visible")
+    ok("Ledger and expanded Notes save multiline text; closing the expansion saves once and undo restores the prior note")
 
-    replace_all(edit_cell(first, "name"), "Draft to cancel")
-    assert saved(first)["name"] == "Friday lunch"
-    answer_dialog("Cancel")
-    double_cell(second, "amount_cents")
-    assert app.editing_id == first and app.form_vars["name"].get() == "Draft to cancel"
-    assert app.ledger.selection() == (first,)
-    assert app.ledger_editor.widget is None or app.ledger_editor.flow_id == first
-    answer_dialog("No")
-    double_cell(second, "amount_cents")
-    assert app.editing_id == second
-    assert saved(first)["name"] == "Friday lunch"
-    assert app.ledger_editor.widget is not None and app.ledger_editor.flow_id == second
-    replace_all(app.ledger_editor.input, "67.89")
-    answer_dialog("Yes")
-    double_cell(first, "name")
-    assert saved(second)["amount_cents"] == 6789
-    assert app.editing_id == first and app.ledger_editor.flow_id == first
-    click(app.cancel_button)
-    fresh_form()
-    ok("Double-clicking another row respects Cancel, No, and Yes without opening an editor for the wrong record")
+    previous = saved(first)["amount_cents"]
+    replace_all(edit_cell(first, "amount_cents"), "oops")
+    key("Return")
+    assert saved(first)["amount_cents"] == previous
+    assert app.form_feedback.get(), "Invalid edit needs visible feedback"
+    assert app.editing_id == first
+    key("Escape")
+    assert saved(first)["amount_cents"] == previous
+    assert app.form_vars["amount"].get() == f"{previous / 100:.2f}"
+    no_prompt()
+    ok("Invalid amounts remain unsaved with visible feedback; Escape restores the saved value without a confirmation")
 
-    replace_all(edit_cell(first, "amount_cents"), "24.68")
+    replace_all(edit_cell(first, "name"), "Completed once")
+    key("Return")
+    edit_cell(first, "name")
+    key("Return")
+    chord("Control_L", "z")
+    assert saved(first)["name"] == "Switching rows"
+    chord("Control_L", "y")
+    assert saved(first)["name"] == "Completed once"
+    row(app.ledger, first)
+    replace_all(top_entry("name"), "Not yet completed")
+    chord("Control_L", "z")
+    assert saved(first)["name"] == "Completed once"
+    assert app.form_vars["name"].get() == "Completed once"
+    chord("Control_L", "z")
+    assert saved(first)["name"] == "Switching rows"
+    chord("Control_L", "y")
+    assert saved(first)["name"] == "Completed once"
+    ok("No-op completion adds no history; Ctrl+Z first abandons an unfinished field, then undoes the saved edit")
+
+    replace_all(edit_cell(first, "amount_cents"), "27.89")
     replace_all(search_entry(), "Boat supplies")
-    assert first not in app.ledger_rows and app.editing_id == first
-    assert app.form_vars["amount"].get() == "24.68"
+    assert saved(first)["amount_cents"] == 2789
+    assert first not in app.ledger_rows
     editor_closed()
-    click(app.save_button)
-    assert saved(first)["amount_cents"] == 2468
-    fresh_form()
     replace_all(search_entry(), "")
-    ok("Filtering away an edited row closes its overlay but keeps and saves the correct draft")
+    ok("Filtering away an edited row saves the correct record and closes its cell overlay")
 
-    replace_all(edit_cell(first, "name"), "Sort draft")
+    replace_all(edit_cell(first, "name"), "Sorted edit")
     header("name")
-    assert app.editing_id == first and app.form_vars["name"].get() == "Sort draft"
+    assert saved(first)["name"] == "Sorted edit"
     aligned_or_closed(first, "name")
-    assert preview(first, "name") == "Sort draft"
-    click(app.cancel_button)
-    replace_all(edit_cell(first, "name"), "Scroll draft")
+    replace_all(edit_cell(first, "name"), "Scrolled edit")
     before_scroll = app.ledger.yview()
     wheel_up(app.ledger, 18)
     assert app.ledger.yview() != before_scroll
     aligned_or_closed(first, "name")
-    assert app.form_vars["name"].get() == "Scroll draft"
-    click(app.cancel_button)
-    ok("Sorting and native wheel scrolling preserve the draft without leaving a cell overlay on another row")
+    assert saved(first)["name"] == "Scrolled edit"
+    ok("Sorting and native wheel scrolling save edits without leaving a cell editor on the wrong row")
 
-    replace_all(edit_cell(first, "name"), "Resize draft")
+    replace_all(edit_cell(first, "name"), "Resize edit")
     app.geometry("1280x800+0+0")
     pump(.25)
     aligned_or_closed(first, "name")
-    assert app.form_vars["name"].get() == "Resize draft"
+    assert app.form_vars["name"].get() == "Resize edit"
     assert app.ledger.xview() == (0.0, 1.0)
-    click(app.cancel_button)
+    click(app.new_flow_button)
+    assert saved(first)["name"] == "Resize edit"
     fresh_form()
-    ok("Window resizing keeps the editor aligned or closes it and keeps all ledger columns visible")
+    ok("Window resizing keeps the editor aligned or closes it; New Flow completes an existing edit and clears the form")
 
     app.geometry("1920x1200+0+0")
     pump(.25)
-    # A screenshot of a real cell edit, with both views showing the same draft.
+    row(app.ledger, first)
+    previous_status = saved(first)["status"]
+    click_text("Void")
+    assert saved(first)["status"] == "Void"
+    fresh_form()
+    no_prompt()
+    chord("Control_L", "z")
+    assert saved(first)["status"] == previous_status
+    chord("Control_L", "y")
+    assert saved(first)["status"] == "Void"
+    chord("Control_L", "z")
+    ok("Void needs no confirmation and can be undone and redone for the current session")
+
     replace_all(edit_cell(first, "name"), "Lunch with friends")
     from PIL import ImageGrab
     ImageGrab.grab().save(Path(__file__).resolve().parents[1] / "docs" / "Flow_Ledger_Edit.png")
-    click(app.cancel_button)
+    key("Return")
+    click(app.new_flow_button)
     fresh_form()
     for event in maps:
         if event["override"]:
             assert not event["geometry"].endswith("+0+0"), event
-    ok("Save and Cancel return to a clean New Flow; every custom popup first maps at its final position")
+    ok("All custom popups first map at their final position; field completion leaves no reopened suggestions")
     success = True
     print(f"PASS {len(results)} ledger interaction checks; no callback exceptions.", flush=True)
 except BaseException:

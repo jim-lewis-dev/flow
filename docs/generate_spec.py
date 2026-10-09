@@ -75,7 +75,7 @@ PAGES = []
 def page(title, subtitle, blocks):
     PAGES.append((title, subtitle, blocks))
 
-page('Objects and editing', '01 / Flow 0.5 - 2 October 2026', [
+page('Objects and editing', '01 / Flow 0.5 - 8 October 2026', [
  ('p', 'A flow subtracts from one named account and adds to another. The application uses Python dictionaries and one SQLite repository. These are the actual objects returned by Repository.get_account() and get_flow().'),
  ('code', '{\n  "name": "AmEx",\n  "opening_cents": 0,\n  "opening_at": "2026-10-01 00:00:00"\n}'),
  ('code', '{\n  "flow_id": "11111111-1111-4111-8111-111111111111",\n  "date": "2026-10-02 12:30:00",\n  "from_account": "AmEx", "to_account": "Joe\'s Diner",\n  "amount_cents": 1200, "status": "Complete",\n  "name": "Friday lunch", "notes": "Burger and fries",\n  "category": "Dining", "tags": ["Road trip"]\n}'),
@@ -87,8 +87,8 @@ page('Objects and editing', '01 / Flow 0.5 - 2 October 2026', [
  ], [113,411]),
  ('sub', 'The GUI edits these objects'),
  ('p', 'Date, From, To, Amount, Status, Name, Notes, Category, Tags. Defaults: today, blank time, Complete and Uncategorized. Accounts has Name, Starting Balance and Starting Date, with optional time.'),
- ('p', '**Notes:** inline and expanded editors share one draft. Close, Escape and window close retain it; Up/Down follows wrapped lines and the wheel scrolls. Save commits notes with the entire flow; Cancel discards the draft.'),
- ('p', 'Click a ledger row to load it. Save updates that ID and clears the editor; Cancel clears without saving. Leaving a draft asks: Save changes to this flow? Yes / No / Cancel. Record JSON shows the selected saved record.'),
+ ('p', 'Existing records save completed fields on Enter, Tab or leaving the field. Notes shares one buffer: Enter adds a line; Ctrl+Enter or leaving/closing the editor saves. Invalid edits stay unsaved; Escape restores the saved value.'),
+ ('p', 'New Flow clears; Add Flow inserts. Repeat copies every field, including date/time/status. Selecting another row/page discards an unfinished new draft. Ctrl+Z / Ctrl+Y undo and redo this session. Record JSON shows saved values.'),
  ('small', 'Repository-generated objects and rows: examples/record_objects.json and examples/review.sql. Launching and controls: README.md. Source walkthrough: docs/model_review.md. Forecast collections and simulation controls are deferred.'),
 ])
 
@@ -104,7 +104,7 @@ page('Storage and calculations', '02 / Schema 4 - six tables', [
  ], [122,402]),
  ('p', 'Category/tag tables retain choices; flow_tags preserves assignments and order. audit stores saved before/after values; audit_id is its sequence. Data > View Schema reads the live definitions. Constraints and indexes: flowledger/schema.sql.'),
  ('sub', 'Save and calculate'),
- ('p', 'GUI draft -> Repository.save_flow() -> validate -> write choices, flow, tags and audit in one transaction -> return the saved dictionary. Failed saves roll back together. core.py owns storage and math; exchange.py imports/exports; gui.py and widgets.py manage drafts and views.'),
+ ('p', 'GUI draft -> Repository.save_flow() -> validate -> write choices, flow, tags and audit in one transaction -> return the saved dictionary. Failed saves roll back together. history.py records changed rows for session undo/redo using temporary capture tables. Undo appends audit events; closing the app or restoring a database clears undo. No persistent schema additions.'),
  ('p', 'An account receives +amount when To and -amount when From. Confirmed includes Complete; Including Pending adds Pending; Including Planned also adds Planned. Void contributes zero. Settle Pending by editing that record; a refund is a new reverse flow.'),
  ('p', 'Each account has one confirmed starting balance immediately before flows at its timestamp. Earlier Complete flows are already reflected; eligible earlier Pending/Planned flows enter estimates once. Unknown balances remain unknown. Dates are points in local time, compared at second precision; date-only means midnight.'),
  ('p', 'Graphs compare or sum explicitly selected accounts. A transfer cancels within a sum containing both endpoints. Selecting every endpoint conserves the total; this is not automatically net worth. Category totals count each matching non-Void flow once, including transfers.'),
@@ -124,7 +124,7 @@ def page_footer(c, doc):
 
 def build():
     story=[]
-    md=['# Flow software specification','', 'Version 0.5 | 2 October 2026','']
+    md=['# Flow software specification','', 'Version 0.5 | 8 October 2026','']
     for n,(title,subtitle,blocks) in enumerate(PAGES):
         if n: story.append(PageBreak())
         story.append(p(subtitle.upper(),'FlowSmall'))

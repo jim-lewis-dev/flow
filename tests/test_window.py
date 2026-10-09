@@ -69,6 +69,25 @@ class WindowTests(unittest.TestCase):
         self.app.update()
         self.assertFalse(self.app._fullscreen_requested)
 
+    def test_escape_reverts_existing_field_then_exits_fullscreen(self):
+        flow = self.repo.save_flow(dict(date="2026-10-02", from_account="Checking",
+                                       to_account="Shop", amount="12.34"))
+        self.app.refresh_all()
+        self.app.ledger.selection_set(flow["flow_id"])
+        self.app.update()
+        amount = self.app.form_widgets["amount"]
+        amount.focus_force()
+        self.app.update()
+        self.app.form_vars["amount"].set("invalid")
+        amount.event_generate("<Escape>")
+        self.app.update()
+        self.assertEqual(self.app.form_vars["amount"].get(), "12.34")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertTrue(self.app._fullscreen_requested)
+        amount.event_generate("<Escape>")
+        self.app.update()
+        self.assertFalse(self.app._fullscreen_requested)
+
 
 if __name__ == "__main__":
     unittest.main()
