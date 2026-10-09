@@ -2,17 +2,19 @@
   "success": true,
   "input": "X11 XTest mouse and keyboard events",
   "passed": [
-    "Balance cells and upper fields share one draft; Enter does not save; Ctrl+S commits and recalculates current balances",
-    "Negative, zero, and Unknown starting balances save correctly; account names and calculated balances remain read-only",
-    "Starting Date cells preserve optional time, accept full timestamps to the second, and normalize dates on Save",
-    "Native row changes obey Cancel, No, and Yes; explicit Cancel restores the saved row and clears the account draft",
-    "Invalid balance or date displays an error while preserving the draft; correcting it allows Save",
-    "F2 and Tab/Shift+Tab navigate editable account cells; Escape finishes a cell without saving the account",
-    "Resizing, scrolling, and page changes preserve or discard drafts correctly without stale cell overlays",
-    "Account editing ends with clean focus and selection; positioned popups never first map at the top-left corner"
+    "Enter saves an inline starting balance and recalculates totals; Ctrl+Z/Ctrl+Y restore both values and totals",
+    "Account top fields save on click-away and inline Tab saves once before moving to Starting Date",
+    "Negative, zero, and Unknown balances auto-save; account identity and calculated balances remain read-only",
+    "Starting Date preserves optional time and accepts seconds; each completed date edit can be undone",
+    "Switching between account rows saves the old field and opens the right record without confirmations",
+    "Invalid balances and dates stay unsaved with visible errors; Escape restores their saved values",
+    "F2 and Tab/Shift+Tab navigate editable cells; Escape abandons only the current unfinished field",
+    "New account drafts are discarded on row selection; Add Account creates one undoable record",
+    "Resizing, scrolling, and changing pages save completed account edits without stale overlays or prompts",
+    "New Account clears selection and editing state; popups never first appear at the top-left corner"
   ],
   "errors": [],
   "failure": "",
   "maps": [],
-  "database": "/tmp/flow-real-input-faqckyuz/demo.sqlite3"
+  "database": "/tmp/flow-real-input-vofv5_pl/demo.sqlite3"
 }

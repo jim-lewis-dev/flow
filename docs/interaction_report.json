@@ -3,66 +3,60 @@
   "input": "X11 XTest mouse and keyboard events",
   "passed": [
     "Mouse-select suggestion closes cleanly",
-    "Create full flow clears editor, selection, and popup",
-    "Expanded Notes and inline Notes share edits; Escape and Close retain the draft",
-    "Multiline Notes stay visible during arrow navigation and survive Save/reload",
-    "Main Save commits expanded Notes directly and closes the old editor",
-    "Second precision, explicit midnight, and date-only values survive Save/reload",
-    "Single click loads existing flow without popup",
-    "Edit endpoints and metadata; settle Pending to Complete without changing ID",
-    "Click next flow replaces every field without carryover",
-    "Ctrl+S from open dropdown does not reopen on key release",
-    "Same row reloads after save",
-    "Navigation dismisses flow suggestions",
-    "Account edit/save/new/reselect works",
-    "Modal open/close leaves no suggestion popup",
-    "Every observed custom popup first mapped at its final position",
-    "Cancel row switch preserves draft and selection",
-    "Discard row switch loads next record without saving draft",
-    "Save row switch commits old record then loads chosen next record",
-    "Void clears stale editor; empty Save cannot resurrect record",
-    "Native hover tooltip opens at its final position",
-    "Invalid Save preserves draft without vocabulary side effects",
-    "Corrected invalid entry saves normally",
-    "Cancel discards changed draft and clears every field",
-    "Filter refresh preserves unsaved draft; Save updates correct hidden ID",
-    "Graph account selection, Update Graph, and exact inspection work"
+    "Add Flow creates one full record and clears the form and suggestions",
+    "Undo and redo preserve all fields of the added flow and its identity",
+    "Expanded Notes saves on close; compact Notes saves on click-away and keeps multiline navigation visible",
+    "Date, midnight and seconds auto-save correctly through the Date and optional Time controls",
+    "Selecting an existing row loads all fields without a dropdown",
+    "Top fields auto-save endpoints, amount, category, tags, notes, optional time and status on the existing ID",
+    "Selecting the next row replaces all fields without old edits carrying over",
+    "Ctrl+S from an open dropdown completes the edit without reopening suggestions",
+    "Page navigation dismisses flow suggestions",
+    "Account auto-save, New Account and same-row reselection work",
+    "Row switching saves the completed field without a prompt; undo and redo target the changed record",
+    "Void clears the form without confirmation and supports session undo/redo",
+    "Invalid Add Flow retains the draft without side effects; correcting the amount creates the record",
+    "Selecting an existing row silently drops an unfinished new-flow draft",
+    "Suggestion X removes only the choice; session undo and redo restore visibility without changing records",
+    "Filtering away an edited record saves the correct ID without a stale cell or record switch",
+    "Graph selection and exact inspection still work after form and account edits",
+    "No callback errors or custom dropdowns first appearing at the top-left corner"
   ],
   "errors": [],
   "maps": [
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
-      "geometry": "300x134+422+186",
+      "geometry": "300x109+422+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
-      "geometry": "300x134+940+186",
+      "geometry": "300x109+940+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel",
-      "geometry": "300x134+1200+186",
+      "geometry": "300x109+1200+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel",
-      "geometry": "300x98+1391+186",
+      "geometry": "300x81+1391+175",
       "override": true
     },
     {
       "path": ".!toplevel",
-      "geometry": "423x203+0+0",
+      "geometry": "340x183+0+0",
       "override": false
     },
     {
@@ -72,116 +66,84 @@
     },
     {
       "path": ".!toplevel3",
-      "geometry": "650x350+0+0",
+      "geometry": "340x183+0+0",
       "override": false
     },
     {
       "path": ".!toplevel4",
-      "geometry": "650x350+0+0",
-      "override": false
-    },
-    {
-      "path": ".!toplevel5",
-      "geometry": "423x203+0+0",
-      "override": false
-    },
-    {
-      "path": ".!toplevel6",
-      "geometry": "423x203+0+0",
+      "geometry": "340x183+0+0",
       "override": false
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel2",
-      "geometry": "300x134+422+186",
+      "geometry": "300x109+422+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel2",
-      "geometry": "300x134+1200+186",
+      "geometry": "300x109+1200+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame8.!filtercombo.!toplevel2",
-      "geometry": "300x134+1391+186",
+      "geometry": "300x109+1391+175",
       "override": true
     },
     {
-      "path": ".!toplevel7",
-      "geometry": "423x203+0+0",
+      "path": ".!toplevel5",
+      "geometry": "340x183+0+0",
       "override": false
     },
     {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel2",
+      "geometry": "300x109+940+175",
+      "override": true
+    },
+    {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel4",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel3",
-      "geometry": "300x134+1200+186",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel4",
-      "geometry": "300x134+1200+186",
-      "override": true
-    },
-    {
-      "path": ".!toplevel8",
-      "geometry": "423x203+0+0",
-      "override": false
-    },
-    {
-      "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!toplevel",
-      "geometry": "207x106+68+835",
+      "geometry": "300x109+1200+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel5",
-      "geometry": "300x134+203+186",
+      "geometry": "300x109+203+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel3",
-      "geometry": "300x134+422+186",
+      "geometry": "300x109+422+175",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel2",
-      "geometry": "300x134+940+186",
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel3",
+      "geometry": "300x109+940+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel4",
+      "geometry": "300x109+1200+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel4",
+      "geometry": "300x109+940+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame7.!filtercombo.!toplevel5",
-      "geometry": "300x134+1200+186",
+      "geometry": "300x109+1200+175",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-c3r2doln/demo.sqlite3",
-  "final_fix_followup": {
-    "success": true,
-    "input": "X11 XTest mouse and keyboard events",
-    "passed": [
-      "Full Date to Time editor to Save keeps the edited second-precise timestamp",
-      "Scaled graph Update and inspection work at 1920x1200 and after resize to 1280x800"
-    ],
-    "errors": [],
-    "maps": [
-      {
-        "path": ".!toplevel",
-        "geometry": "423x203+0+0",
-        "override": false
-      }
-    ],
-    "database": "/tmp/flow-real-input-di4nms2f/demo.sqlite3",
-    "tk_scaling": 1.65,
-    "window_sizes": [
-      "1920x1200",
-      "1280x800"
-    ]
-  }
+  "database": "/tmp/flow-real-input-sbh_kh4a/demo.sqlite3"
 }

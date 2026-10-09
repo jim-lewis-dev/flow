@@ -25,6 +25,7 @@ from .graphing import graph_timeline, normalize_graph_date
 from .widgets import FilterCombo, ScrollFrame, TreeTooltip
 from .ledger_editor import LedgerEditor
 from .account_editor import AccountEditor
+from .history import SessionHistory
 
 BG = "#f2f5f2"
 CARD = "#ffffff"
@@ -58,6 +59,11 @@ class FlowApp(tk.Tk):
     def __init__(self, repo, demo=False):
         super().__init__()
         self.repo = repo
+        self.history = SessionHistory(repo)
+        self._committing = False
+        self._loading = False
+        self._active_edit = None
+        self._draft_redo = None
         self.demo = demo
         self.suggestion_preferences = SuggestionPreferences(repo.path)
         self.title(f"Flow {__version__}" + (" · Demo" if demo else ""))
@@ -96,10 +102,16 @@ class FlowApp(tk.Tk):
         self.bind_class("Text", "<Control-a>", self._select_all_text)
         self.bind("<Control-n>", self._shortcut_new)
         self.bind("<Control-s>", self._shortcut_save)
+        for cls in ("Text", "TEntry", "Entry", "TCombobox", "Treeview"):
+            self.bind_class(cls, "<Control-z>", self.undo)
+            self.bind_class(cls, "<Control-y>", self.redo)
+        self.bind("<Control-z>", self.undo)
+        self.bind("<Control-y>", self.redo)
         self.bind("<Escape>", self.exit_fullscreen)
         self.protocol("WM_DELETE_WINDOW", self.request_close)
         self.new_flow(focus=False, confirm=False)
         self.new_account(focus=False, confirm=False)
+        self._bind_form_edits()
         self.refresh_all()
         self.show_view("flows")
         if self.suggestion_preferences.load_error:
@@ -154,6 +166,10 @@ class FlowApp(tk.Tk):
             self.nav_buttons[key] = button
         context = ttk.Frame(bar, style="Card.TFrame")
         context.pack(side="right")
+        self.undo_button = ttk.Button(context, text="Undo", style="Small.TButton", command=self.undo, state="disabled")
+        self.undo_button.pack(side="left", padx=3)
+        self.redo_button = ttk.Button(context, text="Redo", style="Small.TButton", command=self.redo, state="disabled")
+        self.redo_button.pack(side="left", padx=3)
         if self.demo:
             ttk.Label(context, text="Demo", style="CardMuted.TLabel").pack(side="left", padx=(0, 18))
         self.view_host = ttk.Frame(self, padding=(16, 14, 16, 0))
@@ -216,22 +232,228 @@ class FlowApp(tk.Tk):
         return raw
 
     def _confirm_changes(self, kind):
-        """Resolve an unsaved draft before replacing it, never on mere refresh."""
-        current = self._flow_snapshot() if kind == "flow" else self._account_snapshot()
-        clean = getattr(self, "_clean_" + kind, current)
-        if current == clean:
-            return True
-        self._prepare_dialog()
-        self._confirming = True
+        """Finish an existing edit; new drafts may be replaced without a prompt."""
+        return self._finish_existing(kind)
+
+    def _bind_form_edits(self):
+        for key, widget in self.form_widgets.items():
+            self._bind_field(widget, "flow", key)
+        self._bind_field(self.notes_text, "flow", "notes")
+        for key, widget in self.account_widgets.items():
+            self._bind_field(widget, "account", key)
+
+    def _bind_field(self, widget, kind, key):
+        entry = widget.entry if isinstance(widget, FilterCombo) else widget
+        entry.bind("<FocusIn>", lambda event: self._begin_field(kind, key), add="+")
+        entry.bind("<FocusOut>", lambda event: self._defer_field_finish(widget, kind, key), add="+")
+        entry.bind("<Escape>", lambda event: self._escape_field(widget, kind, key), add="+")
+        if key != "notes" and not isinstance(widget, FilterCombo):
+            entry.bind("<Return>", lambda event: self._field_enter(kind, key))
+            entry.bind("<KP_Enter>", lambda event: self._field_enter(kind, key))
+        entry.bind("<Control-Return>", lambda event: self._field_enter(kind, key))
+        if isinstance(widget, ttk.Combobox):
+            widget.bind("<<ComboboxSelected>>", lambda event: self._field_enter(kind, key))
+
+    def _draft_identity(self, kind):
+        return self.editing_id if kind == "flow" else self.account_editing
+
+    def _field_value(self, kind, key):
+        if kind == "flow" and key == "notes":
+            return self.notes_text.get("1.0", "end-1c")
+        variables = self.form_vars if kind == "flow" else self.account_vars
+        if key == "date":
+            return variables["date"].get(), variables["time"].get()
+        return variables[key].get()
+
+    def _put_field_value(self, kind, key, value):
+        if kind == "flow" and key == "notes":
+            self.notes_text.delete("1.0", "end")
+            self.notes_text.insert("1.0", value)
+            return
+        variables = self.form_vars if kind == "flow" else self.account_vars
+        if key == "date":
+            variables["date"].set(value[0])
+            variables["time"].set(value[1])
+        else:
+            variables[key].set(value)
+
+    def _begin_field(self, kind, key):
+        if self._loading or self._committing:
+            return
+        identity = self._draft_identity(kind)
+        token = (kind, key, identity)
+        if self._active_edit is None or self._active_edit[:3] != token:
+            before = self._field_value(kind, key)
+            if identity and kind == "flow" and hasattr(self, "_clean_flow"):
+                values = dict(zip(self.form_vars, self._clean_flow))
+                before = (self._clean_flow[-1] if key == "notes" else
+                          (values["date"], values["time"]) if key == "date" else values[key])
+            elif identity and kind == "account":
+                saved = self.repo.get_account(identity)
+                if saved:
+                    if key == "opening":
+                        before = "" if saved["opening_cents"] is None else format_money(saved["opening_cents"]).replace(",", "")
+                    elif key == "date":
+                        time = saved["opening_at"][11:]
+                        before = (saved["opening_at"][:10], "" if time == "00:00:00" else time)
+            self._active_edit = token + (before,)
+
+    def _defer_field_finish(self, widget, kind, key):
+        identity = self._draft_identity(kind)
+        def finish():
+            if self._loading or self._committing or identity != self._draft_identity(kind):
+                return
+            focused = str(self.tk.call("focus"))
+            entry = widget.entry if isinstance(widget, FilterCombo) else widget
+            if focused == str(entry) or focused.startswith(str(widget) + "."):
+                return
+            popup = widget.popup if isinstance(widget, FilterCombo) else None
+            if popup is not None and (focused == str(popup) or focused.startswith(str(popup) + ".")):
+                return
+            if key == "notes" and getattr(self, "notes_dialog", None) is not None:
+                return
+            self._finish_existing(kind)
+        self.after_idle(finish)
+
+    def _field_enter(self, kind, key):
+        if key == "date":
+            (self._split_flow_date if kind == "flow" else self._split_account_date)()
+        self._finish_existing(kind)
+        return "break"
+
+    def _escape_field(self, widget, kind, key):
+        if isinstance(widget, FilterCombo) and widget.popup is not None:
+            widget.close_popup()
+            return "break"
+        if not self._draft_identity(kind):
+            return None  # A new draft survives Escape; the window may exit fullscreen.
+        self._begin_field(kind, key)
+        token = self._active_edit
+        if token and self._field_value(kind, key) != token[3]:
+            self._revert_field(kind, key)
+            return "break"
+        return None
+
+    def _revert_field(self, kind, key):
+        token = self._active_edit
+        if token and token[:3] == (kind, key, self._draft_identity(kind)):
+            self._put_field_value(kind, key, token[3])
+        elif self._draft_identity(kind):
+            self._reload_current(kind)
+        self._draft_redo = None
+        if kind == "flow":
+            self.form_feedback.set("Edits save automatically" if self.editing_id else "From, To, and Amount required")
+        else:
+            self.account_feedback.set("Negative = debt · Blank = unknown")
+
+    def _draft_is_dirty(self):
+        token = self._active_edit
+        return bool(token and token[2] == self._draft_identity(token[0]) and
+                    self._field_value(token[0], token[1]) != token[3])
+
+    def _update_history_buttons(self):
+        draft = self._draft_is_dirty()
+        if self._draft_redo:
+            kind, key, identity, before, after = self._draft_redo
+            if identity != self._draft_identity(kind) or self._field_value(kind, key) != before:
+                self._draft_redo = None
+        self.undo_button.configure(state="normal" if draft or self.history.can_undo else "disabled")
+        self.redo_button.configure(state="normal" if not draft and (self._draft_redo or self.history.can_redo) else "disabled")
+
+    def _reload_current(self, kind):
+        if kind == "flow":
+            flow = self.repo.get_flow(self.editing_id) if self.editing_id else None
+            if flow:
+                self._load_form(flow)
+            else:
+                self.new_flow(focus=False, confirm=False)
+        else:
+            name = self.account_editing
+            if name and self.repo.get_account(name):
+                self._load_account(self.repo.get_account(name))
+            else:
+                self.new_account(focus=False, confirm=False)
+
+    def _undo_draft(self):
+        token = self._active_edit
+        if token and token[2] == self._draft_identity(token[0]):
+            kind, key, identity, before = token
+            after = self._field_value(kind, key)
+            if after != before:
+                self._put_field_value(kind, key, before)
+                self._draft_redo = (kind, key, identity, before, after)
+                self.status_message.set("Undid typing")
+                self._update_history_buttons()
+                return True
+        return False
+
+    def _history_event_allowed(self, event):
+        if event is None:
+            return self.grab_current() is None
+        top = str(self.tk.call("winfo", "toplevel", str(event.widget)))
+        notes = getattr(self, "notes_dialog", None)
+        return self.grab_current() is None and top in (str(self), str(notes))
+
+    def undo(self, event=None):
+        if not self._history_event_allowed(event):
+            return "break"
+        if self._undo_draft():
+            return "break"
+        return self._history_step(False)
+
+    def redo(self, event=None):
+        if not self._history_event_allowed(event):
+            return "break"
+        if self._draft_redo:
+            kind, key, identity, before, after = self._draft_redo
+            self._draft_redo = None
+            if identity == self._draft_identity(kind) and self._field_value(kind, key) == before:
+                self._put_field_value(kind, key, after)
+                self.status_message.set("Redid typing")
+                self._update_history_buttons()
+                return "break"
+        if self._draft_is_dirty():
+            return "break"
+        return self._history_step(True)
+
+    def _history_step(self, redo):
+        if not (self.history.can_redo if redo else self.history.can_undo):
+            return "break"
+        # Close views of a draft before restoring records, with no implicit save.
+        self._committing = True
         try:
-            answer = messagebox.askyesnocancel("Unsaved Changes", f"Save changes to this {kind}?", parent=self)
-            if answer is None:
-                return False
-            if answer:
-                return self.save_flow() if kind == "flow" else self.save_account()
-            return True
+            self.ledger_editor.close(commit=False)
+            self.account_cell_editor.close(commit=False)
+            self._close_notes_editor(commit=False)
+            self._close_popups()
+            label = self.history.redo() if redo else self.history.undo()
+            if label is not None:
+                self.refresh_all()
+                if self.editing_id:
+                    self._reload_current("flow")
+                if self.account_editing:
+                    self._reload_current("account")
+                self._restore_draft_row()
+                self._restore_account_draft_row()
+                self.refresh_suggestions()
+                self.status_message.set(("Redid: " if redo else "Undid: ") + label)
+            self._active_edit = None
+            self._update_history_buttons()
+        except (ValueError, sqlite3.Error, OSError) as exc:
+            self._feedback(str(exc), True)
         finally:
-            self._confirming = False
+            self._committing = False
+        self._begin_focused_field()
+        return "break"
+
+    def _begin_focused_field(self):
+        focused = str(self.tk.call("focus"))
+        for kind, widgets in (("flow", {**self.form_widgets, "notes": self.notes_text}),
+                              ("account", self.account_widgets)):
+            for key, widget in widgets.items():
+                entry = widget.entry if isinstance(widget, FilterCombo) else widget
+                if focused == str(entry):
+                    self._begin_field(kind, key)
 
     def _set_flow_selection(self, flow_id):
         self._flow_selection = flow_id if flow_id and self.ledger.exists(flow_id) else None
@@ -285,6 +507,7 @@ class FlowApp(tk.Tk):
     def request_close(self):
         if self._confirm_changes("flow") and self._confirm_changes("account"):
             self._close_popups()
+            self.history.close()
             self.destroy()
 
     def show_view(self, name):
@@ -415,7 +638,9 @@ class FlowApp(tk.Tk):
                 if raw:
                     normalize_date("2026-10-01 " + raw)
                 variable.set(raw)
-                dialog.destroy()
+                kind = "flow" if variable is self.form_vars["time"] else "account"
+                if self._finish_existing(kind):
+                    dialog.destroy()
             except ValueError:
                 error.set("Use a valid time, for example 14:30.")
         buttons = ttk.Frame(body)
@@ -436,10 +661,12 @@ class FlowApp(tk.Tk):
         event.widget.yview_scroll(direction, "units")
         return "break"
 
-    def _close_notes_editor(self, focus=False):
+    def _close_notes_editor(self, focus=False, commit=True):
         dialog = getattr(self, "notes_dialog", None)
         if dialog is None:
             return
+        if commit and not self._finish_existing("flow"):
+            return False
         self.notes_dialog = None
         if dialog.winfo_exists():
             self.notes_text.mark_set("insert", self.expanded_notes_text.index("insert"))
@@ -482,6 +709,10 @@ class FlowApp(tk.Tk):
         dialog.protocol("WM_DELETE_WINDOW", lambda: self._close_notes_editor(focus=True))
         dialog.bind("<Escape>", lambda event: self._close_notes_editor(focus=True))
         dialog.bind("<Control-s>", self._shortcut_save)
+        self._bind_field(text, "flow", "notes")
+        text.bind("<Escape>", lambda event: (self._close_notes_editor(focus=True), "break")[1])
+        text.bind("<Control-z>", self.undo)
+        text.bind("<Control-y>", self.redo)
         text.focus_set()
 
     def _card(self, parent, **kwargs):
@@ -515,10 +746,8 @@ class FlowApp(tk.Tk):
         self.form_title.pack(side="left")
         self.form_feedback = tk.StringVar(self, "From, To, and Amount required")
         ttk.Label(header, textvariable=self.form_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
-        self.save_button = ttk.Button(header, text="Save Flow  ·  Ctrl+S", style="Primary.TButton", command=self.save_flow)
+        self.save_button = ttk.Button(header, text="Add Flow  ·  Ctrl+S", style="Primary.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
-        self.cancel_button = ttk.Button(header, text="Cancel", style="Small.TButton", command=lambda: self.new_flow(focus=True, confirm=False))
-        self.cancel_button.pack(side="right", padx=8)
         self.new_flow_button = ttk.Button(header, text="New Flow", style="Small.TButton", command=self.new_flow)
         self.new_flow_button.pack(side="right")
         form = ttk.Frame(editor, style="Card.TFrame")
@@ -600,8 +829,8 @@ class FlowApp(tk.Tk):
         self._fit_columns(self.ledger, {k: w for k, label, w in specs})
         self.ledger.grid(row=0, column=0, sticky="nsew")
         def scroll_ledger(*args):
-            self.ledger_editor.close()
-            self.ledger.yview(*args)
+            if self.ledger_editor.close():
+                self.ledger.yview(*args)
         ys = ttk.Scrollbar(tree_box, command=scroll_ledger)
         ys.grid(row=0, column=1, sticky="ns")
         def ledger_scrolled(*args):
@@ -624,7 +853,7 @@ class FlowApp(tk.Tk):
         ttk.Button(actions, text="Category Totals", style="Small.TButton", command=self.show_report).pack(side="right")
         self.report_summary = tk.StringVar(self, "")
         ttk.Label(actions, textvariable=self.report_summary, style="CardMuted.TLabel").pack(side="right", padx=14)
-        self.selection_detail = tk.StringVar(self, "Click a row · Double-click a cell to edit · Save commits changes")
+        self.selection_detail = tk.StringVar(self, "Click a row · Double-click a cell to edit · Changes save automatically")
         self.selection_label = ttk.Label(ledger_card, textvariable=self.selection_detail, style="CardMuted.TLabel", width=1)
         self.selection_label.grid(row=4, column=0, sticky="ew")
 
@@ -684,63 +913,120 @@ class FlowApp(tk.Tk):
             self.bell()
 
     def new_flow(self, focus=True, confirm=True, clear_selection=True):
-        if confirm and not self._confirm_changes("flow"):
+        if confirm and not self._finish_existing("flow"):
             return False
         if focus and not self.show_view("flows"):
             return False
-        self.ledger_editor.close()
-        self._restore_draft_row()
-        self._close_notes_editor()
-        self.ledger.focus_set()
-        self._close_popups()
-        self.editing_id = None
-        defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "time": "", "from_account": "", "to_account": "", "amount": "", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
-        for key, value in defaults.items():
-            self.form_vars[key].set(value)
-        self.notes_text.delete("1.0", "end")
-        self.form_title.configure(text="New Flow")
-        self.save_button.configure(text="Save Flow  ·  Ctrl+S")
-        self.form_widgets["status"].configure(values=STATUSES)
-        self.form_feedback.set("From, To, and Amount required")
-        self._clean_flow = self._flow_snapshot()
-        if clear_selection:
-            self._set_flow_selection(None)
+        self._loading = True
+        try:
+            self.ledger_editor.close(commit=False)
+            self._restore_draft_row()
+            self._close_notes_editor(commit=False)
+            self._close_popups()
+            self.editing_id = None
+            self._active_edit = None
+            self._draft_redo = None
+            defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "time": "", "from_account": "", "to_account": "", "amount": "", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
+            for key, value in defaults.items():
+                self.form_vars[key].set(value)
+            self.notes_text.delete("1.0", "end")
+            self.form_title.configure(text="New Flow")
+            self.save_button.configure(text="Add Flow  ·  Ctrl+S", state="normal")
+            self.form_widgets["status"].configure(values=STATUSES)
+            self.form_feedback.set("From, To, and Amount required")
+            self._clean_flow = self._flow_snapshot()
+            if clear_selection:
+                self._set_flow_selection(None)
+        finally:
+            self._loading = False
         if focus:
             self.form_widgets["date"].focus_set()
+            self._begin_field("flow", "date")
         return True
 
-    def save_flow(self):
-        """Commit one draft, then prepare New Flow with no selected ledger row."""
-        self.ledger_editor.close()
-        self._close_popups()
+    def _flow_data(self):
+        data = {key: var.get().strip() for key, var in self.form_vars.items() if key != "time"}
+        time_value = self.form_vars["time"].get().strip()
+        if len(data["date"]) == 10 and time_value:
+            data["date"] += " " + time_value
+        data["amount_cents"] = parse_money(data.pop("amount"))
         try:
-            data = {key: var.get().strip() for key, var in self.form_vars.items() if key != "time"}
-            time_value = self.form_vars["time"].get().strip()
-            # A complete timestamp entered in Date replaces the old Time value.
-            if len(data["date"]) == 10 and time_value:
-                data["date"] += " " + time_value
-            data["amount_cents"] = parse_money(data.pop("amount"))
-            try:
-                data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
-            except csv.Error as exc:
-                raise ValueError("Tags use commas; quote a tag that itself contains a comma.") from exc
-            data["notes"] = self.notes_text.get("1.0", "end-1c")
-            if self.editing_id:
-                data["flow_id"] = self.editing_id
-            new_endpoints = [data[key] for key in ("from_account", "to_account") if not self.repo.get_account(data[key])]
-            result = self.repo.save_flow(data)
-            saved_name = result["name"]
+            data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
+        except csv.Error as exc:
+            raise ValueError("Tags use commas; quote a tag that itself contains a comma.") from exc
+        data["notes"] = self.notes_text.get("1.0", "end-1c")
+        if self.editing_id:
+            data["flow_id"] = self.editing_id
+        return data
+
+    def _finish_existing(self, kind):
+        """Save a valid completed field, retaining selection and showing errors inline."""
+        if self._loading or self._committing or not self._draft_identity(kind):
+            return True
+        snapshot = self._flow_snapshot() if kind == "flow" else self._account_snapshot()
+        if snapshot == getattr(self, "_clean_" + kind, snapshot):
+            return True
+        try:
+            self._committing = True
+            if kind == "flow":
+                self._split_flow_date()
+                data = self._flow_data()
+                result = self.history.perform("Edit flow", lambda: self.repo.save_flow(data))
+                self._loading = True
+                try:
+                    for key in ("from_account", "to_account", "name", "category", "status"):
+                        self.form_vars[key].set(result[key])
+                    self.form_vars["amount"].set(format_money(result["amount_cents"]).replace(",", ""))
+                finally:
+                    self._loading = False
+                self._clean_flow = self._flow_snapshot()
+                self.form_feedback.set("Edits save automatically")
+                message = "Updated: " + result["name"]
+            else:
+                self._split_account_date()
+                raw = self.account_vars["opening"].get().strip()
+                cents = parse_money(raw, allow_negative=True) if raw else None
+                when = normalize_date(self._account_when())
+                name = self.account_editing
+                result = self.history.perform("Edit account", lambda: self.repo.save_account(name, opening_cents=cents, opening_at=when))
+                self._clean_account = self._account_snapshot()
+                self.account_feedback.set("Edits save automatically · Blank = unknown")
+                message = "Updated: " + result["name"]
+            # A commit establishes a fresh undo boundary for continued typing.
+            token = self._active_edit
+            if token and token[0] == kind and token[2] == self._draft_identity(kind):
+                self._active_edit = token[:3] + (self._field_value(kind, token[1]),)
+            self._draft_redo = None
+            self.refresh_all()
+            self.status_message.set(message)
+            self._update_history_buttons()
+            return True
+        except (ValueError, sqlite3.Error) as exc:
+            if kind == "flow":
+                self._feedback(str(exc), True)
+            else:
+                self.account_feedback.set(str(exc))
+                self.status_message.set(str(exc))
+                self.bell()
+            return False
+        finally:
+            self._committing = False
+
+    def save_flow(self):
+        """Add a new/repeated draft; existing rows save as fields are finished."""
+        self._close_popups()
+        if self.editing_id:
+            return self._finish_existing("flow")
+        try:
+            result = self.history.perform("Add flow", lambda: self.repo.save_flow(self._flow_data()))
+            self.new_flow(focus=False, confirm=False)
             self.refresh_all()
             if self.ledger.exists(result["flow_id"]):
                 self.ledger.see(result["flow_id"])
-            # Clear selection, focused row, and draft after the ledger rebuild.
-            # Late TreeviewSelect events then see the finished New Flow state.
-            self.new_flow(focus=True, confirm=False)
-            message = f"Saved: {saved_name} · ${format_money(result['amount_cents'])}"
-            if new_endpoints:
-                message += ". New accounts: " + ", ".join(new_endpoints) + "."
-            self._feedback(message)
-            self._close_popups()
+            self.form_widgets["date"].focus_set()
+            self._begin_field("flow", "date")
+            self._feedback(f"Added: {result['name']} · ${format_money(result['amount_cents'])}")
+            self._update_history_buttons()
             return True
         except (ValueError, sqlite3.Error) as exc:
             self._feedback(str(exc), True)
@@ -756,71 +1042,76 @@ class FlowApp(tk.Tk):
     def _load_form(self, flow, repeat=False):
         if not self.show_view("flows"):
             return
-        # A repeated flow is a new draft, so no saved row owns its selection.
-        # Selecting the original again must resolve that draft normally.
         self.new_flow(focus=False, confirm=False, clear_selection=repeat)
-        self.editing_id = None if repeat else flow["flow_id"]
-        for key in ("from_account", "to_account", "name", "category"):
-            self.form_vars[key].set(flow[key])
-        self.form_vars["amount"].set(format_money(flow["amount_cents"]).replace(",", ""))
-        tag_stream = io.StringIO()
-        csv.writer(tag_stream, lineterminator="").writerow(flow.get("tags", []))
-        self.form_vars["tags"].set(tag_stream.getvalue())
-        self.notes_text.insert("1.0", flow.get("notes", ""))
-        if not repeat:
+        self._loading = True
+        try:
+            self.editing_id = None if repeat else flow["flow_id"]
+            for key in ("from_account", "to_account", "name", "category", "status"):
+                self.form_vars[key].set(flow[key])
+            self.form_vars["amount"].set(format_money(flow["amount_cents"]).replace(",", ""))
+            tag_stream = io.StringIO()
+            csv.writer(tag_stream, lineterminator="").writerow(flow.get("tags", []))
+            self.form_vars["tags"].set(tag_stream.getvalue())
+            self.notes_text.insert("1.0", flow.get("notes", ""))
             parts = flow["date"].split(" ")
             self.form_vars["date"].set(parts[0])
             self.form_vars["time"].set(parts[1] if len(parts) > 1 else "")
-            self.form_vars["status"].set(flow["status"])
-            self.form_title.configure(text="Edit Flow")
-            self.save_button.configure(text="Save Changes  ·  Ctrl+S")
-        else:
-            self.form_title.configure(text="Repeat Flow")
-            self._feedback("New copy: confirm the date, amount, and status, then save.")
-        self.form_feedback.set("New copy · Not saved" if repeat else flow["name"])
-        if not repeat:
+            self.form_title.configure(text="Repeat Flow" if repeat else "Edit Flow")
+            self.save_button.configure(state="normal" if repeat else "disabled")
+            self.form_feedback.set("New copy · Click Add Flow" if repeat else "Edits save automatically")
             self._clean_flow = self._flow_snapshot()
-        self.ledger.focus_set()
+            if not repeat:
+                self._set_flow_selection(flow["flow_id"])
+        finally:
+            self._loading = False
+        self._active_edit = None
         self._close_popups()
+        self._begin_focused_field()
 
     def _select_flow(self, event=None):
-        if self._confirming:
+        if self._loading or self._committing:
             return
         selection = self.ledger.selection()
         selected = selection[0] if selection else None
         if selected == self._flow_selection:
             return
         old = self._flow_selection
-        self._set_flow_selection(old)
-        if not self._confirm_changes("flow"):
+        if not self._finish_existing("flow"):
+            self._set_flow_selection(old)
             return
+        self.ledger_editor.close(commit=False)
         self._set_flow_selection(selected)
-        flow = self.ledger_rows.get(selected)
+        flow = self.repo.get_flow(selected) if selected else None
         if flow:
             self._load_form(flow)
         else:
             self.new_flow(focus=False, confirm=False)
 
     def repeat_selected(self):
-        flow = self._selected()
-        if flow and self._confirm_changes("flow"):
+        selected = self.ledger.selection()
+        if not selected or not self._finish_existing("flow"):
+            return
+        flow = self.repo.get_flow(selected[0])
+        if flow:
             self._load_form(flow, repeat=True)
 
     def void_selected(self):
-        self._prepare_dialog()
         flow = self._selected()
-        if not flow:
+        if not flow or not self._finish_existing("flow"):
             return
-        if messagebox.askyesno("Void flow?", f"Exclude “{flow['name']}” from calculations? The record and its history will remain.", parent=self):
-            self.repo.void_flow(flow["flow_id"])
+        try:
+            self.history.perform("Void flow", lambda: self.repo.void_flow(flow["flow_id"]))
             self.new_flow(focus=False, confirm=False)
             self.refresh_all()
-            self.status_message.set("Flow voided. Its history is retained.")
+            self._update_history_buttons()
+            self.status_message.set("Flow voided · Ctrl+Z to undo")
+        except (ValueError, sqlite3.Error) as exc:
+            self._feedback(str(exc), True)
 
     def _show_selection(self, event=None):
         selection = self.ledger.selection()
         if not selection:
-            self.selection_detail.set("Click a row · Double-click a cell to edit · Save commits changes")
+            self.selection_detail.set("Click a row · Double-click a cell to edit · Changes save automatically")
             return
         flow = self.ledger_rows.get(selection[0])
         if flow:
@@ -853,6 +1144,9 @@ class FlowApp(tk.Tk):
 
     def _sync_flow_draft(self, *args):
         """Render the selected form draft without changing stored flow data."""
+        if self._loading:
+            return
+        self._update_history_buttons()
         row = self.editing_id
         if not row or not self.ledger.exists(row):
             return
@@ -878,7 +1172,8 @@ class FlowApp(tk.Tk):
     def refresh_ledger(self):
         if not hasattr(self, "ledger"):
             return
-        self.ledger_editor.close()
+        if not self.ledger_editor.close(commit=not self._committing):
+            return
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
         query = self.search_var.get().strip().casefold()
@@ -929,7 +1224,12 @@ class FlowApp(tk.Tk):
     def _remove_suggestion(self, field, value):
         """Forget an entry suggestion without touching the draft or records."""
         try:
-            self.suggestion_preferences.remove(SUGGESTION_KINDS[field], value)
+            kind = SUGGESTION_KINDS[field]
+            self.history.perform_external("Remove suggestion",
+                lambda: self.suggestion_preferences.remove(kind, value),
+                lambda: self.suggestion_preferences.restore(kind, value),
+                lambda: self.suggestion_preferences.remove(kind, value))
+            self._update_history_buttons()
         except (OSError, ValueError) as exc:
             self._feedback(f"Could not remove suggestion: {exc}", True)
             return False
@@ -942,15 +1242,22 @@ class FlowApp(tk.Tk):
         widget = widget or self.form_widgets[field]
         value = widget._query()
         if not value:
+            self._finish_existing("flow")
             return
         try:
-            restored = self.suggestion_preferences.restore(SUGGESTION_KINDS[field], value)
+            kind = SUGGESTION_KINDS[field]
+            restored = self.history.perform_external("Restore suggestion",
+                lambda: self.suggestion_preferences.restore(kind, value),
+                lambda: self.suggestion_preferences.remove(kind, value),
+                lambda: self.suggestion_preferences.restore(kind, value))
+            self._update_history_buttons()
         except (OSError, ValueError) as exc:
             self._feedback(f"Could not restore suggestion: {exc}", True)
             return
         if restored:
             self.refresh_suggestions()
             self.status_message.set(f"Restored suggestion: {value}")
+        self._finish_existing("flow")
 
     def refresh_suggestions(self):
         """Apply entry preferences while retaining all data in other views."""
@@ -996,10 +1303,8 @@ class FlowApp(tk.Tk):
         self.account_title.pack(side="left")
         self.account_feedback = tk.StringVar(self, "Negative = debt · Blank = unknown")
         ttk.Label(header, textvariable=self.account_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
-        self.account_save_button = ttk.Button(header, text="Save Account", style="Primary.TButton", command=self.save_account)
+        self.account_save_button = ttk.Button(header, text="Add Account", style="Primary.TButton", command=self.save_account)
         self.account_save_button.pack(side="right")
-        self.account_cancel_button = ttk.Button(header, text="Cancel", style="Small.TButton", command=lambda: self.new_account(confirm=False))
-        self.account_cancel_button.pack(side="right", padx=8)
         self.account_new_button = ttk.Button(header, text="New Account", style="Small.TButton", command=self.new_account)
         self.account_new_button.pack(side="right")
         ttk.Button(header, text="Record JSON", style="Small.TButton", command=self.show_account_json).pack(side="right", padx=8)
@@ -1051,11 +1356,11 @@ class FlowApp(tk.Tk):
         self.accounts_tree.bind("<Triple-1>", self._repeat_row_click)
         self.account_cell_editor = AccountEditor(self, font=FONT, background=CARD, foreground=INK)
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda name: "Starting balance immediately before " + self.repo.get_account(name)["opening_at"] if self.repo.get_account(name) else None)
-        ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date to edit · Save commits changes · Hover for exact time", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date · Changes save automatically", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     def _accounts_yview(self, *args):
-        self.account_cell_editor.close()
-        self.accounts_tree.yview(*args)
+        if self.account_cell_editor.close():
+            self.accounts_tree.yview(*args)
 
     def _restore_account_draft_row(self):
         name = self.account_editing
@@ -1069,6 +1374,9 @@ class FlowApp(tk.Tk):
 
     def _sync_account_draft(self, *args):
         """Preview only starting values; calculated balances remain saved values."""
+        if self._loading:
+            return
+        self._update_history_buttons()
         name = self.account_editing
         if not name or not self.accounts_tree.exists(name):
             return
@@ -1083,7 +1391,8 @@ class FlowApp(tk.Tk):
     def refresh_accounts(self):
         if not hasattr(self, "accounts_tree"):
             return
-        self.account_cell_editor.close()
+        if not self.account_cell_editor.close(commit=not self._committing):
+            return
         self.account_tooltip.hide()
         selected = self._account_selection
         self.accounts_tree.delete(*self.accounts_tree.get_children())
@@ -1101,69 +1410,90 @@ class FlowApp(tk.Tk):
         self.account_summary.set(f"{len(accounts)} accounts")
 
     def _select_account(self, event=None):
-        if self._confirming:
+        if self._loading or self._committing:
             return
         selection = self.accounts_tree.selection()
         name = selection[0] if selection else None
         if name == self._account_selection:
             return
-        self.account_cell_editor.close()
-        self._set_account_selection(self._account_selection)
-        if not self._confirm_changes("account"):
+        if not self._finish_existing("account"):
+            self._set_account_selection(self._account_selection)
             return
+        self.account_cell_editor.close(commit=False)
         self._restore_account_draft_row()
         self._close_popups()
-        if not name:
+        account = self.repo.get_account(name) if name else None
+        if account:
+            self._load_account(account)
+        else:
             self.new_account(focus=False, confirm=False)
-            return
-        account = self.repo.get_account(name)
-        if not account:
-            return
-        self._set_account_selection(name)
-        self.account_editing = name
-        self.account_vars["name"].set(name)
-        self.account_name_entry.configure(state="disabled")
-        self.account_vars["opening"].set("" if account["opening_cents"] is None else format_money(account["opening_cents"]).replace(",", ""))
-        self.account_vars["date"].set(account["opening_at"][:10])
-        self.account_vars["time"].set(account["opening_at"][11:] if account["opening_at"][11:] != "00:00:00" else "")
-        self.account_title.configure(text="Edit Account")
-        self.account_feedback.set("Account name is fixed · Negative = debt · Blank = unknown")
-        self._clean_account = self._account_snapshot()
-        self.accounts_tree.focus_set()
+
+    def _load_account(self, account):
+        self._loading = True
+        try:
+            name = account["name"]
+            self._set_account_selection(name)
+            self.account_editing = name
+            self.account_vars["name"].set(name)
+            self.account_name_entry.configure(state="disabled")
+            self.account_vars["opening"].set("" if account["opening_cents"] is None else format_money(account["opening_cents"]).replace(",", ""))
+            self.account_vars["date"].set(account["opening_at"][:10])
+            self.account_vars["time"].set(account["opening_at"][11:] if account["opening_at"][11:] != "00:00:00" else "")
+            self.account_title.configure(text="Edit Account")
+            self.account_save_button.configure(state="disabled")
+            self.account_feedback.set("Edits save automatically · Blank = unknown")
+            self._clean_account = self._account_snapshot()
+            self._active_edit = None
+            self._draft_redo = None
+        finally:
+            self._loading = False
+        self._begin_focused_field()
 
     def new_account(self, focus=True, confirm=True):
-        if confirm and not self._confirm_changes("account"):
+        if confirm and not self._finish_existing("account"):
             return False
-        self.account_cell_editor.close()
-        self._restore_account_draft_row()
-        self._close_popups()
-        self.account_editing = None
-        self.account_name_entry.configure(state="normal")
-        for key, value in {"name": "", "opening": "", "date": "2026-10-01", "time": ""}.items():
-            self.account_vars[key].set(value)
-        self.account_title.configure(text="New Account")
-        self.account_feedback.set("Negative = debt · Blank = unknown")
-        self._clean_account = self._account_snapshot()
-        self._set_account_selection(None)
+        self._loading = True
+        try:
+            self.account_cell_editor.close(commit=False)
+            self._restore_account_draft_row()
+            self._close_popups()
+            self.account_editing = None
+            self._active_edit = None
+            self._draft_redo = None
+            self.account_name_entry.configure(state="normal")
+            for key, value in {"name": "", "opening": "", "date": "2026-10-01", "time": ""}.items():
+                self.account_vars[key].set(value)
+            self.account_title.configure(text="New Account")
+            self.account_save_button.configure(state="normal")
+            self.account_feedback.set("Negative = debt · Blank = unknown")
+            self._clean_account = self._account_snapshot()
+            self._set_account_selection(None)
+        finally:
+            self._loading = False
         if focus:
             self.account_name_entry.focus_set()
-        elif self.current_view == "accounts":
-            self.accounts_tree.focus_set()
+            self._begin_field("account", "name")
         return True
 
     def save_account(self):
-        self.account_cell_editor.close()
+        if self.account_editing:
+            return self._finish_existing("account")
         self._close_popups()
         try:
             raw = self.account_vars["opening"].get().strip()
             cents = parse_money(raw, allow_negative=True) if raw else None
             at = normalize_date(self._account_when())
-            account = self.repo.save_account(self.account_vars["name"].get(), opening_cents=cents, opening_at=at)
+            name = self.account_vars["name"].get().strip()
+            if self.repo.get_account(name):
+                raise ValueError("That account already exists. Select it to edit.")
+            account = self.history.perform("Add account", lambda: self.repo.save_account(name, opening_cents=cents, opening_at=at))
             self.new_account(focus=False, confirm=False)
             self.refresh_all()
-            self.status_message.set(f"Account saved: {account['name']}")
+            self.status_message.set(f"Added account: {account['name']}")
             self.accounts_tree.see(account["name"])
             self.account_name_entry.focus_set()
+            self._begin_field("account", "name")
+            self._update_history_buttons()
             return True
         except (ValueError, sqlite3.Error) as exc:
             self.account_feedback.set(str(exc))
@@ -1583,9 +1913,10 @@ class FlowApp(tk.Tk):
         ttk.Label(bottom, text="Fix errors and ID conflicts in the source file first." if blocked else "Duplicate IDs are skipped. All accepted rows save together.", style="Muted.TLabel").pack(side="left")
         def commit():
             try:
-                result = commit_import(self.repo, preview, include_similar.get())
+                result = self.history.perform("Import flows", lambda: commit_import(self.repo, preview, include_similar.get()))
                 dialog.destroy()
                 self.refresh_all()
+                self._update_history_buttons()
                 self.status_message.set(f"Imported {result['imported']} flows; skipped {result['skipped']}.")
             except (ValueError, sqlite3.Error) as exc:
                 messagebox.showerror("Import was not saved", str(exc), parent=dialog)
@@ -1619,6 +1950,8 @@ class FlowApp(tk.Tk):
         if path and messagebox.askyesno("Restore this backup?", "Replace the current database with this backup? The current database will first be copied to a safety backup.", parent=self):
             try:
                 self.repo.restore(path)
+                self.history.clear()
+                self._update_history_buttons()
                 self.new_flow(focus=False, confirm=False)
                 self.new_account(focus=False, confirm=False)
                 self.refresh_all()

@@ -1,20 +1,22 @@
 Ledger editing: native X11 XTest interaction audit
-PASS: 17 workflows; 0 callback exceptions.
+PASS: 19 workflows; 0 callback exceptions.
 
-PASS Switching from account suggestions to the native Status list closes suggestions without focus errors
-PASS Repeat clears the original selection; Cancel keeps its copy and No lets the original open for cell editing
-PASS Yes saves the repeated copy once before double-clicking resumes editing the original
-PASS After Repeat, selecting the original and pressing F2 edits that record without saving the discarded copy
-PASS Native double-click edits an amount in both views; Enter keeps a draft and Save persists it
-PASS Top form edits preview immediately; cell edits share the draft; Ctrl+S saves and clears both editors
-PASS Editing a full timestamp in the Date cell updates the optional time and preserves seconds on Save
-PASS Account cells filter existing suggestions and accept new names without saving the flow early
-PASS Category and quoted comma-containing tags edit through ledger suggestions and save exactly
-PASS Status cell offers the four fixed choices and changes the saved status only on Save
-PASS Ledger, top, and expanded Notes share multiline text; Cancel discards the draft without data loss
-PASS Multiline ledger Notes survive Save and row reload; compact Notes keeps the caret visible
-PASS Double-clicking another row respects Cancel, No, and Yes without opening an editor for the wrong record
-PASS Filtering away an edited row closes its overlay but keeps and saves the correct draft
-PASS Sorting and native wheel scrolling preserve the draft without leaving a cell overlay on another row
-PASS Window resizing keeps the editor aligned or closes it and keeps all ledger columns visible
-PASS Save and Cancel return to a clean New Flow; every custom popup first maps at its final position
+PASS Moving from suggestions to the native Status list closes the old popup without focus errors
+PASS Enter saves an existing ledger amount once; Ctrl+Z and Ctrl+Y reverse and restore the field
+PASS Top fields save on click-away and Tab; each completed field has one undo step
+PASS Selecting another row saves the completed existing field without a prompt or duplicate history entry
+PASS Repeat copies date, seconds, status, notes, tags and all other fields; selecting a row silently discards its draft
+PASS Add Flow inserts a repeated draft once and resets the form; undo and redo preserve the new record's identity
+PASS Moving between new-flow fields keeps the draft; selecting an existing row forgets it without creating records
+PASS A full timestamp in the Date cell saves to the second without a separate Save button
+PASS Account suggestions and new names save cleanly; undo/redo never reopens a dropdown
+PASS Category and comma-containing tags save through the same ledger editing gesture
+PASS The native Status list saves a selected choice and does not leave a stale cell editor
+PASS Ledger and expanded Notes save multiline text; closing the expansion saves once and undo restores the prior note
+PASS Invalid amounts remain unsaved with visible feedback; Escape restores the saved value without a confirmation
+PASS No-op completion adds no history; Ctrl+Z first abandons an unfinished field, then undoes the saved edit
+PASS Filtering away an edited row saves the correct record and closes its cell overlay
+PASS Sorting and native wheel scrolling save edits without leaving a cell editor on the wrong row
+PASS Window resizing keeps the editor aligned or closes it; New Flow completes an existing edit and clears the form
+PASS Void needs no confirmation and can be undone and redone for the current session
+PASS All custom popups first map at their final position; field completion leaves no reopened suggestions

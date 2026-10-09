@@ -103,7 +103,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.ledger.selection(), ())
         self.assertEqual(self.app.ledger.focus(), "", "A cleared editor must not retain a focused ledger row")
         self.assertEqual(self.app.form_title.cget("text"), "New Flow")
-        self.assertEqual(self.app.save_button.cget("text"), "Save Flow  ·  Ctrl+S")
+        self.assertEqual(self.app.save_button.cget("text"), "Add Flow  ·  Ctrl+S")
         for key in ("time", "from_account", "to_account", "amount", "name", "tags"):
             self.assertEqual(self.app.form_vars[key].get(), "", key)
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
@@ -137,7 +137,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app.form_vars["status"].get(), "Complete")
         self.assert_no_popups()
 
-    def test_save_from_focused_account_field_clears_form_without_reopening_popup(self):
+    def test_completing_account_field_keeps_record_selected_without_reopening_popup(self):
         row = self.seed_flow(tags=["Old tag"], notes="Old notes", date="2026-10-02 10:30")
         self.click_flow(row)
         source = self.app.form_widgets["from_account"]
@@ -145,19 +145,15 @@ class GuiEditingStateTests(unittest.TestCase):
         self.pump()
         self.assertIsNotNone(source.popup)
         self.app.form_vars["from_account"].set("AmEx")
-        self.app.form_vars["to_account"].set("New shop")
-        # A selection notification already in the queue must see the final,
-        # cleared selection when it runs after Save.
         self.app.ledger.event_generate("<<TreeviewSelect>>", when="tail")
-        self.app.save_button.invoke()
+        source.entry.event_generate("<Return>")
         self.settle()
-        stored = self.repo.get_flow(row["flow_id"])
-        self.assertEqual((stored["from_account"], stored["to_account"]), ("AmEx", "New shop"))
+        self.assertEqual(self.repo.get_flow(row["flow_id"])["from_account"], "AmEx")
         self.assertEqual(len(self.repo.list_flows()), 1)
-        self.assert_empty_flow()
-        self.assertEqual(self.app.focus_get(), self.app.form_widgets["date"])
-        self.app.focus_get().event_generate("<KeyPress-Down>")
-        self.app.focus_get().event_generate("<KeyRelease-Down>")
+        self.assertEqual(self.app.editing_id, row["flow_id"])
+        self.assertEqual(self.app.ledger.selection(), (row["flow_id"],))
+        self.assert_no_popups()
+        self.app.new_flow_button.invoke()
         self.settle()
         self.assert_empty_flow()
 
@@ -213,35 +209,23 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.app._flow_snapshot(), before)
         self.assertEqual(self.repo.get_flow(row["flow_id"])["name"], "Original")
 
-    def test_dirty_row_change_honors_cancel_discard_and_save(self):
+    def test_dirty_row_change_saves_each_original_record_without_prompt(self):
         first = self.seed_flow(name="First")
         second = self.seed_flow(name="Second")
         self.click_flow(first)
-        self.app.form_vars["name"].set("First draft")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-            self.click_flow(second)
-        self.assertEqual(prompt.call_count, 1)
-        self.assertEqual(prompt.call_args.args[1], "Save changes to this flow?")
-        self.assertEqual(self.app.ledger.selection(), (first["flow_id"],))
-        self.assertEqual(self.app.editing_id, first["flow_id"])
-        self.assertEqual(self.app.form_vars["name"].get(), "First draft")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=False) as prompt:
-            self.click_flow(second)
-        self.assertEqual(prompt.call_count, 1)
+        self.app.form_vars["name"].set("First saved")
+        self.click_flow(second)
+        self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], "First saved")
         self.assertEqual(self.app.editing_id, second["flow_id"])
-        self.assertEqual(self.repo.get_flow(first["flow_id"])["name"], "First")
         self.app.form_vars["name"].set("Second saved")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True) as prompt:
-            self.click_flow(first)
-        self.assertEqual(prompt.call_count, 1)
-        self.assertEqual(self.repo.get_flow(second["flow_id"])["name"], "Second saved")
-        self.assertEqual(self.app.editing_id, first["flow_id"])
-        self.assertEqual(self.app.form_vars["name"].get(), "First")
+        self.click_flow(first)
         self.settle()
+        self.assertEqual(self.repo.get_flow(second["flow_id"])["name"], "Second saved")
+        self.assertEqual(self.app.form_vars["name"].get(), "First saved")
         self.assertEqual(self.app.ledger.selection(), (first["flow_id"],))
         self.assertEqual(self.app.ledger.focus(), first["flow_id"])
-        self.assertEqual(self.app.editing_id, first["flow_id"])
         self.assertEqual(self.app.form_title.cget("text"), "Edit Flow")
+        self.assertEqual(len(self.repo.list_flows()), 2)
 
     def test_invalid_save_during_row_change_preserves_draft_and_selection(self):
         first = self.seed_flow(name="First")
@@ -250,54 +234,51 @@ class GuiEditingStateTests(unittest.TestCase):
         self.app.form_vars["amount"].set("12.345")
         self.app.form_vars["to_account"].set("Not yet an account")
         before = self.app._flow_snapshot()
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=True):
-            self.click_flow(second)
+        self.click_flow(second)
         self.assertEqual(self.app.editing_id, first["flow_id"])
         self.assertEqual(self.app.ledger.selection(), (first["flow_id"],))
         self.assertEqual(self.app._flow_snapshot(), before)
         self.assertEqual(self.repo.get_flow(first["flow_id"])["amount_cents"], 2000)
         self.assertIsNone(self.repo.get_account("Not yet an account"))
 
-    def test_cancel_drops_edit_identity_and_every_optional_value(self):
+    def test_new_finishes_existing_edit_then_clears_every_optional_value(self):
         row = self.seed_flow(date="2026-10-02 14:00", tags=["Boat"], notes="Original note")
         self.click_flow(row)
-        self.app.form_vars["name"].set("Discard this change")
+        self.app.form_vars["name"].set("Keep this change")
         self.app.form_widgets["category"].entry.focus_force()
         self.pump()
         self.app.ledger.event_generate("<<TreeviewSelect>>", when="tail")
-        self.app.cancel_button.invoke()
+        self.app.new_flow_button.invoke()
         self.settle()
         self.assert_empty_flow()
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["name"], "Purchase")
+        self.assertEqual(self.repo.get_flow(row["flow_id"])["name"], "Keep this change")
         self.assertEqual(self.app.focus_get(), self.app.form_widgets["date"])
         self.app.focus_get().event_generate("<KeyPress-Down>")
         self.app.focus_get().event_generate("<KeyRelease-Down>")
         self.settle()
         self.assert_empty_flow()
 
-    def test_repeat_is_an_unsaved_new_record_even_before_typing(self):
-        first = self.seed_flow(name="Repeat this", date="2026-10-02 12:34", tags=["Trip"])
+    def test_repeat_copies_timestamp_and_status_but_row_selection_discards_draft(self):
+        first = self.seed_flow(name="Repeat this", date="2026-10-02 12:34:56", tags=["Trip"], status="Planned")
         second = self.seed_flow(name="Another record")
         self.click_flow(first)
+        before = self.app._flow_snapshot()
         self.app.repeat_selected()
         self.pump()
         self.assertIsNone(self.app.editing_id)
-        self.assertEqual(self.app.form_vars["name"].get(), "Repeat this")
-        self.assertEqual(self.app.form_vars["time"].get(), "")
-        with patch("flowledger.gui.messagebox.askyesnocancel", return_value=None) as prompt:
-            self.click_flow(second)
-        self.assertEqual(prompt.call_count, 1)
-        self.assertIsNone(self.app.editing_id)
-        self.assertEqual(self.app.form_vars["name"].get(), "Repeat this")
+        self.assertEqual(self.app._flow_snapshot(), before)
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.app.form_vars["name"].set("Unadded copy")
+        self.click_flow(second)
+        self.assertEqual(self.app.editing_id, second["flow_id"])
+        self.assertEqual(self.app.form_vars["name"].get(), "Another record")
         self.assertEqual(len(self.repo.list_flows()), 2)
-        self.app.cancel_button.invoke()
-        self.pump()
-        self.assert_empty_flow()
+        self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
 
     def test_void_clears_editor_so_old_complete_status_cannot_be_saved_back(self):
         row = self.seed_flow(name="Void me")
         self.click_flow(row)
-        with patch("flowledger.gui.messagebox.askyesno", return_value=True):
+        with patch("flowledger.gui.messagebox.askyesno", side_effect=self.unexpected_dialog):
             self.app.void_selected()
         self.settle()
         self.assert_empty_flow()
@@ -307,7 +288,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(row["flow_id"])["status"], "Void")
         self.assertEqual(len(self.repo.list_flows()), 1)
 
-    def test_account_refresh_preserves_draft_and_save_returns_to_empty_form(self):
+    def test_account_refresh_preserves_field_and_completion_keeps_selected_account(self):
         self.app.show_view("accounts")
         self.pump()
         self.click_row(self.app.accounts_tree, "Checking")
@@ -317,18 +298,12 @@ class GuiEditingStateTests(unittest.TestCase):
         self.app.refresh_all()
         self.pump()
         self.assertEqual(self.app._account_snapshot(), before)
-        self.app.account_save_button.invoke()
-        self.settle()
+        self.click_row(self.app.accounts_tree, "AmEx")
         saved = self.repo.get_account("Checking")
         self.assertEqual(saved["opening_cents"], 123456)
         self.assertEqual(saved["opening_at"], "2026-10-01 08:09:10")
         self.assertEqual(set(saved), {"name", "opening_cents", "opening_at"})
-        self.assertIsNone(self.app.account_editing)
-        self.assertEqual(self.app.accounts_tree.selection(), ())
-        for key in ("name", "opening", "time"):
-            self.assertEqual(self.app.account_vars[key].get(), "", key)
-        self.assertEqual(self.app.focus_get(), self.app.account_name_entry)
-        self.click_row(self.app.accounts_tree, "AmEx")
+        self.assertEqual(self.app.account_editing, "AmEx")
         self.assertEqual(self.app.account_vars["opening"].get(), "0.00")
         self.assertEqual(self.app.account_vars["time"].get(), "")
 

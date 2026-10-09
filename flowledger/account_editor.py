@@ -20,9 +20,16 @@ class AccountEditor(LedgerEditor):
         return self.app.account_editing
 
     def _select_draft(self, row):
-        if self.draft_id != row:
+        if self.tree.selection() != (row,):
             self.tree.selection_set(row)
-            self.app._select_account()
+        self.app._select_account()
+
+    @property
+    def record_kind(self):
+        return "account"
+
+    def variable_key(self, field):
+        return "opening" if field == "balance" else "date"
 
     def _make_widget(self, field):
         key = "opening" if field == "balance" else "date"
@@ -34,3 +41,4 @@ class AccountEditor(LedgerEditor):
     def _finish_field(self, field):
         if field == "anchor":
             self.app._split_account_date()
+        return self.app._finish_existing("account")

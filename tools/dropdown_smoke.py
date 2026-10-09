@@ -39,20 +39,30 @@ try:
     pump()
     row(app.ledger, fixture["flow_id"])
     replace(app.form_widgets["amount"], "15.67")
+    combo = show_all("from_account")
+    assert repo.get_flow(fixture["flow_id"])["amount_cents"] == 1567
     draft = app._flow_snapshot()
     database = "\n".join(repo.conn.iterdump())
-    combo = show_all("from_account")
     remove_visible(combo, "Checking")
     assert app._flow_snapshot() == draft
     assert "Checking" not in app.form_widgets["to_account"].values
     assert "\n".join(repo.conn.iterdump()) == database
     assert "Checking" in app.chart_accounts.get(0, "end")
-    ok("Account X updates both entry lists and preserves unsaved draft, records, and balances")
+    ok("Finishing Amount autosaves; account X updates both entry lists without changing fields or records")
 
-    click(app.save_button)
-    assert repo.get_flow(fixture["flow_id"])["amount_cents"] == 1567
+    key("Escape")
+    chord("Control_L", "z")
+    assert all("Checking" in app.form_widgets[field].values
+               for field in ("from_account", "to_account"))
+    assert "\n".join(repo.conn.iterdump()) == database
+    chord("Control_L", "y")
     assert "Checking" not in app.form_widgets["from_account"].values
-    clean_popups("Save keeps the removed suggestion absent and all dropdowns closed")
+    assert "Checking" not in app.form_widgets["to_account"].values
+    assert "\n".join(repo.conn.iterdump()) == database
+    clean_popups("Ctrl+Z and Ctrl+Y restore and remove an X suggestion without changing saved flows")
+
+    click(app.new_flow_button)
+    assert app.editing_id is None
 
     combo = app.form_widgets["category"]
     replace(combo.entry, "boaa")
@@ -95,6 +105,7 @@ try:
     assert combo.popup is None
     ok("Enter restores only the final quoted CSV tag without saving or replacing earlier tags")
 
+    app.history.close()
     app.destroy()
     app = FlowApp(repo, demo=True)
     app.geometry("1920x1200+0+0")
@@ -107,6 +118,7 @@ try:
     assert "Checking" not in app.form_widgets["from_account"].values
     assert "Boaat" not in app.form_widgets["category"].values
     assert "A12" not in app.form_widgets["to_account"].values
+    assert not app.history.can_undo and not app.history.can_redo
     database = "\n".join(repo.conn.iterdump())
     combo = app.form_widgets["from_account"]
     replace(combo.entry, "Checking")
@@ -114,6 +126,7 @@ try:
     assert all("Checking" in app.form_widgets[field].values
                for field in ("from_account", "to_account"))
     assert "\n".join(repo.conn.iterdump()) == database
+    assert app.history.undo_label == "Restore suggestion"
     ok("Fresh app restart retains removed suggestions; exact Enter restores an account in both lists")
 
     combo = show_all("from_account")
@@ -137,5 +150,6 @@ finally:
     report.write_text(json.dumps({"success":success,"input":"X11 XTest mouse and keyboard events",
         "passed":results,"errors":errors,"maps":maps,"database":str(path)},indent=2))
     print("Report:", report, flush=True)
+    app.history.close()
     app.destroy()
     repo.close()

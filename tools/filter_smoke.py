@@ -1,4 +1,4 @@
-"""Focused multiselect and Save/reset audit using native X11 mouse/keyboard input.
+"""Focused multiselect, autosave, and Add audit using native X11 input.
 
 Only setup and read-only outcome checks access application internals. Run on an
 isolated Xvfb display; see tools/README.txt.
@@ -111,15 +111,21 @@ try:
     click(status.checkbuttons["Complete"])
     assert set(app.ledger_rows) == {fixtures[1]["flow_id"]}
     assert app._flow_snapshot() == draft and app.editing_id == fixtures[0]["flow_id"]
-    click(app.save_button)
-    clean_new()
     assert repo.get_flow(fixtures[0]["flow_id"])["amount_cents"] == 2345
     assert repo.get_flow(fixtures[0]["flow_id"])["notes"] == "Updated notes"
+    assert app.save_button.instate(["disabled"])
+    # The selected flow stays editable even when filters hide its ledger row.
+    enter("amount", "24.56")
+    key("Return")
+    assert repo.get_flow(fixtures[0]["flow_id"])["amount_cents"] == 2456
+    assert fixtures[0]["flow_id"] not in app.ledger_rows
+    click(app.new_flow_button)
+    clean_new()
     assert status.get() == ("Pending",)
     assert set(category.get()) == {"Dining", "Boat"}
     assert set(tag.get()) == {"Audit trip", "Audit repair"}
     assert set(app.ledger_rows) == {fixtures[1]["flow_id"]}
-    ok("Row click edits directly; changing filters preserves draft; Save resets to New and keeps filters")
+    ok("Finished fields autosave even on a filtered-out flow; New Flow clears entry and retains filters")
 
     enter("from_account", "Checking")
     enter("to_account", "Corner Shop")
@@ -131,7 +137,7 @@ try:
     assert saved["amount_cents"] == 500 and saved["status"] == "Complete"
     assert saved["flow_id"] not in app.ledger_rows
     assert set(app.ledger_rows) == {fixtures[1]["flow_id"]}
-    ok("Saving a new flow hidden by current filters still stores it and immediately clears entry")
+    ok("Add Flow stores a new flow hidden by current filters and immediately clears entry")
 
     category = open_filter("Category")
     click(entry("from_account"))
@@ -173,7 +179,6 @@ try:
     app.geometry("1920x1200+0+0")
     pump()
     docs = Path(__file__).resolve().parents[1] / "docs"
-    ImageGrab.grab().save(docs / "Flow_Form.png")
     category = open_filter("Category")
     click(category.checkbuttons["Boat"])
     click(category.checkbuttons["Dining"])
@@ -184,5 +189,6 @@ finally:
     report.write_text(json.dumps({"success": success, "input": "X11 XTest mouse and keyboard events",
         "passed": results, "errors": errors, "maps": maps, "database": str(path)}, indent=2))
     print("Report:", report, flush=True)
+    app.history.close()
     app.destroy()
     repo.close()

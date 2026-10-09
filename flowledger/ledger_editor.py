@@ -1,8 +1,4 @@
-"""A cell-sized view of the existing Flow form draft.
-
-The editor shares the form's StringVars and notes buffer. It never writes a
-record; the form's Save and Cancel commands still own the whole transaction.
-"""
+"""A shared view of one field, saved when the user finishes editing it."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -33,7 +29,7 @@ class LedgerEditor:
         self.tree.bind("<Configure>", self.queue_position, add="+")
         self.tree.bind("<Unmap>", lambda event: self.close(), add="+")
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.tree.bind(sequence, lambda event: self.close(), add="+")
+            self.tree.bind(sequence, lambda event: None if self.close() else "break", add="+")
         app.bind("<Destroy>", self._destroyed, add="+")
 
     def _double_click(self, event):
@@ -65,15 +61,20 @@ class LedgerEditor:
         return self.flow_id
 
     def _select_draft(self, row):
-        if self.draft_id != row:
+        # A filter may hide then reveal this same draft with no selected row.
+        # Resolve selection now, before a queued TreeviewSelect can reload it.
+        if self.tree.selection() != (row,):
             self.tree.selection_set(row)
-            self.app._select_flow()
+        self.app._select_flow()
 
     def open(self, flow_id, field):
         """Open a cell on the selected draft, resolving any other draft first."""
         if field not in self.editable_columns or not self.tree.exists(flow_id):
             return False
-        self.close()
+        if not self.close():
+            return False
+        if not self.app._finish_existing(self.record_kind):
+            return False
         self._select_draft(flow_id)
         if self.draft_id != flow_id:
             return False  # Cancel or failed validation retained the old draft.
@@ -85,6 +86,7 @@ class LedgerEditor:
         self.flow_id, self.field = flow_id, field
         widget = self._make_widget(field)
         self.widget = widget
+        self.app._begin_field(self.record_kind, self.variable_key(field))
         self.position()
         if field != "notes":
             self.input.bind("<Return>", self._enter)
@@ -95,6 +97,8 @@ class LedgerEditor:
         self.input.bind("<ISO_Left_Tab>", lambda event: self._tab(-1))
         self.input.bind("<Escape>", self._escape)
         self.input.bind("<FocusOut>", self._defer_focus_check, add="+")
+        if isinstance(widget, ttk.Combobox):
+            widget.bind("<<ComboboxSelected>>", self._enter)
         if isinstance(widget, FilterCombo):
             # Geometry has been positioned before focus can map a popup.
             widget.focus_set(open_popup=False)
@@ -109,6 +113,13 @@ class LedgerEditor:
                 self.input.mark_set("insert", self.app.notes_text.index("insert"))
                 self.input.see("insert")
         return True
+
+    @property
+    def record_kind(self):
+        return "flow"
+
+    def variable_key(self, field):
+        return "amount" if field == "amount_cents" else field
 
     def _make_widget(self, field):
         variable_key = "amount" if field == "amount_cents" else field
@@ -151,7 +162,8 @@ class LedgerEditor:
         row, field = self.flow_id, self.field
         columns = self.editable_columns
         index = columns.index(field) + direction
-        self.close()
+        if not self.close():
+            return "break"
         if 0 <= index < len(columns):
             self.open(row, columns[index])
         else:
@@ -162,7 +174,8 @@ class LedgerEditor:
         if isinstance(self.widget, FilterCombo) and self.widget.popup is not None:
             self.widget.close_popup()
         else:
-            self.close(focus_tree=True)
+            self.app._revert_field(self.record_kind, self.variable_key(self.field))
+            self.close(focus_tree=True, commit=False)
         return "break"
 
     def _defer_focus_check(self, event=None):
@@ -207,7 +220,8 @@ class LedgerEditor:
         bounds = self.tree.bbox(self.flow_id, self.field)
         if (not bounds or self.draft_id != self.flow_id or
                 self.app.current_view != self.view_name or not self.tree.winfo_viewable()):
-            self.close()
+            if not self.close():
+                self.close(commit=False)  # Invalid draft remains visible in the top form.
             return
         if isinstance(self.widget, FilterCombo):
             self.widget.close_popup()
@@ -215,8 +229,13 @@ class LedgerEditor:
         self.widget.place(x=x, y=y, width=width, height=height)
         self.widget.lift()
 
-    def close(self, *, focus_tree=False):
-        """End this field's view while keeping every value in the shared draft."""
+    def close(self, *, focus_tree=False, commit=True):
+        """Finish a valid field; leave invalid input open for correction."""
+        if self.widget is not None and commit and not self.app._committing:
+            if not self._finish_field(self.field):
+                if self.input is not None:
+                    self.input.focus_set()
+                return False
         for attr in ("_focus_id", "_position_id"):
             after_id = getattr(self, attr)
             if after_id is not None:
@@ -226,16 +245,17 @@ class LedgerEditor:
         self.widget = self.input = None
         self.field = self.flow_id = None
         if widget is not None and widget.winfo_exists():
-            self._finish_field(field)
             if isinstance(widget, FilterCombo):
                 widget.close_popup()
             widget.destroy()
         if focus_tree:
             self.tree.focus_set()
+        return True
 
     def _finish_field(self, field):
         if field == "date":
             self.app._split_flow_date()
+        return self.app._finish_existing("flow")
 
     def refresh_suggestions(self):
         if isinstance(self.widget, FilterCombo):
@@ -243,4 +263,4 @@ class LedgerEditor:
 
     def _destroyed(self, event):
         if event.widget is self.app:
-            self.close()
+            self.close(commit=False)

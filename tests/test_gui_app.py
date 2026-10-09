@@ -65,7 +65,12 @@ class GuiIntegrationTests(unittest.TestCase):
     def enter(self, **changes):
         for key, value in changes.items():
             self.app.form_vars[key].set(value)
-        self.app.save_button.invoke()
+        if self.app.editing_id:
+            # Complete the edited field, just as Enter/Tab/blur does. Existing
+            # records deliberately have no active Add button.
+            self.app._field_enter("flow", next(reversed(changes)))
+        else:
+            self.app.save_button.invoke()
         self.pump()
 
     def select(self, flow):
@@ -105,9 +110,10 @@ class GuiIntegrationTests(unittest.TestCase):
         combo.remove_canvas.event_generate("<ButtonRelease-1>", x=x, y=y + height // 2)
         self.pump()
 
-    def test_account_suggestion_x_preserves_draft_records_and_other_views(self):
+    def test_account_suggestion_x_preserves_new_draft_records_and_other_views(self):
         flow = self.seed_flow(tags=["Trip"], notes="Existing notes")
         self.select(flow)
+        self.app.repeat_selected()
         self.app.form_vars["amount"].set("21.00")
         self.app.notes_text.insert("end", " and an unsaved edit")
         draft = self.app._flow_snapshot()
@@ -122,7 +128,7 @@ class GuiIntegrationTests(unittest.TestCase):
             self.assertNotIn("Checking", self.app.form_widgets[field].values)
         self.assertEqual(self.app._flow_snapshot(), draft)
         self.assertEqual(self.app._clean_flow, clean)
-        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertIsNone(self.app.editing_id)
         self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
         self.assertEqual(tuple(self.app.ledger.get_children()), ledger)
         self.assertEqual(tuple((iid, self.app.accounts_tree.item(iid, "values"))
@@ -155,9 +161,8 @@ class GuiIntegrationTests(unittest.TestCase):
                    ("tags", "Trip"), ("name", "Lunch"))
         for field, value in removed:
             self.remove_suggestion(field, value)
-        self.app.save_button.invoke()
-        self.pump()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.enter(amount="21.00")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "amount_cents": 2100})
         self.app.suggestion_preferences = SuggestionPreferences(self.repo.path)
         self.app.refresh_all()
         self.pump()
@@ -304,10 +309,12 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.refresh_ledger()
         self.assertEqual(len(self.app.ledger_rows), 4)
 
-    def test_filter_refresh_preserves_draft_and_filters_survive_save(self):
+    def test_filter_refresh_preserves_active_edit_and_filters_survive_autosave(self):
         row = self.seed_flow(category="Dining", tags=["Trip"], notes="Stored notes")
         other = self.seed_flow(category="Boat", status="Pending", tags=["Repair"])
         self.select(row)
+        self.app.notes_text.focus_force()
+        self.pump()
         self.app.form_vars["amount"].set("23.45")
         self.app.notes_text.insert("end", "\nStill editing")
         draft = self.app._flow_snapshot()
@@ -321,14 +328,14 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app._clean_flow, clean)
         self.assertEqual(self.app.editing_id, row["flow_id"])
         self.assertEqual(set(self.app.ledger_rows), {other["flow_id"]})
-        self.app.save_button.invoke()
+        self.app.ledger.focus_force()
         self.pump()
         self.assertEqual(self.repo.get_flow(row["flow_id"])["amount_cents"], 2345)
         self.assertEqual(self.repo.get_flow(row["flow_id"])["notes"], "Stored notes\nStill editing")
-        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app.editing_id, row["flow_id"])
         self.assertEqual(self.app._flow_snapshot(), self.app._clean_flow)
-        self.assertEqual(self.app.form_vars["amount"].get(), "")
-        self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
+        self.assertEqual(self.app.form_vars["amount"].get(), "23.45")
+        self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "Stored notes\nStill editing")
         self.assertEqual(set(self.app.ledger_rows), {other["flow_id"]})
         for label, values in chosen.items():
             self.assertEqual(self.app.ledger_filters[label].get(), values)
@@ -348,9 +355,9 @@ class GuiIntegrationTests(unittest.TestCase):
     def test_large_exact_amount_and_comma_tag_survive_edit(self):
         row = self.seed_flow(amount="90071992547409.93", tags=["Boat, trailer", 'A "quoted" tag'])
         self.select(row)
-        self.app.save_button.invoke()
-        self.pump()
+        self.enter(name="Exact amount preserved")
         updated = self.repo.get_flow(row["flow_id"])
+        self.assertEqual(updated["name"], "Exact amount preserved")
         self.assertEqual(updated["amount_cents"], 9007199254740993)
         self.assertEqual(updated["tags"], ["Boat, trailer", 'A "quoted" tag'])
 
@@ -431,10 +438,191 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertNotIn("time_specified", saved)
         self.assertNotIn("scenario", saved)
         self.assertIn("00:00:00", self.app.flow_tooltip(row["flow_id"]))
+        self.app.new_flow(focus=False)
         self.select(saved)
         self.assertEqual(self.app.form_vars["time"].get(), "00:00:00")
         self.app.repeat_selected()
-        self.assertEqual(self.app.form_vars["time"].get(), "")
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02")
+        self.assertEqual(self.app.form_vars["time"].get(), "00:00:00")
+        self.app.save_button.invoke()
+        self.pump()
+        self.assertEqual([flow["date"] for flow in self.repo.list_flows()],
+                         ["2026-10-02 00:00:00", "2026-10-02 00:00:00"])
+
+    def test_repeat_copies_every_field_and_add_is_one_undoable_action(self):
+        original = self.seed_flow(date="2026-10-02 01:02:03", status="Planned",
+                                  from_account="AmEx", to_account="Boat store",
+                                  amount="1234.56", category="Boat", name="Parts",
+                                  notes="First line\nSecond line", tags=["Trip", "Boat, trailer"])
+        self.select(original)
+        self.assertIn("disabled", self.app.save_button.state())
+        self.app.repeat_selected()
+        self.pump()
+        self.assertEqual(self.app.form_vars["date"].get(), "2026-10-02")
+        self.assertEqual(self.app.form_vars["time"].get(), "01:02:03")
+        self.assertEqual(self.app.form_vars["status"].get(), "Planned")
+        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.assertNotIn("disabled", self.app.save_button.state())
+        self.app.save_button.invoke()
+        self.pump()
+        copies = [flow for flow in self.repo.list_flows() if flow["flow_id"] != original["flow_id"]]
+        self.assertEqual(len(copies), 1)
+        repeated = copies[0]
+        self.assertEqual({key: value for key, value in repeated.items() if key != "flow_id"},
+                         {key: value for key, value in original.items() if key != "flow_id"})
+        self.assertIsNone(self.app.editing_id)
+        self.assertEqual(self.app.form_vars["amount"].get(), "")
+        self.app.undo()
+        self.pump()
+        self.assertEqual(self.repo.list_flows(), [original])
+        self.app.redo()
+        self.pump()
+        self.assertEqual(self.repo.get_flow(repeated["flow_id"]), repeated)
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+
+    def test_selecting_original_discards_repeat_draft_without_prompt(self):
+        original = self.seed_flow()
+        self.select(original)
+        self.app.repeat_selected()
+        self.app.form_vars["amount"].set("999.99")
+        self.app.notes_text.insert("end", "Unfinished draft")
+        with patch("flowledger.gui.messagebox.askyesnocancel",
+                   side_effect=AssertionError("Row navigation must not prompt")):
+            self.select(original)
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
+        self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
+        self.assertEqual(self.repo.list_flows(), [original])
+
+    def test_suggestion_x_can_be_undone_and_redone_without_changing_records(self):
+        original = self.seed_flow(category="Boat")
+        self.select(original)
+        self.remove_suggestion("category", "Boat")
+        self.assertNotIn("Boat", self.app.form_widgets["category"].values)
+        self.app.undo()
+        self.pump()
+        self.assertIn("Boat", self.app.form_widgets["category"].values)
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+        self.app.redo()
+        self.pump()
+        self.assertNotIn("Boat", self.app.form_widgets["category"].values)
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+
+    def test_time_dialog_undo_does_not_undo_an_unrelated_saved_record(self):
+        import tkinter as tk
+        from tkinter import ttk
+        self.enter(from_account="Checking", to_account="Shop", amount="20.00")
+        original = self.repo.list_flows()[0]
+        self.select(original)
+        self.app.time_button.invoke()
+        self.pump()
+        dialog = next(widget for widget in self.app.winfo_children() if isinstance(widget, tk.Toplevel))
+        def descendants(parent):
+            for child in parent.winfo_children():
+                yield child
+                yield from descendants(child)
+        entry = next(widget for widget in descendants(dialog) if isinstance(widget, ttk.Entry))
+        entry.focus_force()
+        self.pump()
+        entry.insert(0, "14:35")
+        entry.event_generate("<Control-z>")
+        self.pump()
+        self.assertEqual(self.repo.list_flows(), [original])
+        self.assertEqual(self.app.editing_id, original["flow_id"])
+        self.assertTrue(self.app.history.can_undo)
+        self.assertFalse(self.app.history.can_redo)
+        self.assertTrue(dialog.winfo_exists())
+        dialog.destroy()
+
+    def test_empty_redo_keeps_the_current_inline_edit(self):
+        original = self.seed_flow()
+        self.select(original)
+        self.assertTrue(self.app.ledger_editor.open(original["flow_id"], "amount_cents"))
+        self.pump()
+        editor = self.app.ledger_editor.input
+        editor.delete(0, "end")
+        editor.insert(0, "12.345")
+        self.assertFalse(self.app.history.can_redo)
+        editor.event_generate("<Control-y>")
+        self.pump()
+        self.assertIs(self.app.ledger_editor.input, editor)
+        self.assertEqual(editor.get(), "12.345")
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+        editor.event_generate("<Escape>")
+        self.pump()
+
+    def test_redo_after_fresh_typing_does_not_replace_existing_unsaved_field(self):
+        original = self.seed_flow()
+        self.select(original)
+        self.enter(amount="21.00")
+        self.app.undo()
+        self.pump()
+        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+        self.assertTrue(self.app.history.can_redo)
+        editor = self.app.form_widgets["amount"]
+        editor.focus_force()
+        self.pump()
+        editor.delete(0, "end")
+        editor.insert(0, "22.00")
+        editor.event_generate("<Control-z>")
+        self.pump()
+        self.assertEqual(editor.get(), "20.00")
+        editor.delete(0, "end")
+        editor.insert(0, "23.00")
+        # A stale typing-redo must not fall through to the saved 21.00 edit.
+        # Repeating Ctrl+Y must also leave this unfinished field alone.
+        for _ in range(2):
+            editor.event_generate("<Control-y>")
+            self.pump()
+            self.assertEqual(editor.get(), "23.00")
+            self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
+            self.assertEqual(self.app.editing_id, original["flow_id"])
+        editor.event_generate("<Escape>")
+        self.pump()
+
+    def test_redo_after_fresh_typing_does_not_add_an_undone_flow(self):
+        self.enter(from_account="Checking", to_account="Shop", amount="21.00")
+        self.app.undo()
+        self.pump()
+        self.assertEqual(self.repo.list_flows(), [])
+        self.assertTrue(self.app.history.can_redo)
+        editor = self.app.form_widgets["amount"]
+        editor.focus_force()
+        self.pump()
+        editor.insert(0, "22.00")
+        editor.event_generate("<Control-z>")
+        self.pump()
+        self.assertEqual(editor.get(), "")
+        editor.insert(0, "23.00")
+        for _ in range(2):
+            editor.event_generate("<Control-y>")
+            self.pump()
+            self.assertEqual(editor.get(), "23.00")
+            self.assertEqual(self.repo.list_flows(), [])
+            self.assertIsNone(self.app.editing_id)
+
+    def test_add_and_new_reestablish_typing_undo_when_date_keeps_focus(self):
+        editor = self.app.form_widgets["date"]
+        editor.focus_force()
+        self.pump()
+        self.enter(from_account="Checking", to_account="Shop", amount="21.00")
+        saved = self.repo.list_flows()[0]
+        for reset in (False, True):
+            with self.subTest(after_new=reset):
+                if reset:
+                    editor.event_generate("<Control-n>")
+                    self.pump()
+                self.assertIs(self.app.focus_get(), editor)
+                before = editor.get()
+                editor.delete(0, "end")
+                editor.insert(0, "2026-11-05")
+                editor.event_generate("<Control-z>")
+                self.pump()
+                self.assertEqual(editor.get(), before)
+                self.assertEqual(self.repo.list_flows(), [saved])
+                self.assertFalse(self.app.history.can_redo)
 
     def test_desktop_layout_uses_full_width_and_all_columns(self):
         for height in (1200, 1080):
@@ -551,7 +739,7 @@ class GuiIntegrationTests(unittest.TestCase):
         time_entry.delete(0, "end")
         time_entry.insert(0, "09:00:01")
         next(w for w in controls if isinstance(w, ttk.Button) and w.cget("text") == "Apply").invoke()
-        self.assertTrue(self.app.save_flow())
+        self.pump()
         self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-04 09:00:01")
         date_widget.focus_force()
         self.pump()
@@ -559,7 +747,8 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.notes_text.focus_set()
         self.pump()
         self.assertEqual(self.app.form_vars["date"].get(), "2026-02-31 12:00:00")
-        self.assertEqual(self.app.form_vars["time"].get(), "")
+        self.assertEqual(self.repo.get_flow(row["flow_id"])["date"], "2026-10-04 09:00:01")
+        self.assertTrue(self.app.form_feedback.get())
 
     def test_graph_map_and_resize_fit_scaled_canvas_and_date_labels(self):
         original_scaling = float(self.app.tk.call("tk", "scaling"))

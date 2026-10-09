@@ -61,8 +61,8 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.app.expanded_notes_text.get("1.0", "end-1c"),
                          "First line\nSecond line\nInline addition")
 
-    def test_escape_and_window_close_keep_notes_in_draft(self):
-        self.seed()
+    def test_escape_and_window_close_finish_existing_notes(self):
+        flow = self.seed()
         self.app.edit_notes()
         self.app.expanded_notes_text.insert("end-1c", "\nEscape keeps this")
         self.app.expanded_notes_text.focus_force()
@@ -71,11 +71,14 @@ class NotesTests(unittest.TestCase):
         self.pump()
         self.assertIsNone(self.app.notes_dialog)
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "Old notes\nEscape keeps this")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], "Old notes\nEscape keeps this")
         self.app.edit_notes()
         self.app.expanded_notes_text.insert("end-1c", "\nWindow close keeps this")
         self.app.tk.call(self.app.notes_dialog.protocol("WM_DELETE_WINDOW"))
         self.assertIsNone(self.app.notes_dialog)
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"),
+                         "Old notes\nEscape keeps this\nWindow close keeps this")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"],
                          "Old notes\nEscape keeps this\nWindow close keeps this")
 
     def test_expanded_close_stays_visible_at_default_and_minimum_sizes(self):
@@ -104,21 +107,20 @@ class NotesTests(unittest.TestCase):
                                  dialog.winfo_rooty() + dialog.winfo_height())
             self.assertGreater(self.app.expanded_notes_text.winfo_height(), 50)
 
-    def test_main_save_reads_expanded_immediately_and_preserves_whitespace(self):
+    def test_expanded_close_reads_immediately_and_preserves_whitespace(self):
         flow = self.seed()
         self.app.edit_notes()
         dialog = self.app.notes_dialog
         expected = "  Indented line\n\nSecond line  \n"
         self.app.expanded_notes_text.delete("1.0", "end")
         self.app.expanded_notes_text.insert("1.0", expected)
-        self.assertTrue(self.app.save_flow())  # No update()/Modified event first.
+        self.app._close_notes_editor()  # No update()/Modified event first.
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], expected)
         self.assertFalse(dialog.winfo_exists())
         self.assertIsNone(self.app.notes_dialog)
-        self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
-        self.app.ledger.selection_set(flow["flow_id"])
-        self.pump()
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), expected)
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_inline_arrows_reveal_wrapped_text(self):
         text = self.app.notes_text
