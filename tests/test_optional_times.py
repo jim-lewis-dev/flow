@@ -1,5 +1,6 @@
 """Optional date precision, exact-second arithmetic and old-data recovery."""
 from datetime import date, datetime
+from decimal import Decimal
 import hashlib
 from pathlib import Path
 import sqlite3
@@ -30,7 +31,7 @@ INSERT INTO audit VALUES(1,'2026-10-02 00:00:00','flow','00000000-0000-0000-0000
 """
 
 
-FLOW_FIELDS = {"date", "from_account", "to_account", "amount_cents", "status",
+FLOW_FIELDS = {"date", "from_account", "to_account", "units", 'amount', "status",
                "name", "notes", "category", "tags", "flow_id"}
 
 class OptionalTimeTests(unittest.TestCase):
@@ -42,7 +43,7 @@ class OptionalTimeTests(unittest.TestCase):
         self.addCleanup(self.repo.close)
 
     def flow(self, **changes):
-        return self.repo.save_flow({'date':'2026-10-02','from_account':'Cash',
+        return self.repo.save_flow({"units": "USD", 'date':'2026-10-02','from_account':'Cash',
                                    'to_account':'Shop','amount':'12.00',**changes})
 
     def make_v1(self):
@@ -60,33 +61,33 @@ class OptionalTimeTests(unittest.TestCase):
                 saved = self.flow(date=value)
                 self.assertEqual(saved['date'],expected)
                 self.assertEqual(set(saved),FLOW_FIELDS)
-        default = self.repo.save_flow({'from_account':'Cash','to_account':'Shop','amount':'1'})
+        default = self.repo.save_flow({"units": "USD", 'from_account':'Cash','to_account':'Shop','amount':'1'})
         self.assertEqual(default['date'],date.today().isoformat())
 
     def test_edit_and_void_preserve_date_only_without_duplicate_effect(self):
-        self.repo.save_account('Cash',10000,'2026-10-01')
+        self.repo.save_account('Cash','100','2026-10-01')
         saved = self.flow()
-        updated = self.repo.save_flow({**saved,'status':'Pending','amount_cents':1500})
+        updated = self.repo.save_flow({"units": "USD", **saved,'status':'Pending','amount':'15'})
         self.assertEqual(updated['date'],'2026-10-02')
         updated = self.repo.save_flow({**updated,'status':'Complete'})
         self.assertEqual(len(self.repo.list_flows()),1)
-        self.assertEqual(ledger_balance_at(self.repo.get_account('Cash'),self.repo.list_flows(),'2026-10-03'),8500)
+        self.assertEqual(ledger_balance_at(self.repo.get_account('Cash'),self.repo.list_flows(),'2026-10-03'),Decimal("85"))
         self.assertEqual(self.repo.void_flow(updated['flow_id'])['date'],'2026-10-02')
-        self.assertEqual(ledger_balance_at(self.repo.get_account('Cash'),self.repo.list_flows(),'2026-10-03'),10000)
+        self.assertEqual(ledger_balance_at(self.repo.get_account('Cash'),self.repo.list_flows(),'2026-10-03'),Decimal("100"))
 
     def test_exact_midnight_date_only_and_second_ordering_share_calculation_timestamps(self):
-        self.repo.save_account('Cash',10000,'2026-10-02')
+        self.repo.save_account('Cash','100','2026-10-02')
         # The explicit midnight has the smaller ID despite being entered last.
         date_only = self.flow(flow_id='00000000-0000-0000-0000-000000000002')
         later = self.flow(date='2026-10-02 00:00:01',amount='3',flow_id='00000000-0000-0000-0000-000000000003')
         midnight = self.flow(date='2026-10-02 00:00',amount='1',flow_id='00000000-0000-0000-0000-000000000001')
         self.assertEqual(self.repo.list_flows(),[midnight,date_only,later])
         account = self.repo.get_account('Cash')
-        self.assertEqual(ledger_balance_at(account,self.repo.list_flows(),'2026-10-02'),8700)
-        self.assertEqual(ledger_balance_at(account,self.repo.list_flows(),'2026-10-02 00:00:01'),8400)
-        self.assertEqual(ledger_timeline([account],self.repo.list_flows(),'2026-10-01 23:59:59','2026-10-02 00:00:02')['Cash'],
-                         [('2026-10-01 23:59:59',10000),('2026-10-02 00:00:00',8700),
-                          ('2026-10-02 00:00:01',8400),('2026-10-02 00:00:02',8400)])
+        self.assertEqual(ledger_balance_at(account,self.repo.list_flows(),'2026-10-02'),Decimal("87"))
+        self.assertEqual(ledger_balance_at(account,self.repo.list_flows(),'2026-10-02 00:00:01'),Decimal("84"))
+        self.assertEqual(ledger_timeline([account],self.repo.list_flows(),'2026-10-01 23:59:59','2026-10-02 00:00:02')['Cash', 'USD'],
+                         [('2026-10-01 23:59:59',Decimal("100")),('2026-10-02 00:00:00',Decimal("87")),
+                          ('2026-10-02 00:00:01',Decimal("84")),('2026-10-02 00:00:02',Decimal("84"))])
 
     def test_removed_fields_are_rejected_without_mutation(self):
         for values in ({'time_specified':False},{'time_specified':True},{'scenario':'Baseline'}, {'extra':'value'}):
@@ -102,12 +103,12 @@ class OptionalTimeTests(unittest.TestCase):
             audit = conn.execute('SELECT * FROM audit').fetchall()
         repo = Repository(path)
         try:
-            self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],4)
+            self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],5)
             self.assertEqual([row['date'] for row in repo.list_flows()],['2026-10-02','2026-10-02 12:34:56'])
             self.assertTrue(all(set(row)==FLOW_FIELDS for row in repo.list_flows()))
             self.assertEqual([tuple(row) for row in repo.conn.execute('SELECT * FROM audit')],audit)
-            self.assertEqual(ledger_balance_at(repo.get_account('Cash'),repo.list_flows(),'2026-10-03'),8800)
-            self.assertEqual(ledger_balance_at(repo.get_account('Cash'),repo.list_flows(),'2026-10-03',('Complete','Pending')),8600)
+            self.assertEqual(ledger_balance_at(repo.get_account('Cash'),repo.list_flows(),'2026-10-03'),Decimal("88"))
+            self.assertEqual(ledger_balance_at(repo.get_account('Cash'),repo.list_flows(),'2026-10-03',('Complete','Pending')),Decimal("86"))
             backup = Path(repo.migration_backup_path)
             self.assertTrue(backup.is_file())
             with sqlite3.connect(backup) as conn:
@@ -118,13 +119,13 @@ class OptionalTimeTests(unittest.TestCase):
         reopened = Repository(path)
         self.assertIsNone(reopened.migration_backup_path)
         reopened.close()
-        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v4-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v5-*.bak'))),1)
 
     def test_failed_migration_keeps_legacy_data_and_pre_upgrade_snapshot(self):
         path = self.make_v1()
         real_validate = Repository._validate_database
         def reject_upgrade(conn, **kwargs):
-            if conn.execute('PRAGMA user_version').fetchone()[0] == 4:
+            if conn.execute('PRAGMA user_version').fetchone()[0] == 5:
                 raise ValueError('simulated migration validation failure')
             real_validate(conn, **kwargs)
         with patch.object(Repository,'_validate_database',side_effect=reject_upgrade):
@@ -133,7 +134,7 @@ class OptionalTimeTests(unittest.TestCase):
         with sqlite3.connect(path) as conn:
             self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0],1)
             self.assertEqual(conn.execute('SELECT count(*) FROM flows').fetchone()[0],2)
-        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v4-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v5-*.bak'))),1)
 
     def test_restore_v1_migrates_private_copy_and_keeps_source_unchanged(self):
         path = self.make_v1()
@@ -141,7 +142,7 @@ class OptionalTimeTests(unittest.TestCase):
         active = self.flow(name='Current data')
         self.repo.restore(path)
         self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),source_hash)
-        self.assertEqual(self.repo.conn.execute('PRAGMA user_version').fetchone()[0],4)
+        self.assertEqual(self.repo.conn.execute('PRAGMA user_version').fetchone()[0],5)
         self.assertEqual([row['date'] for row in self.repo.list_flows()],['2026-10-02','2026-10-02 12:34:56'])
         safety = list(self.root.glob('active.sqlite3.pre-restore-*.bak'))
         self.assertEqual(len(safety),1)

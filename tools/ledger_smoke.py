@@ -7,23 +7,23 @@ from pathlib import Path
 
 
 def seed_ledger_data(repo):
-    repo.save_account("Checking", 100000, "2026-10-01")
-    repo.save_account("Savings", 50000, "2026-10-01")
-    repo.save_account("AmEx", -25000, "2026-10-01")
+    repo.save_account("Checking", '1000', "2026-10-01")
+    repo.save_account("Savings", '500', "2026-10-01")
+    repo.save_account("AmEx", '-250', "2026-10-01")
     for date, source, destination, amount, name, category, status, notes, tags in (
         ("2026-10-03 12:30:15", "Checking", "Corner Shop", "12.34", "Lunch", "Dining", "Complete", "First saved note", ["Trip"]),
         ("2026-10-02 09:10:11", "AmEx", "Boat Store", "56.78", "Boat supplies", "Boat", "Pending", "Second saved note", ["Weekend"]),
     ):
         repo.save_flow(dict(date=date, from_account=source, to_account=destination,
-                            amount=amount, name=name, category=category,
+                            amount=amount, units="USD", name=name, category=category,
                             status=status, notes=notes, tags=tags))
     for number in range(45):
         repo.save_flow(dict(date=f"2026-09-{number % 28 + 1:02d}",
                             from_account="Checking", to_account="Corner Shop",
-                            amount="5", name=f"Earlier flow {number:02d}",
+                            amount="5", units="USD", name=f"Earlier flow {number:02d}",
                             category="Earlier", status="Complete"))
     repo.save_flow(dict(date="2026-09-01", from_account="Checking",
-                        to_account="Savings", amount="1", status="Void"))
+                        to_account="Savings", amount="1", units="USD", status="Void"))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text()
@@ -154,7 +154,7 @@ def no_prompt():
 def check_copy(flow):
     expected = {
         "from_account": flow["from_account"], "to_account": flow["to_account"],
-        "amount": f'{flow["amount_cents"] / 100:.2f}', "status": flow["status"],
+        "amount": flow["amount"], "units": flow["units"], "status": flow["status"],
         "name": flow["name"], "category": flow["category"],
     }
     for field, value in expected.items():
@@ -184,19 +184,19 @@ try:
     fresh_form()
     ok("Moving from suggestions to the native Status list closes the old popup without focus errors")
 
-    replace_all(edit_cell(first, "amount_cents"), "23.45")
+    replace_all(edit_cell(first, "amount"), "23.45")
     assert app.form_vars["amount"].get() == "23.45"
-    assert preview(first, "amount_cents") == "$23.45"
-    assert saved(first)["amount_cents"] == 1234
+    assert preview(first, "amount") == "23.45"
+    assert saved(first)["amount"] == '12.34'
     key("Return")
     editor_closed()
-    assert saved(first)["amount_cents"] == 2345
+    assert saved(first)["amount"] == '23.45'
     assert app.editing_id == first and app.ledger.selection() == (first,)
     no_prompt()
     chord("Control_L", "z")
-    assert saved(first)["amount_cents"] == 1234
+    assert saved(first)["amount"] == '12.34'
     chord("Control_L", "y")
-    assert saved(first)["amount_cents"] == 2345
+    assert saved(first)["amount"] == '23.45'
     ok("Enter saves an existing ledger amount once; Ctrl+Z and Ctrl+Y reverse and restore the field")
 
     row(app.ledger, first)
@@ -206,14 +206,14 @@ try:
     assert saved(first)["name"] == "Friday lunch"
     replace_all(top_entry("amount"), "24.68")
     key("Tab")
-    assert saved(first)["amount_cents"] == 2468
+    assert saved(first)["amount"] == '24.68'
     chord("Control_L", "z")
-    assert saved(first)["amount_cents"] == 2345 and saved(first)["name"] == "Friday lunch"
+    assert saved(first)["amount"] == '23.45' and saved(first)["name"] == "Friday lunch"
     chord("Control_L", "z")
     assert saved(first)["name"] == "Lunch"
     chord("Control_L", "y")
     chord("Control_L", "y")
-    assert saved(first)["name"] == "Friday lunch" and saved(first)["amount_cents"] == 2468
+    assert saved(first)["name"] == "Friday lunch" and saved(first)["amount"] == '24.68'
     ok("Top fields save on click-away and Tab; each completed field has one undo step")
 
     row(app.ledger, first)
@@ -344,15 +344,15 @@ try:
         assert app.notes_text.bbox("insert") is not None
     ok("Ledger and expanded Notes save multiline text; closing the expansion saves once and undo restores the prior note")
 
-    previous = saved(first)["amount_cents"]
-    replace_all(edit_cell(first, "amount_cents"), "oops")
+    previous = saved(first)["amount"]
+    replace_all(edit_cell(first, "amount"), "oops")
     key("Return")
-    assert saved(first)["amount_cents"] == previous
+    assert saved(first)["amount"] == previous
     assert app.form_feedback.get(), "Invalid edit needs visible feedback"
     assert app.editing_id == first
     key("Escape")
-    assert saved(first)["amount_cents"] == previous
-    assert app.form_vars["amount"].get() == f"{previous / 100:.2f}"
+    assert saved(first)["amount"] == previous
+    assert app.form_vars["amount"].get() == previous
     no_prompt()
     ok("Invalid amounts remain unsaved with visible feedback; Escape restores the saved value without a confirmation")
 
@@ -375,9 +375,9 @@ try:
     assert saved(first)["name"] == "Completed once"
     ok("No-op completion adds no history; Ctrl+Z first abandons an unfinished field, then undoes the saved edit")
 
-    replace_all(edit_cell(first, "amount_cents"), "27.89")
+    replace_all(edit_cell(first, "amount"), "27.89")
     replace_all(search_entry(), "Boat supplies")
-    assert saved(first)["amount_cents"] == 2789
+    assert saved(first)["amount"] == '27.89'
     assert first not in app.ledger_rows
     editor_closed()
     replace_all(search_entry(), "")

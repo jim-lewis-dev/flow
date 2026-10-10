@@ -18,9 +18,9 @@
   "maps": [
     {
       "path": ".!frame2.!frame2.!frame2.!treeview.!toplevel",
-      "geometry": "352x29+1390+321",
+      "geometry": "352x29+550+321",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-g779x55h/demo.sqlite3"
+  "database": "/tmp/flow-real-input-r2abnjos/demo.sqlite3"
 }

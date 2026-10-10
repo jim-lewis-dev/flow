@@ -39,6 +39,24 @@ class SuggestionPreferencesTests(unittest.TestCase):
         for kind in ("category", "tag", "name"):
             self.assertEqual(self.preferences.visible(kind, values), values)
 
+    def test_unit_identity_is_case_sensitive_and_survives_restart(self):
+        values = ["USD", "mW", "MW", "kg"]
+        self.assertTrue(self.preferences.remove("unit", " mW "))
+        self.assertEqual(self.preferences.visible("unit", values), ["USD", "MW", "kg"])
+        restarted = SuggestionPreferences(self.database)
+        self.assertEqual(restarted.visible("unit", values), ["USD", "MW", "kg"])
+        self.assertFalse(restarted.restore("unit", "MW"))
+        self.assertEqual(restarted.visible("unit", values), ["USD", "MW", "kg"])
+        self.assertTrue(restarted.restore("unit", "mW"))
+        self.assertEqual(restarted.visible("unit", values), values)
+
+    def test_old_preferences_load_with_empty_unit_removals(self):
+        self.preferences.path.write_text('{"account": ["cash"], "category": [], "tag": [], "name": []}')
+        restarted = SuggestionPreferences(self.database)
+        self.assertIsNone(restarted.load_error)
+        self.assertEqual(restarted.visible("unit", ["USD", "kg"]), ["USD", "kg"])
+        self.assertEqual(restarted.visible("account", ["Cash", "Shop"]), ["Shop"])
+
     def test_different_databases_and_memory_instances_are_isolated(self):
         self.preferences.remove("name", "Lunch")
         other = SuggestionPreferences(Path(self.temp.name) / "other.sqlite3")
@@ -54,7 +72,7 @@ class SuggestionPreferencesTests(unittest.TestCase):
     def test_preferences_never_change_saved_objects_or_database(self):
         repo = Repository(self.database)
         flow = repo.save_flow(dict(from_account="Cash", to_account="Shop",
-                                   amount="12.00", name="Lunch", category="Dining",
+                                   amount="12.00", units="USD", name="Lunch", category="Dining",
                                    tags=["Trip"]))
         before = "\n".join(repo.conn.iterdump())
         for kind, value in (("account", "Shop"), ("category", "Dining"),

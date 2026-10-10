@@ -22,8 +22,8 @@ class GuiIntegrationTests(unittest.TestCase):
 
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "gui.sqlite3")
-        self.repo.save_account("Checking", 100000)
-        self.repo.save_account("AmEx", 0)
+        self.repo.save_account("Checking", '1000')
+        self.repo.save_account("AmEx", '0')
         self.callback_errors = []
         errors = self.callback_errors
 
@@ -80,7 +80,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.pump()
 
     def seed_flow(self, **changes):
-        data = dict(date="2026-10-02 12:00", from_account="Checking", to_account="Shop",
+        data = dict(units="USD", date="2026-10-02 12:00", from_account="Checking", to_account="Shop",
                     amount="20.00", category="Dining", name="Lunch")
         data.update(changes)
         flow = self.repo.save_flow(data)
@@ -91,7 +91,7 @@ class GuiIntegrationTests(unittest.TestCase):
     def select_chart(self, *names):
         self.app.chart_accounts.selection_clear(0, "end")
         for index in range(self.app.chart_accounts.size()):
-            if self.app.chart_accounts.get(index) in names:
+            if self.app.chart_account_pairs[index][0] in names:
                 self.app.chart_accounts.selection_set(index)
 
     def remove_suggestion(self, field, value):
@@ -134,7 +134,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(tuple((iid, self.app.accounts_tree.item(iid, "values"))
                                for iid in self.app.accounts_tree.get_children()), accounts)
         self.assertEqual(self.app.chart_accounts.get(0, "end"), chart_choices)
-        self.assertIn("Checking", chart_choices)
+        self.assertIn("Checking · USD", chart_choices)
 
     def test_category_tag_and_name_x_leave_ledger_filters_and_records_intact(self):
         flow = self.seed_flow(tags=["Trip"])
@@ -162,7 +162,7 @@ class GuiIntegrationTests(unittest.TestCase):
         for field, value in removed:
             self.remove_suggestion(field, value)
         self.enter(amount="21.00")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "amount_cents": 2100})
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, 'amount': '21'})
         self.app.suggestion_preferences = SuggestionPreferences(self.repo.path)
         self.app.refresh_all()
         self.pump()
@@ -225,8 +225,8 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["date"], datetime.now().strftime("%Y-%m-%d"))
         self.assertEqual(set(rows[0]), {"flow_id", "date", "from_account", "to_account",
-                                       "amount_cents", "status", "name", "notes", "category", "tags"})
-        self.assertEqual(rows[0]["amount_cents"], 1234)
+                                       "units", 'amount', "status", "name", "notes", "category", "tags"})
+        self.assertEqual(rows[0]['amount'], '12.34')
         self.assertEqual(rows[0]["category"], "Boat")
         self.assertIn("Boat", self.app.form_widgets["category"].values)
         self.assertIn("Boat store", self.app.form_widgets["from_account"].values)
@@ -257,15 +257,15 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.ledger_filters["Tag"].set_selected(("Trip",))
         self.app.refresh_ledger()
         self.assertEqual(list(self.app.ledger_rows), [wanted["flow_id"]])
-        self.assertEqual(self.app.report_summary.get(), "Complete · $12.00 flow volume")
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 12 USD')
 
     def test_invalid_flow_stays_editable_and_does_not_create_vocabulary(self):
-        self.enter(from_account="Checking", to_account="Brand new shop", amount="12.345", category="New hobby")
+        self.enter(from_account="Checking", to_account="Brand new shop", amount="invalid", category="New hobby")
         self.assertEqual(self.repo.list_flows(), [])
         self.assertIsNone(self.repo.get_account("Brand new shop"))
         self.assertNotIn("New hobby", self.repo.list_categories())
-        self.assertEqual(self.app.form_vars["amount"].get(), "12.345")
-        self.assertIn("exact", self.app.form_feedback.get().casefold())
+        self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
+        self.assertIn("decimal", self.app.form_feedback.get().casefold())
 
     def test_multiselect_filters_use_any_value_within_each_field(self):
         dining = self.seed_flow(category="Dining", tags=["Trip"], amount="12")
@@ -281,7 +281,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(set(self.app.ledger_rows), wanted)
         self.assertEqual({flow["flow_id"] for flow in self.app.report_rows}, wanted)
         self.assertEqual([value.get() for value in self.app.metric_vars], ["1", "1", "2"])
-        self.assertEqual(self.app.report_summary.get(), "Complete · $12.00 flow volume")
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 12 USD')
         # Tags match exact elements, including a comma inside one quoted tag.
         quoted = self.seed_flow(category="Boat", tags=["Boat, trailer"], amount="8")
         self.app.ledger_filters["Tag"].set_selected(("Boat, trailer", "Maintenance"))
@@ -329,7 +329,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(set(self.app.ledger_rows), {other["flow_id"]})
         self.app.ledger.focus_force()
         self.pump()
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["amount_cents"], 2345)
+        self.assertEqual(self.repo.get_flow(row["flow_id"])['amount'], '23.45')
         self.assertEqual(self.repo.get_flow(row["flow_id"])["notes"], "Stored notes\nStill editing")
         self.assertEqual(self.app.editing_id, row["flow_id"])
         self.assertEqual(self.app._flow_snapshot(), self.app._clean_flow)
@@ -348,7 +348,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 1)
         self.assertEqual(updated["status"], "Complete")
         self.assertEqual(updated["date"], "2026-10-02 13:14:15")
-        self.assertEqual(updated["amount_cents"], 2400)
+        self.assertEqual(updated['amount'], '24')
         self.assertEqual([v.get() for v in self.app.metric_vars], ["1", "0", "1"])
 
     def test_large_exact_amount_and_comma_tag_survive_edit(self):
@@ -357,7 +357,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.enter(name="Exact amount preserved")
         updated = self.repo.get_flow(row["flow_id"])
         self.assertEqual(updated["name"], "Exact amount preserved")
-        self.assertEqual(updated["amount_cents"], 9007199254740993)
+        self.assertEqual(updated['amount'], '90071992547409.93')
         self.assertEqual(updated["tags"], ["Boat, trailer", 'A "quoted" tag'])
 
     def test_saving_while_search_or_status_filter_hides_new_row_is_safe(self):
@@ -378,7 +378,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.account_vars["opening"].set("")
         self.app.save_account()
         self.pump()
-        self.assertIsNone(self.repo.get_account("Savings")["opening_cents"])
+        self.assertIsNone(self.repo.get_account("Savings")['opening_amount'])
         self.seed_flow(to_account="Savings")
         self.select_chart("Checking", "Savings")
         self.app.chart_combined.set(True)
@@ -407,17 +407,17 @@ class GuiIntegrationTests(unittest.TestCase):
         self.seed_flow(status="Planned", amount="8")
         self.seed_flow(status="Void", amount="5")
         self.assertEqual([v.get() for v in self.app.metric_vars], ["1", "1", "4"])
-        self.assertEqual(self.app.report_summary.get(), "Complete · $40.00 flow volume")
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 40 USD')
         self.app.ledger_filters["Status"].set_selected(("Pending",))
         self.app.refresh_ledger()
         self.assertEqual([v.get() for v in self.app.metric_vars], ["0", "1", "1"])
-        self.assertEqual(self.app.report_summary.get(), "Complete · $0.00 flow volume")
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 0 flows')
 
     def test_account_gui_and_graph_do_not_infer_ownership(self):
         self.seed_flow()
         self.assertFalse(hasattr(self.app, "account_mine"))
         self.assertFalse(hasattr(self.app, "account_archived"))
-        self.assertEqual(set(self.repo.get_account("Checking")), {"name", "opening_cents", "opening_at"})
+        self.assertEqual(set(self.repo.get_account("Checking")), {"name", "units", 'opening_amount', "opening_at"})
         self.assertEqual(len(self.app.chart_accounts.curselection()), 1)
         selected = self.app.chart_accounts.get(self.app.chart_accounts.curselection()[0])
         self.assertEqual(selected, self.app.chart_accounts.get(0))
@@ -489,7 +489,7 @@ class GuiIntegrationTests(unittest.TestCase):
                    side_effect=AssertionError("Row navigation must not prompt")):
             self.select(original)
         self.assertEqual(self.app.editing_id, original["flow_id"])
-        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
+        self.assertEqual(self.app.form_vars["amount"].get(), "20")
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
         self.assertEqual(self.repo.list_flows(), [original])
 
@@ -537,16 +537,16 @@ class GuiIntegrationTests(unittest.TestCase):
     def test_empty_redo_keeps_the_current_inline_edit(self):
         original = self.seed_flow()
         self.select(original)
-        self.assertTrue(self.app.ledger_editor.open(original["flow_id"], "amount_cents"))
+        self.assertTrue(self.app.ledger_editor.open(original["flow_id"], 'amount'))
         self.pump()
         editor = self.app.ledger_editor.input
         editor.delete(0, "end")
-        editor.insert(0, "12.345")
+        editor.insert(0, "invalid")
         self.assertFalse(self.app.history.can_redo)
         editor.event_generate("<Control-y>")
         self.pump()
         self.assertIs(self.app.ledger_editor.input, editor)
-        self.assertEqual(editor.get(), "12.345")
+        self.assertEqual(editor.get(), "invalid")
         self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
         editor.event_generate("<Escape>")
         self.pump()
@@ -566,7 +566,7 @@ class GuiIntegrationTests(unittest.TestCase):
         editor.insert(0, "22.00")
         editor.event_generate("<Control-z>")
         self.pump()
-        self.assertEqual(editor.get(), "20.00")
+        self.assertEqual(editor.get(), "20")
         editor.delete(0, "end")
         editor.insert(0, "23.00")
         # A stale typing-redo must not fall through to the saved 21.00 edit.
@@ -628,7 +628,7 @@ class GuiIntegrationTests(unittest.TestCase):
             self.app.geometry(f"1920x{height}+0+0")
             self.app.show_view("flows")
             self.pump()
-            self.assertEqual(len(self.app.ledger["columns"]), 9)
+            self.assertEqual(len(self.app.ledger["columns"]), 10)
             self.assertEqual(self.app.ledger.xview(), (0.0, 1.0))
             self.assertGreater(self.app.ledger.winfo_width(), 1800)
             self.assertGreater(self.app.ledger.winfo_height(), height*.5)

@@ -6,6 +6,11 @@ from unittest.mock import patch
 from flowledger.core import Repository
 
 
+def account_key(name, units="USD"):
+    import json
+    return json.dumps([name, units], ensure_ascii=False)
+
+
 class ReferencedAccountsTests(unittest.TestCase):
     def setUp(self):
         self.repo = Repository(":memory:")
@@ -14,25 +19,25 @@ class ReferencedAccountsTests(unittest.TestCase):
         self.repo.close()
 
     def flow(self, **changes):
-        return self.repo.save_flow(dict(date="2026-10-02", from_account="Checking",
+        return self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account="Checking",
                                        to_account="Shop", amount="12.34", **changes))
 
     def names(self):
         return [a["name"] for a in self.repo.list_accounts(referenced_only=True)]
 
     def test_starting_balance_alone_is_hidden_but_not_lost(self):
-        anchor = self.repo.save_account("Unused", 98765, "2026-10-01 12:34:56")
+        anchor = self.repo.save_account("Unused", '987.65', "2026-10-01 12:34:56")
         self.assertEqual(self.names(), [])
         self.assertEqual(self.repo.get_account("Unused"), anchor)
         self.assertEqual(self.repo.list_accounts(), [anchor])
 
     def test_both_directions_all_statuses_and_canonical_names_count(self):
-        self.repo.save_account("Checking", 100000)
+        self.repo.save_account("Checking", '1000')
         for status in ("Complete", "Pending", "Planned", "Void"):
-            self.repo.save_flow(dict(date="2026-10-02", from_account=" checking ",
+            self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account=" checking ",
                                     to_account=status, amount="1", status=status))
         self.assertEqual(self.names(), ["Checking", "Complete", "Pending", "Planned", "Void"])
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 100000)
+        self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '1000')
 
     def test_last_reference_in_either_direction_controls_visibility(self):
         first = self.flow()
@@ -50,9 +55,9 @@ class AccountVisibilityGuiTests(unittest.TestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.repo = Repository(":memory:")
-        self.anchor = self.repo.save_account("Typo", 54321, "2026-10-01 12:34:56")
-        self.repo.save_account("Checking", 100000)
-        self.flow = self.repo.save_flow(dict(date="2026-10-02", from_account="Typo",
+        self.anchor = self.repo.save_account("Typo", '543.21', "2026-10-01 12:34:56")
+        self.repo.save_account("Checking", '1000')
+        self.flow = self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account="Typo",
                                             to_account="Checking", amount="12.34"))
         self.errors = []
         errors = self.errors
@@ -82,11 +87,11 @@ class AccountVisibilityGuiTests(unittest.TestCase):
 
     def assert_names(self, *names):
         expected = set(names)
-        self.assertEqual(set(self.app.accounts_tree.get_children()), expected)
-        self.assertEqual(set(self.app.chart_accounts.get(0, "end")), expected)
+        self.assertEqual({self.app.account_rows[key]["name"] for key in self.app.accounts_tree.get_children()}, expected)
+        self.assertEqual({name for name, units in self.app.chart_account_pairs}, expected)
         for field in ("from_account", "to_account"):
             self.assertEqual(set(self.app.form_widgets[field].values), expected)
-        self.assertEqual(self.app.account_summary.get(), f"{len(expected)} accounts")
+        self.assertEqual(self.app.account_summary.get(), f"{len(expected)} accounts · {len(expected)} balances")
 
     def select_flow(self):
         self.app.ledger.selection_set(self.flow["flow_id"])
@@ -146,9 +151,9 @@ class AccountVisibilityGuiTests(unittest.TestCase):
         self.app.form_vars["amount"].set("5")
         self.assertTrue(self.app.save_flow())
         self.app.show_view("accounts")
-        self.app.accounts_tree.selection_set("Typo")
+        self.app.accounts_tree.selection_set(account_key("Typo"))
         self.pump()
-        self.assertEqual(self.app.account_editing, "Typo")
+        self.assertEqual(self.app.account_editing, account_key("Typo"))
         self.app.undo()
         self.pump()
         self.assert_names("Checking", "Correct")
@@ -164,11 +169,11 @@ class AccountVisibilityGuiTests(unittest.TestCase):
         self.pump()
         self.assert_names("Checking", "Typo")
         self.assertIn("used in a flow", self.app.status_message.get())
-        self.assertEqual(self.repo.get_account("Savings")["opening_cents"], 3456)
+        self.assertEqual(self.repo.get_account("Savings")['opening_amount'], '34.56')
         self.app.account_vars["name"].set("Savings")
         self.assertFalse(self.app.save_account())
         self.assertIn("Use it in a flow", self.app.account_feedback.get())
-        self.assertEqual(self.repo.get_account("Savings")["opening_cents"], 3456)
+        self.assertEqual(self.repo.get_account("Savings")['opening_amount'], '34.56')
 
     def test_validation_reports_errors_without_sound(self):
         # Catch reintroduced Python bell calls while exercising all four former
@@ -182,7 +187,7 @@ class AccountVisibilityGuiTests(unittest.TestCase):
             self.app.account_vars["opening"].set("invalid")
             self.assertFalse(self.app.save_account())
             self.assertTrue(self.app.account_feedback.get())
-            self.app.accounts_tree.selection_set("Checking")
+            self.app.accounts_tree.selection_set(account_key("Checking"))
             self.pump()
             self.app.account_vars["opening"].set("invalid")
             self.assertFalse(self.app._finish_existing("account"))
@@ -224,7 +229,7 @@ class AccountVisibilityGuiTests(unittest.TestCase):
         self.app.form_vars["amount"].set("45.67")
         self.click_empty_ledger()
         self.assert_empty_entry()
-        self.assertEqual(self.repo.get_flow(self.flow["flow_id"])["amount_cents"], 4567)
+        self.assertEqual(self.repo.get_flow(self.flow["flow_id"])['amount'], '45.67')
         self.app.undo()
         self.pump()
         self.assertEqual(self.repo.get_flow(self.flow["flow_id"]), self.flow)
@@ -245,7 +250,7 @@ class AccountVisibilityGuiTests(unittest.TestCase):
 
     def test_empty_ledger_click_closes_invalid_inline_edit_without_writing_it(self):
         self.select_flow()
-        self.assertTrue(self.app.ledger_editor.open(self.flow["flow_id"], "amount_cents"))
+        self.assertTrue(self.app.ledger_editor.open(self.flow["flow_id"], 'amount'))
         self.pump()
         self.app.form_vars["amount"].set("invalid")
         self.click_empty_ledger()

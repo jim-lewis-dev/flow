@@ -39,7 +39,7 @@ class NotesTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
 
     def seed(self, notes="Old notes"):
-        flow = self.repo.save_flow(dict(date="2026-10-02", from_account="Checking",
+        flow = self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account="Checking",
                                        to_account="Shop", amount="12.00", notes=notes))
         self.app.refresh_all()
         self.app.ledger.selection_set(flow["flow_id"])
@@ -158,7 +158,7 @@ class NotesTests(unittest.TestCase):
 
     def test_reset_destroys_old_expanded_view_before_loading_another_record(self):
         first = self.seed("First record")
-        second = self.repo.save_flow(dict(date="2026-10-02", from_account="Checking",
+        second = self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account="Checking",
                                          to_account="Shop", amount="9.00", notes="Second record"))
         self.app.edit_notes()
         old_editor = self.app.expanded_notes_text

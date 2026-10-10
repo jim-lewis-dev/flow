@@ -15,14 +15,15 @@ import uuid
 
 
 _COLUMNS = {
-    "accounts": ("account_key", "name", "opening_cents", "opening_at"),
+    "accounts": ("account_key", "name"),
+    "account_balances": ("account_key", "units", "opening_amount", "opening_at"),
     "categories": ("category_key", "name"),
     "tags": ("tag_key", "name"),
-    "flows": ("flow_id", "date", "from_key", "to_key", "amount_cents",
+    "flows": ("flow_id", "date", "from_key", "to_key", "amount", "units",
               "status", "name", "notes", "category_key"),
     "flow_tags": ("flow_id", "tag_key", "position"),
 }
-_KEY_LENGTH = {table: 2 if table == "flow_tags" else 1 for table in _COLUMNS}
+_KEY_LENGTH = {table: 2 if table in ("flow_tags", "account_balances") else 1 for table in _COLUMNS}
 _T = TypeVar("_T")
 
 
@@ -208,9 +209,9 @@ class SessionHistory:
                 identity = "flow", change.key[0]
                 if identity not in records:
                     records[identity] = self.repo.get_flow(change.key[0])
-            elif change.table == "accounts":
-                identity = "account", change.key[0]
-                records[identity] = self.repo.get_account(change.key[0])
+            elif change.table == "account_balances":
+                identity = "account", change.key
+                records[identity] = self.repo.get_account(*change.key)
         return records
 
     def _restore(self, action: _Action, *, undo: bool) -> None:
@@ -250,7 +251,8 @@ class SessionHistory:
             for (entity, key), old in before.items():
                 new = after[entity, key]
                 if old != new:
-                    audit_key = (new or old)["name"] if entity == "account" else key
+                    record = new or old
+                    audit_key = f"{record['name']} [{record['units']}]" if entity == "account" else key
                     self.repo._audit(entity, audit_key, "undo" if undo else "redo", old, new)
 
     def undo(self) -> str | None:

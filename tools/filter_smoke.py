@@ -58,7 +58,7 @@ try:
         ("Other", "Complete", "Audit trip", "Dining and Boat in title", "50"),
     ):
         fixtures.append(repo.save_flow(dict(date="2026-10-02 12:30:15", from_account="Checking",
-            to_account="Corner Shop", amount=amount, status=status, category=category,
+            to_account="Corner Shop", amount=amount, units="USD", status=status, category=category,
             tags=[tag], name=name, notes="Stored notes")))
     app.refresh_all()
     pump()
@@ -88,7 +88,7 @@ try:
     assert set(tag.get()) == {"Audit trip", "Audit repair"}
     assert set(app.ledger_rows) == {fixtures[0]["flow_id"], fixtures[1]["flow_id"]}
     assert [value.get() for value in app.metric_vars] == ["1", "1", "2"]
-    assert app.report_summary.get() == "Complete · $12.00 flow volume"
+    assert app.report_summary.get() == "Complete · 12 USD"
     click(search_box())
     assert tag.popup is None
     ok("Multiple statuses, categories, and exact tags combine correctly; metrics follow visible rows")
@@ -111,13 +111,13 @@ try:
     click(status.checkbuttons["Complete"])
     assert set(app.ledger_rows) == {fixtures[1]["flow_id"]}
     assert app._flow_snapshot() == draft and app.editing_id == fixtures[0]["flow_id"]
-    assert repo.get_flow(fixtures[0]["flow_id"])["amount_cents"] == 2345
+    assert repo.get_flow(fixtures[0]["flow_id"])["amount"] == '23.45'
     assert repo.get_flow(fixtures[0]["flow_id"])["notes"] == "Updated notes"
     assert app.save_button.instate(["disabled"])
     # The selected flow stays editable even when filters hide its ledger row.
     enter("amount", "24.56")
     key("Return")
-    assert repo.get_flow(fixtures[0]["flow_id"])["amount_cents"] == 2456
+    assert repo.get_flow(fixtures[0]["flow_id"])["amount"] == '24.56'
     assert fixtures[0]["flow_id"] not in app.ledger_rows
     click(app.new_flow_button)
     clean_new()
@@ -134,7 +134,7 @@ try:
     click(app.save_button)
     clean_new()
     saved = flow_named("New filtered flow")
-    assert saved["amount_cents"] == 500 and saved["status"] == "Complete"
+    assert saved["amount"] == '5' and saved["status"] == "Complete"
     assert saved["flow_id"] not in app.ledger_rows
     assert set(app.ledger_rows) == {fixtures[1]["flow_id"]}
     ok("Add Flow stores a new flow hidden by current filters and immediately clears entry")

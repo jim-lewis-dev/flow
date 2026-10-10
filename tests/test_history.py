@@ -22,7 +22,7 @@ class SessionHistoryTests(unittest.TestCase):
 
     def flow(self, **changes):
         return {"date": "2026-10-01 12:34:56", "from_account": "Amex",
-                "to_account": "Joe's Diner", "amount_cents": 2499,
+                "to_account": "Joe's Diner", "amount": "24.99", "units": "USD",
                 "status": "Complete", "name": "Lunch", "notes": "Two dishes\nwith tea",
                 "category": "Dining", "tags": ["Friday", "Friends"], **changes}
 
@@ -31,7 +31,7 @@ class SessionHistoryTests(unittest.TestCase):
 
     def state(self):
         return {table: [tuple(row) for row in self.repo.conn.execute(f"SELECT * FROM {table} ORDER BY 1,2")]
-                for table in ("accounts", "categories", "tags", "flows", "flow_tags")}
+                for table in ("accounts", "account_balances", "categories", "tags", "flows", "flow_tags")}
 
     def consistent(self):
         self.assertIsNone(self.repo.conn.execute("PRAGMA foreign_key_check").fetchone())
@@ -55,7 +55,7 @@ class SessionHistoryTests(unittest.TestCase):
         saved = self.add()
         before = self.state()
         edited = self.history.perform("Edit Flow", lambda: self.repo.save_flow({
-            **saved, "from_account": "Cash", "category": "Travel", "amount_cents": 12345,
+            **saved, "from_account": "Cash", "category": "Travel", "amount": "123.45",
             "tags": ["Friends", "Road trip", "Friday"], "notes": "New notes"}))
         after = self.state()
         self.history.undo()
@@ -97,7 +97,7 @@ class SessionHistoryTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_account("Checking"))
         self.history.redo()
         self.history.redo()
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], -12500)
+        self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "-12500")
 
     def test_external_typing_merges_before_and_latest_after_without_touching_records(self):
         state = [""]
@@ -139,7 +139,7 @@ class SessionHistoryTests(unittest.TestCase):
 
     def test_batch_import_is_one_step_and_redo_keeps_generated_ids(self):
         before = self.state()
-        preview = preview_import(self.repo, [self.flow(), self.flow(name="Dinner", amount_cents=4100)])
+        preview = preview_import(self.repo, [self.flow(), self.flow(name="Dinner", amount="41")])
         result = self.history.perform("Import Flows", lambda: commit_import(self.repo, preview))
         after = self.state()
         self.assertEqual(result, {"imported": 2, "skipped": 0})
@@ -216,7 +216,7 @@ class SessionHistoryTests(unittest.TestCase):
         self.add()
         self.history.undo()
         with self.assertRaises(ValueError):
-            self.add(amount_cents=-1)
+            self.add(amount="-1")
         self.assertTrue(self.history.can_redo)
         self.history.perform("Add Account", lambda: self.repo.save_account("Checking"))
         self.assertFalse(self.history.can_redo)
@@ -229,12 +229,12 @@ class SessionHistoryTests(unittest.TestCase):
             self.repo.save_account("Checking", 300)
 
         self.history.perform("Outer", change)
-        self.assertEqual(len(self.history._undo[-1].changes), 1)
+        self.assertEqual(len(self.history._undo[-1].changes), 2)
         self.assertEqual(self.history.undo(), "Outer")
         self.assertIsNone(self.repo.get_account("Checking"))
         self.assertFalse(self.history.can_undo)
         self.history.redo()
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 300)
+        self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "300")
 
     def test_history_is_sparse_and_unrelated_changes_are_preserved(self):
         for number in range(100):
@@ -243,8 +243,8 @@ class SessionHistoryTests(unittest.TestCase):
         self.assertEqual(len(self.history._undo[-1].changes), 1)
         self.repo.save_account("Account 99", 999)
         self.history.undo()
-        self.assertEqual(self.repo.get_account("Account 1")["opening_cents"], 1)
-        self.assertEqual(self.repo.get_account("Account 99")["opening_cents"], 999)
+        self.assertEqual(self.repo.get_account("Account 1")["opening_amount"], "1")
+        self.assertEqual(self.repo.get_account("Account 99")["opening_amount"], "999")
 
     def test_unrecorded_change_to_affected_row_blocks_without_overwriting(self):
         saved = self.add()

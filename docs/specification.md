@@ -1,78 +1,77 @@
 # Flow software specification
 
-Version 0.5 | 9 October 2026
+10 October 2026 | Schema 5
 
 ## Objects and editing
 
-01 / Flow 0.5 - 9 October 2026
+01 / Flow - 10 October 2026
 
-A flow subtracts from one named account and adds to another. The application uses Python dictionaries and one SQLite repository. These are the actual objects returned by Repository.get_account() and get_flow().
+A flow subtracts a quantity from one named account and adds it to another, in one unit. Accounts can hold several units; each account/unit pair has its own starting balance and time.
 
 ```text
 {
-  "name": "AmEx",
-  "opening_cents": 0,
+  "name": "Warehouse", "units": "kg",
+  "opening_amount": "20",
   "opening_at": "2026-10-01 00:00:00"
 }
 ```
 
 ```text
 {
-  "flow_id": "11111111-1111-4111-8111-111111111111",
-  "date": "2026-10-02 12:30:00",
-  "from_account": "AmEx", "to_account": "Joe's Diner",
-  "amount_cents": 1200, "status": "Complete",
-  "name": "Friday lunch", "notes": "Burger and fries",
-  "category": "Dining", "tags": ["Road trip"]
+  "flow_id": "22222222-2222-4222-8222-222222222222",
+  "date": "2026-10-03 09:15:06", "name": "Materials",
+  "from_account": "Warehouse", "to_account": "Workshop",
+  "amount": "0.125", "units": "kg", "status": "Complete",
+  "category": "Materials", "tags": ["Project"],
+  "notes": "Exact fractional quantity"
 }
 ```
 
 | Representation | Meaning |
 | --- | --- |
-| Account name | Its identity. Starting balance is integer cents, negative for debt, or null when unknown. New endpoint accounts start unknown. |
-| Amount / flow ID | Input .50 means 50 cents; stored 1200 means $12.00. Exact integer arithmetic. UUID preserves identity during edits/imports. Repeat creates a new UUID. |
-| Date | One Date/Time entry, in 24-hour format. Leading zeros optional. Missing month/day = 1; missing hour/minute/second = 0. Example: 2026-10-9 7:5 becomes 2026-10-09 07:05:00. |
-| Category / tags | One category and a list of tag names. Shared tags can connect split purchases. Nine flow fields plus ID; no scenario field. |
+| Account / units | Account names identify holders. Unit labels are required and case-sensitive: mW and MW differ. No implicit conversion. Starting balance is signed decimal text, or null when unknown. |
+| Amount / flow ID | Exact decimal text, without a cents limit. .125 stores as 0.125; 12.00 stores as 12. UUID preserves edits/imports; Repeat gets a new UUID when added. |
+| Date | One Date/Time entry, optional 24-hour time to seconds. Leading zeros optional. Missing month/day = 1; missing hour/minute/second = 0. Date-only means midnight. |
+| Category / tags | One category and a list of tag names. Shared tags can connect related transfers. Ten agreed flow fields plus ID. |
 
 ### The GUI edits these objects
 
-Date/Time, From, To, Amount, Status, Name, Notes, Category, Tags. Defaults: today, Complete and Uncategorized. Accounts has Name, Starting Balance and Starting Date/Time. No separate Time control.
+Default order: Date, Name, From, To, Amount, Units, Status, Category, Tags, Notes. Defaults: today, USD, Complete and Uncategorized. Units uses the learned dropdown with filtering, Enter and X. Accounts has Name, Units, Starting Balance and Starting Date/Time.
 
-Existing records save on Enter, Tab or leaving a field. Ctrl+S finishes existing edits and leaves new drafts untouched. Notes: Enter adds a line; Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error; Escape restores the saved value.
+Existing records save completed fields on Enter, Tab or leaving them. Ctrl+S finishes existing edits; new drafts wait for Add. Notes: Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error. New clears; Repeat copies every value, including units and date.
 
-New Flow clears; Add Flow inserts; Repeat copies every value. Empty ledger space deselects and clears, saving valid edits and discarding invalid/unadded drafts. Row/page changes discard new drafts; undo restores them. Drag table titles to move columns; cell editing and Tab follow their visible order.
+Row/page changes and blank ledger clicks discard unadded drafts without prompts; undo restores them. Drag titles to move columns; cell editing and Tab follow their visible order. Account Name/Units identify a row; starting balance/date remain editable.
 
-Repository-generated objects and rows: examples/record_objects.json and examples/review.sql. Launching and controls: README.md. Source walkthrough: docs/model_review.md. Forecast collections and simulation controls are deferred.
+Actual objects and SQL rows: examples/record_objects.json and examples/review.sql. Source walkthrough: docs/model_review.md. Controls and update/export commands: README.md.
 
 ## Storage and calculations
 
-02 / Schema 4 - six tables
+02 / Schema 5 - seven tables
 
-Named keys are name.strip().casefold(): AmEx becomes amex. They provide case-insensitive matching and foreign-key references, not separate generated identities. Display spelling stays in name.
+Account/category/tag keys use name.strip().casefold(), retaining display spelling. Unit labels keep exact case. Amounts are canonical decimal TEXT; Python Decimal arithmetic uses sufficient precision for every operand.
 
 | Table | Every stored column |
 | --- | --- |
-| accounts | account_key, name, opening_cents, opening_at |
-| flows | flow_id, date, from_key, to_key, amount_cents, status, name, notes, category_key |
+| accounts | account_key, name |
+| account_balances | account_key, units, opening_amount, opening_at |
+| flows | flow_id, date, from_key, to_key, amount, units, status, name, notes, category_key |
 | categories | category_key, name |
 | tags | tag_key, name |
 | flow_tags | flow_id, tag_key, position |
 | audit | audit_id, changed_at, entity, entity_key, action, before_json, after_json |
 
-Category/tag tables retain choices; flow_tags preserves assignments and order. audit stores before/after values. Account lists show only names used in saved From/To fields, including Void flows. Unreferenced starting balances remain stored for reuse/undo. Schema: flowledger/schema.sql.
+account_balances is keyed by (account_key, units); each flow references matching endpoint/unit pairs. Lists show pairs used by saved flows, including Void. Unreferenced anchors remain stored for reuse/undo. audit retains before/after history. SQL: flowledger/schema.sql.
 
-### Save and calculate
+### Save, calculate and inspect
 
-GUI draft -> Repository.save_flow() -> validate -> write flow, choices, tags and audit atomically. Failed saves roll back. Ctrl+Z / Ctrl+Y undo records, drafts, filters, searches, dates, sorting, graph controls and column changes in action order. history.py captures changed rows; view_history.py keeps UI snapshots in memory. Record undo appends audit; closing/restoring clears history. No new stored fields.
+GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records, drafts, filters, searches, graph controls and all plot/column changes in one session order.
 
-An account receives +amount when To and -amount when From. Confirmed includes Complete; Including Pending adds Pending; Including Planned also adds Planned. Void contributes zero. Settle Pending by editing that record; a refund is a new reverse flow.
+Within its unit, a flow contributes +amount to To and -amount to From. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Void contributes zero. Each pair has a confirmed anchor immediately before events at its own timestamp; unknown remains unknown.
 
-Each account has one confirmed starting balance immediately before flows at its timestamp. Earlier Complete flows are already reflected; eligible earlier Pending/Planned flows enter estimates once. Unknown balances remain unknown. Dates are points in local time, compared at second precision; date-only means midnight.
+Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Ledger/category totals stay separate by unit.
 
-Graphs compare or sum explicitly selected accounts. A transfer cancels within a sum containing both endpoints. Selecting every endpoint conserves the total; this is not automatically net worth. Category totals count each matching non-Void flow once, including transfers.
+### Migration and scope
 
-### Upgrade and scope
+Opening schema 1-4 first saves .pre-v5-timestamp.bak, then upgrades atomically. Existing cents and anchors become exactly equivalent USD quantities; IDs, metadata and old audit remain. Older forecasts stay in the backup and recovery JSON, outside active flows. Reopening makes no new migration copy.
 
-Schema 1-3 upgrades first save a full .pre-v4-timestamp.bak. Old Baseline flows stay active with their IDs; accounts and history remain. Old hypothetical collections remain in the backup and .bak.forecasts.json recovery file, outside the active ledger. Time flags become date precision, then disappear.
-
-Import/export: nine fields plus ID. Old scenario/time-flag imports are rejected; upgrade the database and export again. Use Backup for a complete snapshot. Scope: USD cents, one starting balance per account, local timestamps, one computer. Executed checks: docs/test_results.txt and docs/interaction_check.txt.
+Import/export: ten fields plus ID; units required. Git rollback restores code, not migrated records; older apps need the pre-v5 backup. Scope: any units, multiple per-unit anchors, local timestamps, one computer. No automatic conversion or forecast collection controls. Executed checks: docs/test_results.txt and docs/units_interaction.txt.

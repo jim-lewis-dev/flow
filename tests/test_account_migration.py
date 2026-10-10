@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from flowledger.core import Repository, ledger_balance_at
+from flowledger.core import Repository, ledger_balance_at, _legacy_quantity
 from tests.test_optional_times import V1_SCHEMA, FLOW_FIELDS
 
 
@@ -51,16 +51,18 @@ class AccountMigrationTests(unittest.TestCase):
     def test_new_accounts_have_only_anchor_fields_and_no_hidden_visibility(self):
         repo = Repository(self.root / "new.sqlite3")
         self.addCleanup(repo.close)
-        saved = repo.save_account(" Cash ", 1000, "2026-10-01")
-        self.assertEqual(saved, {"name": "Cash", "opening_cents": 1000,
+        saved = repo.save_account(" Cash ", "10", "2026-10-01")
+        self.assertEqual(saved, {"name": "Cash", "units": "USD", "opening_amount": "10",
                                  "opening_at": "2026-10-01 00:00:00"})
-        flow = repo.save_flow({"from_account": "Cash", "to_account": "Shop", "amount": "1"})
+        flow = repo.save_flow({"from_account": "Cash", "to_account": "Shop", "amount": "1", "units": "USD"})
         self.assertEqual([row["name"] for row in repo.list_accounts()], ["Cash", "Shop"])
-        self.assertIsNone(repo.get_account("Shop")["opening_cents"])
+        self.assertIsNone(repo.get_account("Shop")["opening_amount"])
         self.assertIsNone(ledger_balance_at(repo.get_account("Shop"), repo.list_flows(), flow["date"]))
         self.assertEqual(set(json.loads(repo.history()[-2]["after_json"])), set(saved))
         self.assertEqual({row[1] for row in repo.conn.execute("PRAGMA table_info(accounts)")},
-                         {"account_key", "name", "opening_cents", "opening_at"})
+                         {"account_key", "name"})
+        self.assertEqual({row[1] for row in repo.conn.execute("PRAGMA table_info(account_balances)")},
+                         {"account_key", "units", "opening_amount", "opening_at"})
 
     def test_v2_and_v3_upgrade_keep_actual_flows_and_recover_hypothetical_collections(self):
         for version in (2,3):
@@ -71,8 +73,9 @@ class AccountMigrationTests(unittest.TestCase):
                 repo = Repository(path)
                 try:
                     after = self.snapshot(repo.conn)
-                    self.assertEqual(set(after), {'accounts','flows','categories','tags','flow_tags','audit'})
-                    self.assertEqual(after['accounts'],[row[:4] for row in before['accounts']])
+                    self.assertEqual(set(after), {'accounts','account_balances','flows','categories','tags','flow_tags','audit'})
+                    self.assertEqual(after['accounts'],[row[:2] for row in before['accounts']])
+                    self.assertEqual(after['account_balances'], [(row[0], 'USD', None if row[2] is None else _legacy_quantity(row[2]), row[3]) for row in before['accounts']])
                     self.assertEqual(after['audit'],before['audit'])
                     self.assertEqual(after['categories'],before['categories'])
                     self.assertEqual(after['tags'],before['tags'])
@@ -87,11 +90,11 @@ class AccountMigrationTests(unittest.TestCase):
                         '00000000-0000-0000-0000-000000000001',
                         '00000000-0000-0000-0000-000000000002',
                         '00000000-0000-0000-0000-000000000003'])
-                    self.assertIsNone(repo.get_account('Unknown')['opening_cents'])
-                    self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03'),8800)
-                    self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03',('Complete','Pending','Planned')),8600)
+                    self.assertIsNone(repo.get_account('Unknown')['opening_amount'])
+                    self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03'),88)
+                    self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03',('Complete','Pending','Planned')),86)
                     self.assertEqual(repo.conn.execute('PRAGMA foreign_keys').fetchone()[0],1)
-                    self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],4)
+                    self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],5)
                     self.assertIsNone(repo.conn.execute('PRAGMA foreign_key_check').fetchone())
                     with self.assertRaises(sqlite3.IntegrityError):
                         repo.conn.execute("DELETE FROM accounts WHERE account_key='cash'")
@@ -105,7 +108,8 @@ class AccountMigrationTests(unittest.TestCase):
                     hypothetical = recovered[0]['flows'][0]
                     self.assertEqual(set(hypothetical),FLOW_FIELDS)
                     self.assertEqual(hypothetical['date'],'2026-10-02 13:14:15')
-                    self.assertEqual(hypothetical['amount_cents'],99900)
+                    self.assertEqual(hypothetical['amount'],'999')
+                    self.assertEqual(hypothetical['units'],'USD')
                     self.assertEqual(hypothetical['tags'],['Trip'])
                     self.assertEqual(hypothetical['notes'],'Do not apply to real ledger')
                     self.assertIsNone(repo.get_flow(hypothetical['flow_id']))
@@ -114,7 +118,7 @@ class AccountMigrationTests(unittest.TestCase):
                 reopened = Repository(path)
                 self.assertIsNone(reopened.migration_backup_path)
                 reopened.close()
-                self.assertEqual(len(list(self.root.glob(f'legacy-v{version}.sqlite3.pre-v4-*.bak'))),1)
+                self.assertEqual(len(list(self.root.glob(f'legacy-v{version}.sqlite3.pre-v5-*.bak'))),1)
 
     def test_failed_upgrade_rolls_back_all_tables_and_version(self):
         path = self.make_legacy()
@@ -122,7 +126,7 @@ class AccountMigrationTests(unittest.TestCase):
             before = self.snapshot(conn)
         validate = Repository._validate_database
         def fail_on_new_schema(conn, **kwargs):
-            if conn.execute('PRAGMA user_version').fetchone()[0] == 4:
+            if conn.execute('PRAGMA user_version').fetchone()[0] == 5:
                 raise ValueError('simulated migration failure')
             validate(conn, **kwargs)
         with patch.object(Repository,'_validate_database',side_effect=fail_on_new_schema):
@@ -131,7 +135,7 @@ class AccountMigrationTests(unittest.TestCase):
         with sqlite3.connect(path) as conn:
             self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0],2)
             self.assertEqual(self.snapshot(conn),before)
-        self.assertEqual(len(list(self.root.glob('*.pre-v4-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('*.pre-v5-*.bak'))),1)
 
     def test_restore_v3_preserves_source_forecasts_and_current_data_safety_copy(self):
         path = self.make_legacy(3)
@@ -142,7 +146,7 @@ class AccountMigrationTests(unittest.TestCase):
         repo.restore(path)
         self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),original_hash)
         self.assertEqual([row['name'] for row in repo.list_accounts()],['Cash','Shop','Unknown'])
-        self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],4)
+        self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],5)
         self.assertEqual(repo.conn.execute('PRAGMA foreign_keys').fetchone()[0],1)
         self.assertEqual(len(repo.list_flows()),3)
         recovered = json.loads(Path(repo.migration_forecasts_path).read_text())

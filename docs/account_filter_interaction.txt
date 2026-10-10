@@ -1,4 +1,4 @@
-Flow 0.5.13: native X11 XTest mouse and keyboard audit
+Native X11 XTest interaction audit
 PASS: 11 workflows; 0 callback exceptions.
 
 PASS From checkboxes match whole source names and allow multiple selections

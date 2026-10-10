@@ -2,25 +2,45 @@
   "flows": [
     {
       "date": "2026-10-02 13:15:00",
+      "name": "Friday lunch",
       "from_account": "AmEx",
       "to_account": "Joe's Diner",
       "amount": "12.00",
+      "units": "USD",
       "status": "Complete",
-      "name": "Friday lunch",
-      "notes": "Burger, fries, and tip.",
       "category": "Dining",
-      "tags": ["Road trip"]
+      "tags": [
+        "Road trip"
+      ],
+      "notes": "Burger, fries, and tip."
     },
     {
       "date": "2026-10-05",
+      "name": "Boat supplies",
       "from_account": "Checking",
       "to_account": "Boat shop",
       "amount": "25.50",
+      "units": "USD",
       "status": "Planned",
-      "name": "Boat supplies",
-      "notes": "Illustrative future flow; review before importing.",
       "category": "Boat",
-      "tags": ["Weekend project"]
+      "tags": [
+        "Weekend project"
+      ],
+      "notes": "Illustrative future flow; review before importing."
+    },
+    {
+      "date": "2026-10-03 09:15:06",
+      "name": "Materials",
+      "from_account": "Warehouse",
+      "to_account": "Workshop",
+      "amount": "0.125",
+      "units": "kg",
+      "status": "Complete",
+      "category": "Materials",
+      "tags": [
+        "Project"
+      ],
+      "notes": "Exact fractional quantity."
     }
   ]
 }

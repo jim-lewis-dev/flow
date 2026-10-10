@@ -7,13 +7,13 @@ from pathlib import Path
 
 
 def seed_visibility_data(repo):
-    repo.save_account("Checking", 100000, "2026-10-01")
-    repo.save_account("Typo", 54321, "2026-10-01 12:34:56")
-    repo.save_account("Never used", 40000, "2026-10-01")
+    repo.save_account("Checking", '1000', "2026-10-01")
+    repo.save_account("Typo", '543.21', "2026-10-01 12:34:56")
+    repo.save_account("Never used", '400', "2026-10-01")
     repo.save_flow(dict(date="2026-10-02", from_account="Typo", to_account="Checking",
-                        amount="12.34", name="First reference", status="Complete"))
+                        amount="12.34", units="USD", name="First reference", status="Complete"))
     repo.save_flow(dict(date="2026-10-03", from_account="Checking", to_account="Typo",
-                        amount="5", name="Last reference", status="Pending"))
+                        amount="5", units="USD", name="Last reference", status="Pending"))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text()
@@ -37,11 +37,11 @@ def entry(field):
 
 def account_names(*names):
     expected = set(names)
-    assert set(app.accounts_tree.get_children()) == expected
-    assert set(app.chart_accounts.get(0, "end")) == expected
+    assert {app._account_record(iid)["name"] for iid in app.accounts_tree.get_children()} == expected
+    assert {name for name, unit in app.chart_account_pairs} == expected
     for field in ("from_account", "to_account"):
         assert set(app.form_widgets[field].values) == expected
-    assert app.account_summary.get() == f"{len(expected)} accounts"
+    assert app.account_summary.get() == f"{len(expected)} accounts · {len(expected)} balances"
 
 
 def blank_click():
@@ -72,7 +72,7 @@ try:
     last = flow_named("Last reference")["flow_id"]
     anchor = repo.get_account("Typo")
     account_names("Checking", "Typo")
-    assert repo.get_account("Never used")["opening_cents"] == 40000
+    assert repo.get_account("Never used")["opening_amount"] == '400'
     ok("Unused starting balances stay off Accounts, suggestions and graph choices")
 
     row(app.ledger, first)
@@ -93,9 +93,9 @@ try:
     chord("Control_L", "y")
     account_names("Checking", "Correct")
     click(app.nav_buttons["accounts"])
-    assert app.accounts_tree.get_children() == ("Checking", "Correct")
+    assert tuple(app._account_record(iid)["name"] for iid in app.accounts_tree.get_children()) == ("Checking", "Correct")
     click(app.nav_buttons["charts"])
-    assert app.chart_accounts.get(0, "end") == ("Checking", "Correct")
+    assert app.chart_account_pairs == [("Checking", "USD"), ("Correct", "USD")]
     ok("Correcting the last reference hides the old account everywhere; undo and redo restore the right lists")
 
     click(app.nav_buttons["flows"])
@@ -103,11 +103,11 @@ try:
     replace_all(entry("amount"), "45.67")
     blank_click()
     cleared()
-    assert repo.get_flow(first)["amount_cents"] == 4567
+    assert repo.get_flow(first)["amount"] == '45.67'
     chord("Control_L", "z")
-    assert repo.get_flow(first)["amount_cents"] == 1234
+    assert repo.get_flow(first)["amount"] == '12.34'
     chord("Control_L", "y")
-    assert repo.get_flow(first)["amount_cents"] == 4567
+    assert repo.get_flow(first)["amount"] == '45.67'
     ok("Clicking blank ledger space saves a valid edit once and resets selection and every entry field")
 
     row(app.ledger, first)
@@ -122,15 +122,15 @@ try:
     assert len(repo.list_flows()) == 2 and repo.get_account("Unadded account") is None
     ok("Blank-space clicks discard repeated/new drafts and close an open dropdown without reopening it")
 
-    row(app.ledger, first, "amount_cents", count=2)
-    assert app.ledger_editor.field == "amount_cents"
+    row(app.ledger, first, "amount", count=2)
+    assert app.ledger_editor.field == "amount"
     replace_all(app.ledger_editor.input, "invalid")
     key("Return")
-    assert "dollars and cents" in app.form_feedback.get()
-    assert repo.get_flow(first)["amount_cents"] == 4567
+    assert "decimal" in app.form_feedback.get()
+    assert repo.get_flow(first)["amount"] == '45.67'
     blank_click()
     cleared()
-    assert repo.get_flow(first)["amount_cents"] == 4567
+    assert repo.get_flow(first)["amount"] == '45.67'
     assert app.tk.call("info", "body", "bell") == ""
     ok("Invalid cell input shows a silent error; clicking blank space discards it without changing the saved flow")
 
@@ -209,12 +209,12 @@ try:
 
     replace_all(app.account_widgets["opening"], "-.50")
     key("Return")
-    assert repo.get_account("Typo")["opening_cents"] == -50
+    assert repo.get_account("Typo")["opening_amount"] == '-0.5'
     click(app.nav_buttons["flows"])
-    row(app.ledger, first, "amount_cents", count=2)
+    row(app.ledger, first, "amount", count=2)
     replace_all(app.ledger_editor.input, ".05")
     key("Return")
-    assert repo.get_flow(first)["amount_cents"] == 5
+    assert repo.get_flow(first)["amount"] == '0.05'
     blank_click()
     replace_all(entry("from_account"), "Checking")
     key("Return")
@@ -228,7 +228,7 @@ try:
     assert app.status_message.get() == "Saved"
     click(app.save_button)
     assert len(repo.list_flows()) == count + 1
-    assert any(flow["amount_cents"] == 50 for flow in repo.list_flows())
+    assert any(flow["amount"] == '0.5' for flow in repo.list_flows())
     cleared()
     ok("Flow amounts accept .05 and .5; starting balances accept -.50 without requiring a leading zero")
 

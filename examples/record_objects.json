@@ -1,7 +1,8 @@
 {
   "account": {
     "name": "AmEx",
-    "opening_cents": 0,
+    "units": "USD",
+    "opening_amount": "0",
     "opening_at": "2026-10-01 00:00:00"
   },
   "flow": {
@@ -9,13 +10,43 @@
     "date": "2026-10-02 12:30:00",
     "from_account": "AmEx",
     "to_account": "Joe's Diner",
-    "amount_cents": 1200,
+    "amount": "12",
+    "units": "USD",
     "status": "Complete",
     "name": "Friday lunch",
     "notes": "Burger and fries",
     "category": "Dining",
     "tags": [
       "Road trip"
+    ]
+  },
+  "multiple_balances": [
+    {
+      "name": "Warehouse",
+      "units": "USD",
+      "opening_amount": "1000",
+      "opening_at": "2026-10-01 00:00:00"
+    },
+    {
+      "name": "Warehouse",
+      "units": "kg",
+      "opening_amount": "20",
+      "opening_at": "2026-10-01 00:00:00"
+    }
+  ],
+  "resource_flow": {
+    "flow_id": "22222222-2222-4222-8222-222222222222",
+    "date": "2026-10-03 09:15:06",
+    "from_account": "Warehouse",
+    "to_account": "Workshop",
+    "amount": "0.125",
+    "units": "kg",
+    "status": "Complete",
+    "name": "Materials",
+    "notes": "Exact fractional quantity",
+    "category": "Materials",
+    "tags": [
+      "Project"
     ]
   }
 }

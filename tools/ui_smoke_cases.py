@@ -16,6 +16,7 @@ def cleared():
         assert app.form_vars[field].get() == '', field
     assert app.form_vars['category'].get() == 'Uncategorized'
     assert app.form_vars['status'].get() == 'Complete'
+    assert app.form_vars['units'].get() == 'USD'
     assert app.notes_text.get('1.0', 'end-1c') == ''
 
 
@@ -56,10 +57,10 @@ click(app.save_button)
 a = flow_named('Audit Flow Alpha')
 assert len(repo.list_flows()) == count_before + 1
 assert a['from_account'] == 'Checking' and a['to_account'] == 'Audit Shop'
-assert a['amount_cents'] == 4275 and a['category'] == 'Audit Category'
+assert a['amount'] == '42.75' and a['category'] == 'Audit Category'
 assert a['tags'] == ['First tag', 'Second tag'] and a['notes'] == 'New record notes'
 assert a['date'].endswith('13:47:26')
-assert set(a) == {'flow_id', 'date', 'from_account', 'to_account', 'amount_cents',
+assert set(a) == {'flow_id', 'date', 'from_account', 'to_account', 'amount', 'units',
                   'status', 'name', 'notes', 'category', 'tags'}
 cleared()
 clean_popups('Add Flow creates one full record and clears the form and suggestions')
@@ -131,7 +132,7 @@ key('Return')
 click(entry('name'))
 f2 = repo.get_flow(f['flow_id'])
 assert f2['from_account'] == 'Savings' and f2['to_account'] == 'Audit Utility'
-assert f2['amount_cents'] == 9925 and f2['category'] == 'Edited Category'
+assert f2['amount'] == '99.25' and f2['category'] == 'Edited Category'
 assert f2['tags'] == ['Edited tag'] and f2['notes'] == 'Edited record notes'
 assert len(f2['date']) == 10 and f2['status'] == 'Complete'
 assert f2['flow_id'] == f['flow_id'] and len(repo.list_flows()) == count_before + 1
@@ -150,7 +151,7 @@ enter('amount', '40.00')
 click(entry('from_account'))
 assert popups()
 chord('Control_L', 's')
-assert repo.get_flow(b['flow_id'])['amount_cents'] == 4000
+assert repo.get_flow(b['flow_id'])['amount'] == '40'
 clean_popups('Ctrl+S from an open dropdown completes the edit without reopening suggestions')
 click(entry('category'))
 assert popups()
@@ -161,7 +162,7 @@ clean_popups('Page navigation dismisses flow suggestions')
 row(app.accounts_tree, 'Cash')
 replace(app.account_widgets['opening'], '181.25')
 key('Return')
-assert repo.get_account('Cash')['opening_cents'] == 18125
+assert repo.get_account('Cash')['opening_amount'] == '181.25'
 click(app.account_new_button)
 assert app.account_vars['name'].get() == ''
 row(app.accounts_tree, 'Cash')
@@ -172,12 +173,12 @@ click(app.nav_buttons['flows'])
 row(app.ledger, b['flow_id'])
 enter('amount', '41.01')
 row(app.ledger, f['flow_id'])
-assert app.editing_id == f['flow_id'] and repo.get_flow(b['flow_id'])['amount_cents'] == 4101
+assert app.editing_id == f['flow_id'] and repo.get_flow(b['flow_id'])['amount'] == '41.01'
 assert not app.tk.splitlist(app.tk.call('grab', 'current'))
 chord('Control_L', 'z')
-assert repo.get_flow(b['flow_id'])['amount_cents'] == 4000
+assert repo.get_flow(b['flow_id'])['amount'] == '40'
 chord('Control_L', 'y')
-assert repo.get_flow(b['flow_id'])['amount_cents'] == 4101
+assert repo.get_flow(b['flow_id'])['amount'] == '41.01'
 ok('Row switching saves the completed field without a prompt; undo and redo target the changed record')
 
 row(app.ledger, a['flow_id'])
@@ -205,7 +206,7 @@ assert 'Only After Add' not in repo.list_categories()
 enter('amount', '12.34')
 click(app.save_button)
 c = flow_named('Corrected Audit Flow')
-assert c['amount_cents'] == 1234
+assert c['amount'] == '12.34'
 cleared()
 ok('Invalid Add Flow retains the draft without side effects; correcting the amount creates the record')
 
@@ -244,7 +245,7 @@ enter('amount', '41.50')
 search = next(w for w in widgets() if w.winfo_class() == 'TEntry'
               and str(w.cget('textvariable')) == str(app.search_var))
 replace(search, 'electric')
-assert repo.get_flow(b['flow_id'])['amount_cents'] == 4150
+assert repo.get_flow(b['flow_id'])['amount'] == '41.5'
 assert app.editing_id == b['flow_id']
 replace(search, '')
 assert b['flow_id'] in app.ledger_rows
@@ -253,7 +254,7 @@ ok('Filtering away an edited record saves the correct ID without a stale cell or
 # Graph interaction remains usable after edit/undo/navigation.
 click(app.nav_buttons['charts'])
 click_text('None')
-index = next(i for i in range(app.chart_accounts.size()) if app.chart_accounts.get(i) == 'Cash')
+index = next(i for i in range(app.chart_accounts.size()) if app.chart_account_pairs[i] == ('Cash', 'USD'))
 bounds = app.chart_accounts.bbox(index)
 assert bounds
 click_xy(app.chart_accounts.winfo_rootx() + 20, app.chart_accounts.winfo_rooty() + bounds[1] + bounds[3] / 2)

@@ -1,5 +1,6 @@
 """Independent acceptance examples checked against hand-calculated outcomes."""
 
+from decimal import Decimal
 import tempfile
 from pathlib import Path
 import unittest
@@ -14,11 +15,11 @@ class IndependentReviewTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.repo = Repository(Path(self.directory.name) / "review.sqlite3")
         self.addCleanup(self.repo.close)
-        for name, opening in (("Checking", 100000), ("AmEx", -10000), ("Wallet", 5000)):
+        for name, opening in (("Checking", Decimal("1000")), ("AmEx", -Decimal("100")), ("Wallet", Decimal("50"))):
             self.repo.save_account(name, opening)
 
     def flow(self, source, target, amount, when, **fields):
-        return self.repo.save_flow(dict(from_account=source, to_account=target,
+        return self.repo.save_flow(dict(units="USD", from_account=source, to_account=target,
                                        amount=amount, date=when, **fields))
 
     def example(self):
@@ -39,56 +40,56 @@ class IndependentReviewTests(unittest.TestCase):
     def test_purchase_transfer_income_pending_and_void_have_exact_independent_answers(self):
         self.example()
         self.assertEqual(self.balances("2026-10-01"),
-                         {"AmEx": -10000, "Checking": 90000, "Wallet": 15000})
+                         {"AmEx": -Decimal("100"), "Checking": Decimal("900"), "Wallet": Decimal("150")})
         self.assertEqual(self.balances("2026-10-02 13:00"),
-                         {"AmEx": -7645, "Checking": 84000, "Wallet": 15000})
+                         {"AmEx": -Decimal("76.45"), "Checking": Decimal("840"), "Wallet": Decimal("150")})
         self.assertEqual(self.balances("2026-10-31"),
-                         {"AmEx": -7645, "Checking": 134000, "Wallet": 15000})
+                         {"AmEx": -Decimal("76.45"), "Checking": Decimal("1340"), "Wallet": Decimal("150")})
         estimate = self.balances("2026-10-31", ("Complete", "Pending"))
-        self.assertEqual(estimate, {"AmEx": -7645, "Checking": 134000, "Wallet": 14275})
-        self.assertEqual(sum(estimate.values()), 140630)
+        self.assertEqual(estimate, {"AmEx": -Decimal("76.45"), "Checking": Decimal("1340"), "Wallet": Decimal("142.75")})
+        self.assertEqual(sum(estimate.values()), Decimal("1406.3"))
         forecast = self.balances("2026-10-31", ("Complete", "Pending", "Planned", "Void"))
-        self.assertEqual(sum(forecast.values()), 110630)
+        self.assertEqual(sum(forecast.values()), Decimal("1106.3"))
 
 
     def test_later_confirmed_snapshot_reconstructs_history_and_includes_unsettled_flow(self):
         self.example()
-        for name, opening in (("Checking", 134000), ("AmEx", -7645), ("Wallet", 15000)):
+        for name, opening in (("Checking", Decimal("1340")), ("AmEx", -Decimal("76.45")), ("Wallet", Decimal("150"))):
             self.repo.save_account(name, opening, opening_at="2026-10-04")
         self.assertEqual(self.balances("2026-09-30 23:59:59"),
-                         {"AmEx": -10000, "Checking": 100000, "Wallet": 5000})
+                         {"AmEx": -Decimal("100"), "Checking": Decimal("1000"), "Wallet": Decimal("50")})
         self.assertEqual(self.balances("2026-10-02 13:00"),
-                         {"AmEx": -7645, "Checking": 84000, "Wallet": 15000})
-        self.assertEqual(sum(self.balances("2026-10-05", ("Complete", "Pending")).values()), 140630)
+                         {"AmEx": -Decimal("76.45"), "Checking": Decimal("840"), "Wallet": Decimal("150")})
+        self.assertEqual(sum(self.balances("2026-10-05", ("Complete", "Pending")).values()), Decimal("1406.3"))
 
     def test_graph_window_preserves_carry_and_same_time_flows_are_aggregated(self):
         self.example()
         account = self.repo.get_account("Checking")
         actual = ledger_timeline([account], self.repo.list_flows(),
-                                 "2026-10-02 12:00", "2026-10-03 12:00")["Checking"]
-        self.assertEqual(actual, [("2026-10-02 12:00:00", 90000),
-                                  ("2026-10-02 13:00:00", 84000),
-                                  ("2026-10-03 08:00:00", 134000),
-                                  ("2026-10-03 12:00:00", 134000)])
+                                 "2026-10-02 12:00", "2026-10-03 12:00")["Checking", "USD"]
+        self.assertEqual(actual, [("2026-10-02 12:00:00", Decimal("900")),
+                                  ("2026-10-02 13:00:00", Decimal("840")),
+                                  ("2026-10-03 08:00:00", Decimal("1340")),
+                                  ("2026-10-03 12:00:00", Decimal("1340"))])
 
     def test_imported_legitimate_repeat_is_explicit_and_future_changes_do_not_overwrite(self):
-        row = dict(date="2026-10-02", from_account="Wallet", to_account="Shop", amount="1.25")
+        row = dict(units="USD", date="2026-10-02", from_account="Wallet", to_account="Shop", amount="1.25")
         initial = preview_import(self.repo, [row, row])
         self.assertEqual(commit_import(self.repo, initial, include_similar=True),
                          {"imported": 2, "skipped": 0})
-        self.assertEqual(self.balances("2026-10-03")["Wallet"], 4750)
+        self.assertEqual(self.balances("2026-10-03")["Wallet"], Decimal("47.5"))
         saved = self.repo.list_flows()[0]
-        saved["amount_cents"] = 999
+        saved['amount'] = 999
         with self.assertRaises(ValueError):
             commit_import(self.repo, preview_import(self.repo, [saved]))
-        self.assertEqual(self.balances("2026-10-03")["Wallet"], 4750)
+        self.assertEqual(self.balances("2026-10-03")["Wallet"], Decimal("47.5"))
 
-    def test_disagreeing_money_representations_are_rejected_without_mutation(self):
+    def test_removed_cent_representation_is_rejected_without_mutation(self):
         saved = self.flow("Wallet", "Shop", "12", "2026-10-02")
-        proposed = dict(saved, amount="24.00")
+        proposed = dict(saved, amount_cents=2400)
         with self.assertRaises(ValueError):
             self.repo.save_flow(proposed)
-        self.assertEqual(self.repo.get_flow(saved["flow_id"])["amount_cents"], 1200)
+        self.assertEqual(self.repo.get_flow(saved["flow_id"])['amount'], '12')
 
 
 if __name__ == "__main__":

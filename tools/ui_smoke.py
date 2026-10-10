@@ -94,7 +94,12 @@ def find_text(text,root=None):
     raise AssertionError('Missing visible control: '+text)
 def click_text(text,root=None):click(find_text(text,root))
 def flow_named(name):return next(f for f in repo.list_flows() if f['name']==name)
+def account_iid(name, units="USD"):
+    return app._account_key({"name": name, "units": units})
+def chart_index(name, units="USD"):
+    return app.chart_account_pairs.index((name, units))
 def row(tree,iid,column=None,count=1):
+    if tree is app.accounts_tree and not tree.exists(iid):iid=account_iid(iid)
     tree.see(iid);pump(.05)
     bbox=tree.bbox(iid,column or '#1');assert bbox,(iid,column)
     px,py,w,h=bbox;click_xy(tree.winfo_rootx()+px+w/2,tree.winfo_rooty()+py+h/2,count)

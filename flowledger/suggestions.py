@@ -1,7 +1,7 @@
 """Remember removed entry suggestions without changing ledger records.
 
 Preferences live beside the database in ``<database>.suggestions.json``. Only
-the four entry vocabularies are filtered; accounts, flows, and SQLite remain
+the entry vocabularies are filtered; accounts, flows, and SQLite remain
 untouched. In-memory databases use in-memory preferences.
 """
 from __future__ import annotations
@@ -13,13 +13,14 @@ import tempfile
 from typing import Iterable
 
 
-KINDS = ("account", "category", "tag", "name")
+KINDS = ("account", "category", "tag", "name", "unit")
 
 
-def _key(value: str) -> str:
+def _key(value: str, kind: str = "") -> str:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
         raise ValueError("Suggestion must be nonempty text without null characters.")
-    return value.strip().casefold()
+    # Unit symbols are case sensitive: mW and MW are different resources.
+    return value.strip() if kind == "unit" else value.strip().casefold()
 
 
 class SuggestionPreferences:
@@ -49,12 +50,12 @@ class SuggestionPreferences:
         try:
             data = json.loads(text)
             if not isinstance(data, dict) or set(data) - set(KINDS):
-                raise ValueError("Expected account, category, tag, and name lists.")
+                raise ValueError("Expected account, category, tag, name, and unit lists.")
             removed = {kind: set() for kind in KINDS}
             for kind, values in data.items():
                 if not isinstance(values, list):
                     raise ValueError(f"{kind} must contain a list of suggestions.")
-                removed[kind] = {_key(value) for value in values}
+                removed[kind] = {_key(value, kind) for value in values}
             self._removed = removed
         except (ValueError, TypeError) as error:
             self.load_error = f"Invalid suggestion preferences: {error}"
@@ -67,7 +68,7 @@ class SuggestionPreferences:
     def visible(self, kind: str, values: Iterable[str]) -> list[str]:
         """Filter a vocabulary, preserving its display names and ordering."""
         self._check_kind(kind)
-        return [value for value in values if _key(value) not in self._removed[kind]]
+        return [value for value in values if _key(value, kind) not in self._removed[kind]]
 
     def remove(self, kind: str, value: str) -> bool:
         """Remove a suggestion; return whether the preference changed."""
@@ -79,7 +80,7 @@ class SuggestionPreferences:
 
     def _change(self, kind: str, value: str, *, remove: bool) -> bool:
         self._check_kind(kind)
-        key = _key(value)
+        key = _key(value, kind)
         if self.load_error:
             raise ValueError(self.load_error)
         if (key in self._removed[kind]) == remove:

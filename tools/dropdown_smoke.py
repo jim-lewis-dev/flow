@@ -31,25 +31,25 @@ def remove_visible(combo, value):
 
 try:
     fixture = repo.save_flow(dict(date="2026-10-02 12:30:15", from_account="Checking",
-        to_account="Corner Shop", amount="12.34", status="Complete", name="Lunch typo",
+        to_account="Corner Shop", amount="12.34", units="USD", status="Complete", name="Lunch typo",
         category="Boaat", tags=["Trip", "Boat, trailer"], notes="Preserved notes"))
     for number in range(18):
-        repo.save_account(f"A{number:02d}", 0)
+        repo.save_account(f"A{number:02d}", '0')
         repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                            to_account=f"A{number:02d}", amount="1", status="Void"))
+                            to_account=f"A{number:02d}", amount="1", units="USD", status="Void"))
     app.refresh_all()
     pump()
     row(app.ledger, fixture["flow_id"])
     replace(app.form_widgets["amount"], "15.67")
     combo = show_all("from_account")
-    assert repo.get_flow(fixture["flow_id"])["amount_cents"] == 1567
+    assert repo.get_flow(fixture["flow_id"])["amount"] == '15.67'
     draft = app._flow_snapshot()
     database = "\n".join(repo.conn.iterdump())
     remove_visible(combo, "Checking")
     assert app._flow_snapshot() == draft
     assert "Checking" not in app.form_widgets["to_account"].values
     assert "\n".join(repo.conn.iterdump()) == database
-    assert "Checking" in app.chart_accounts.get(0, "end")
+    assert ("Checking", "USD") in app.chart_account_pairs
     ok("Finishing Amount autosaves; account X updates both entry lists without changing fields or records")
 
     key("Escape")

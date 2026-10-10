@@ -1,5 +1,6 @@
 """Acceptance tests for financial invariants, timeline boundaries and recovery."""
 import json
+from decimal import Decimal
 from pathlib import Path
 import random
 import sqlite3
@@ -66,7 +67,7 @@ class RepositoryTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name) / "ledger.sqlite3"
         self.repo = Repository(self.path)
-        self.repo.save_account("Checking", 100000)
+        self.repo.save_account("Checking", "1000")
         self.repo.save_account("AmEx", 0)
 
     def tearDown(self):
@@ -75,7 +76,7 @@ class RepositoryTests(unittest.TestCase):
 
     def flow(self, source="AmEx", destination="Joe's Diner", amount="12.00", **overrides):
         data = dict(date="2026-10-02 12:30", from_account=source, to_account=destination,
-                    amount=amount, category="Dining", tags=[])
+                    amount=amount, units="USD", category="Dining", tags=[])
         data.update(overrides)
         return self.repo.save_flow(data)
 
@@ -85,30 +86,30 @@ class RepositoryTests(unittest.TestCase):
     def test_credit_purchase_payment_and_refund_conserve_resource(self):
         self.repo.save_account("Joe's Diner", 0)
         self.flow()
-        self.assertEqual(self.balance("AmEx"), -1200)
-        self.assertEqual(self.balance("Joe's Diner"), 1200)
+        self.assertEqual(self.balance("AmEx"), -12)
+        self.assertEqual(self.balance("Joe's Diner"), 12)
         self.flow("Checking", "AmEx")
-        self.assertEqual(self.balance("Checking"), 98800)
+        self.assertEqual(self.balance("Checking"), 988)
         self.assertEqual(self.balance("AmEx"), 0)
         self.flow("Joe's Diner", "AmEx", "5")
-        self.assertEqual(self.balance("AmEx"), 500)
-        self.assertEqual(self.balance("Joe's Diner"), 700)
+        self.assertEqual(self.balance("AmEx"), 5)
+        self.assertEqual(self.balance("Joe's Diner"), 7)
         accounts = self.repo.list_accounts()
-        self.assertEqual(sum(self.balance(row["name"]) for row in accounts), 100000)
-        self.assertEqual(sum(self.balance(row["name"]) for row in accounts if row["name"] in ("Checking", "AmEx")), 99300)
+        self.assertEqual(sum(self.balance(row["name"]) for row in accounts), 1000)
+        self.assertEqual(sum(self.balance(row["name"]) for row in accounts if row["name"] in ("Checking", "AmEx")), 993)
 
     def test_pending_to_complete_updates_one_record_with_audit(self):
         pending = self.flow(amount="20", status="Pending")
         self.assertEqual(self.balance("AmEx"), 0)
-        self.assertEqual(self.balance("AmEx", ("Complete", "Pending")), -2000)
-        pending.update(status="Complete", amount_cents=2400)
+        self.assertEqual(self.balance("AmEx", ("Complete", "Pending")), -20)
+        pending.update(status="Complete", amount="24")
         saved = self.repo.save_flow(pending)
         self.assertEqual(saved["flow_id"], pending["flow_id"])
         self.assertEqual(len(self.repo.list_flows()), 1)
-        self.assertEqual(self.balance("AmEx", ("Complete", "Pending")), -2400)
+        self.assertEqual(self.balance("AmEx", ("Complete", "Pending")), -24)
         history = self.repo.history(pending["flow_id"])
         self.assertEqual(len(history), 2)
-        self.assertEqual(json.loads(history[-1]["before_json"])["amount_cents"], 2000)
+        self.assertEqual(json.loads(history[-1]["before_json"])["amount"], "20")
         self.repo.void_flow(pending["flow_id"])
         self.assertEqual(self.balance("AmEx", ("Complete", "Pending", "Planned", "Void")), 0)
 
@@ -145,11 +146,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.list_flows(), [])
         self.assertEqual(len(self.repo.list_accounts()), 2)
 
-    def test_dual_amount_fields_must_agree(self):
-        consistent = self.flow(amount="12.00", amount_cents=1200)
-        self.assertEqual(consistent["amount_cents"], 1200)
+    def test_legacy_cent_field_is_not_a_second_quantity(self):
+        consistent = self.flow(amount="12.00")
+        self.assertEqual(consistent["amount"], "12")
         before = self.repo.history()
-        with self.assertRaisesRegex(ValueError, "disagree"):
+        with self.assertRaisesRegex(ValueError, "Unknown flow fields"):
             self.flow(amount="12.00", amount_cents=1300)
         self.assertEqual(self.repo.list_flows(), [consistent])
         self.assertEqual(self.repo.history(), before)
@@ -161,7 +162,7 @@ class RepositoryTests(unittest.TestCase):
             for editing in (False, True):
                 with self.subTest(field=field, editing=editing):
                     changes = dict(date="2026-10-02", from_account="New Bank", to_account="New Shop",
-                                   amount="23.45", category="New Category", tags=["New Tag"],
+                                   amount="23.45", units="USD", category="New Category", tags=["New Tag"],
                                    **{field: "Before\x00after"})
                     if editing:
                         changes["flow_id"] = saved["flow_id"]
@@ -193,7 +194,7 @@ class RepositoryTests(unittest.TestCase):
         self.flow("Checking", "Savings", "10")
         self.assertIsNone(self.balance("Savings"))
         values = timeline([self.repo.get_account("Savings")], self.repo.list_flows(), "2026-10-01", "2026-10-31")
-        self.assertTrue(all(value is None for _, value in values["Savings"]))
+        self.assertTrue(all(value is None for _, value in values["Savings", "USD"]))
 
     def test_backup_restore_preserves_records_and_creates_safety_copy(self):
         first = self.flow()
@@ -230,11 +231,11 @@ class RepositoryTests(unittest.TestCase):
 class CalculationTests(unittest.TestCase):
     @staticmethod
     def record(when, amount, source="A", destination="B", status="Complete"):
-        return {"date":when, "amount_cents":amount, "from_account":source,
+        return {"date":when, "amount":str(amount), "units":"USD", "from_account":source,
                 "to_account":destination, "status":status}
 
     def test_anchor_is_before_its_events_target_is_after_its_events(self):
-        account = {"name":"A", "opening_at":"2026-10-02 12:00:00", "opening_cents":1000}
+        account = {"name":"A", "units":"USD", "opening_at":"2026-10-02 12:00:00", "opening_amount":"1000"}
         flows = [self.record("2026-10-01 12:00:00", 100),
                  self.record("2026-10-02 11:00:00", 200),
                  self.record("2026-10-02 12:00:00", 300)]
@@ -244,18 +245,18 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual(balance_at(account, flows, "2026-10-02 12:00:00"), 700)
 
     def test_timeline_carries_prior_flows_combines_same_timestamp(self):
-        account = {"name":"A", "opening_at":"2026-10-01", "opening_cents":1000}
+        account = {"name":"A", "units":"USD", "opening_at":"2026-10-01", "opening_amount":"1000"}
         flows = [self.record("2026-10-01 12:00:00", 100),
                  self.record("2026-10-02 12:00:00", 200),
                  self.record("2026-10-02 12:00:00", 50, "B", "A")]
-        series = timeline([account], flows, "2026-10-02", "2026-10-03")["A"]
+        series = timeline([account], flows, "2026-10-02", "2026-10-03")["A", "USD"]
         self.assertEqual(series, [("2026-10-02 00:00:00",900),
                                   ("2026-10-02 12:00:00",750),
                                   ("2026-10-03 00:00:00",750)])
 
     def test_random_timelines_agree_with_direct_balances_across_anchors(self):
         rng = random.Random(1026)
-        accounts = [{"name":name, "opening_cents":rng.randrange(-1000,1000),
+        accounts = [{"name":name, "units":"USD", "opening_amount":str(rng.randrange(-1000,1000)),
                      "opening_at":f"2026-10-0{day} 12:00:00"}
                     for name, day in (("A",1), ("B",3), ("C",6))]
         flows = []
@@ -266,11 +267,11 @@ class CalculationTests(unittest.TestCase):
         statuses = ("Complete", "Pending", "Planned")
         result = timeline(accounts, flows, "2026-10-01", "2026-10-08", statuses)
         for account in accounts:
-            for when, balance in result[account["name"]]:
+            for when, balance in result[account["name"], account["units"]]:
                 self.assertEqual(balance, balance_at(account, flows, when, statuses))
 
     def test_confirmed_anchor_pending_and_overdue_plans_before_anchor(self):
-        account = {"name":"A", "opening_at":"2026-10-03", "opening_cents":100000}
+        account = {"name":"A", "units":"USD", "opening_at":"2026-10-03", "opening_amount":"100000"}
         flows = [self.record("2026-10-01 12:00:00", 2000, status="Pending"),
                  self.record("2026-10-02 12:00:00", 3000, status="Planned"),
                  self.record("2026-10-04 12:00:00", 4000)]
@@ -282,17 +283,17 @@ class CalculationTests(unittest.TestCase):
         # The generic engine deliberately treats its seed as the complete assumed state.
         self.assertEqual(balance_at(account, flows, "2026-10-05", forecast), 96000)
         self.assertEqual(ledger_balance_at(account, flows, "2026-10-01", forecast), 100000)
-        for when, value in ledger_timeline([account], flows, "2026-10-01", "2026-10-05", forecast)["A"]:
+        for when, value in ledger_timeline([account], flows, "2026-10-01", "2026-10-05", forecast)["A", "USD"]:
             self.assertEqual(value, ledger_balance_at(account, flows, when, forecast))
 
     def test_old_pending_becoming_complete_requires_consistent_snapshot(self):
-        account = {"name":"A", "opening_at":"2026-10-03", "opening_cents":100000}
+        account = {"name":"A", "units":"USD", "opening_at":"2026-10-03", "opening_amount":"100000"}
         flows = [self.record("2026-10-01 12:00:00", 2000, status="Pending")]
         basis = ("Complete", "Pending")
         self.assertEqual(ledger_balance_at(account, flows, "2026-10-04", basis), 98000)
         flows[0]["status"] = "Complete"
         # A completed pre-anchor event is assumed reflected in the confirmed opening.
-        account["opening_cents"] = 98000
+        account["opening_amount"] = "98000"
         self.assertEqual(ledger_balance_at(account, flows, "2026-10-04", basis), 98000)
 
 

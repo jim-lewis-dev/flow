@@ -1,4 +1,4 @@
-Flow 0.5.12: native X11 XTest mouse and keyboard audit
+Native X11 XTest interaction audit
 PASS: 10 workflows; 0 callback exceptions.
 
 PASS Enter saves an inline starting balance and recalculates totals; Ctrl+Z/Ctrl+Y restore both values and totals
