@@ -20,7 +20,7 @@ def seed_account_data(repo):
     for account in repo.list_accounts():
         if account["name"] not in ("Checking", "AmEx", "Savings"):
             repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                                to_account=account["name"], amount="1", units="USD", status="Void"))
+                                to_account=account["name"], amount="1", units="USD", status="Canceled"))
     repo.save_flow(dict(date="2026-10-02 12:00:00", from_account="Checking",
                         to_account="AmEx", amount="12.34", units="USD", status="Complete",
                         name="Card payment"))

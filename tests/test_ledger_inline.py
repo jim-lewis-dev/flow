@@ -395,7 +395,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_suggestions_return_and_tab_save_existing_fields(self):
-        self.seed(from_account="AmEx", to_account="Checking", status="Void")
+        self.seed(from_account="AmEx", to_account="Checking", status="Canceled")
         flow = self.seed()
         entry = self.replace_cell(flow, "from_account", "am")
         combo = self.app.ledger_editor.widget

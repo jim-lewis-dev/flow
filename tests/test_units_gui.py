@@ -113,7 +113,7 @@ class UnitsGuiTests(unittest.TestCase):
         saved, = self.repo.list_flows()
         self.assertEqual((saved["amount"], saved["units"]), ("0.000125", "litres"))
         self.assertIn("litres", self.app.form_widgets["units"].values)
-        self.assertEqual(self.app.ledger.set(saved["flow_id"], "amount"), "0.000125")
+        self.assertEqual(self.app.ledger.set(saved["flow_id"], "amount"), "0.0001")
         self.assertEqual(self.app.ledger.set(saved["flow_id"], "units"), "litres")
         self.assertIsNone(self.app.editing_id)
         self.assertEqual(self.app.form_vars["units"].get(), "USD")
@@ -273,7 +273,7 @@ class UnitsGuiTests(unittest.TestCase):
         self.seed(units="USD", to_account="Shop", amount="10")
         self.seed(units="USD", to_account="Shop", amount="25", status="Pending")
         self.app.show_view("accounts")
-        for units, confirmed, pending in (("USD", "90", "65"), ("kg", "1.375", "1.125")):
+        for units, confirmed, pending in (("USD", "90.00", "65.00"), ("kg", "1.3750", "1.1250")):
             with self.subTest(units=units):
                 key = self.app._account_key(self.repo.get_account("Checking", units))
                 self.assertEqual(self.app.accounts_tree.set(key, "confirmed"), confirmed)
@@ -310,7 +310,7 @@ class UnitsGuiTests(unittest.TestCase):
                 yield from trees(child)
         report = next(tree for tree in trees(self.app) if tuple(tree["columns"]) == ("category", "status", "amount", "units", "count"))
         rows = [tuple(report.item(key, "values")) for key in report.get_children()]
-        self.assertEqual(set(rows), {("Inventory", "Complete", "10", "USD", "1"), ("Inventory", "Complete", "0.125", "kg", "1")})
+        self.assertEqual(set(rows), {("Inventory", "Complete", "10.00", "USD", "1"), ("Inventory", "Complete", "0.1250", "kg", "1")})
         report.winfo_toplevel().destroy()
 
     def test_stacked_graph_hover_reports_the_selected_unit_exactly(self):
@@ -334,7 +334,7 @@ class UnitsGuiTests(unittest.TestCase):
     def test_complete_volume_lists_units_separately(self):
         self.seed()
         self.seed(units="USD", to_account="Shop", amount="10")
-        self.assertEqual(self.app.report_summary.get(), "Complete · 10 USD · 0.125 kg")
+        self.assertEqual(self.app.report_summary.get(), "Complete · 10.00 USD · 0.1250 kg")
         self.assertNotIn("10.125", self.app.report_summary.get())
 
     def test_graph_reports_float_overflow_and_underflow_without_changing_records(self):

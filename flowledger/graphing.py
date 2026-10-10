@@ -42,7 +42,7 @@ def graph_timeline(accounts: list[dict], flows: list[dict], start: str, end: str
     start_effects: dict[tuple[str, str], list[Decimal]] = defaultdict(list)
     has_start_flow = False
     for flow in flows:
-        if flow["status"] == "Void" or flow["status"] not in allowed:
+        if flow["status"] == "Canceled" or flow["status"] not in allowed:
             continue
         if normalize_date(flow["date"]) != start:
             continue

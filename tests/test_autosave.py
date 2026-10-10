@@ -187,15 +187,15 @@ class AutosaveTests(unittest.TestCase):
         self.select(saved)
         self.app.void_selected()
         self.pump()
-        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Void")
+        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
         self.shortcut("<Control-z>", self.app.ledger)
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
         self.shortcut("<Control-y>", self.app.ledger)
-        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Void")
+        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
 
     def test_repeat_copies_all_statuses_and_optional_timestamp_exactly(self):
         for status, date in (("Complete", "2026-10-01"), ("Pending", "2026-10-01 00:00:00"),
-                             ("Planned", "2026-10-02 12:34:56"), ("Void", "2026-10-03 01:02:03")):
+                             ("Planned", "2026-10-02 12:34:56"), ("Canceled", "2026-10-03 01:02:03")):
             with self.subTest(status=status, date=date):
                 original = self.seed(status=status, date=date)
                 self.select(original)

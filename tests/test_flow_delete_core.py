@@ -129,7 +129,7 @@ class DeleteFlowTests(unittest.TestCase):
     def test_deleting_void_record_is_distinct_from_voiding(self):
         record = self.flow()
         voided = self.repo.void_flow(record["flow_id"])
-        self.assertEqual(voided["status"], "Void")
+        self.assertEqual(voided["status"], "Canceled")
         self.assertEqual(self.repo.list_flows(), [voided])
         self.delete(voided)
         self.assertEqual(self.repo.list_flows(), [])

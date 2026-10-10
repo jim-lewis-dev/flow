@@ -348,14 +348,14 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(set(EXPORT_FIELDS), expected_fields)
         self.assertEqual(EXPORT_FIELDS, ("flow_id", "date", "name", "from_account", "to_account",
                                          "amount", "units", "status", "category", "tags", "notes"))
-        for status in ("Complete", "Pending", "Planned", "Void"):
+        for status in ("Complete", "Pending", "Planned", "Canceled"):
             self.save(status=status, name=status)
         for suffix in (".json", ".csv"):
             path = self.path("all_flows" + suffix)
             self.assertEqual(export_flows(self.repo, path), 4)
             rows = read_import(path)
             self.assertEqual({row["status"] for row in rows},
-                             {"Complete", "Pending", "Planned", "Void"})
+                             {"Complete", "Pending", "Planned", "Canceled"})
             self.assertTrue(all(set(row) == expected_fields for row in rows))
             self.assertTrue(all(tuple(row) == EXPORT_FIELDS for row in rows))
 

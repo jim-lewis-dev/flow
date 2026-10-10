@@ -1,0 +1,11 @@
+Flow row clipboard native interaction audit
+Result: PASS (8 checks)
+PASS Only JSON record and Category Totals remain as ledger inspection actions; unwanted action/history buttons are absent
+PASS Ctrl+C/V inserts and selects a saved copy with a new ID and every other field intact, including full date/time and exact amount
+PASS Editing the new copy leaves the source intact; Ctrl+Z/Y reverses editing then paste, and reapplies both in order
+PASS Delete remains keyboard-only and undoable; repeated paste creates another unique saved copy of the clipboard snapshot
+PASS Copy/paste in upper fields and inline Notes edits text without inserting extra records
+PASS Canceled is selected through Status, remains in the ledger, contributes nothing to balances/graphs, and copies exactly
+PASS USD displays two decimals and kg four; inline editing and JSON record retain full precision
+PASS All ten columns fit at 1920 and 1280 pixels; saved records survive reopening, with no callback exceptions
+No callback exceptions.

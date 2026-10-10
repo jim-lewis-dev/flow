@@ -12,7 +12,7 @@ def seed_graph_data(repo):
     repo.save_account("Savings", '500', anchor)
     repo.save_account("Unknown", None, anchor)
     repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                        to_account="Unknown", amount="1", units="USD", status="Void"))
+                        to_account="Unknown", amount="1", units="USD", status="Canceled"))
     for date, source, destination, amount, name in (
         ("2026-10-01", "Checking", "Shop", "12", "Midnight purchase"),
         ("2026-10-02 12:00:00", "Shop", "Checking", "20", "Refund"),

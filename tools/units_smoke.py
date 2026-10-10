@@ -109,17 +109,20 @@ try:
     grain = flow_named("Grain")
     row(app.ledger, grain["flow_id"])
     assert app.form_vars["units"].get() == "kg" and app.form_vars["amount"].get() == "0.000000001"
-    click_text("Repeat")
+    chord("Control_L", "c"); chord("Control_L", "v")
     assert app.form_vars["units"].get() == "kg" and app.form_vars["date"].get() == grain["date"]
     enter("name", "Repeated grain")
-    click(app.save_button)
+    key("Return")
     repeated = flow_named("Repeated grain")
     assert repeated["amount"] == grain["amount"] and repeated["units"] == "kg"
     assert repeated["date"] == grain["date"] and repeated["flow_id"] != grain["flow_id"]
-    assert app.form_vars["units"].get() == "USD" and app.editing_id is None
+    assert app.form_vars["units"].get() == "kg" and app.editing_id == repeated["flow_id"]
+    chord("Control_L", "z")
     chord("Control_L", "z")
     assert not any(f["name"] == "Repeated grain" for f in repo.list_flows())
-    ok("Repeat and Add preserve exact fractional quantities, units and date; Add resets the default unit and undo removes only the copy")
+    assert repo.get_flow(repeated["flow_id"]) is None
+    click(app.new_flow_button)
+    ok("Row paste preserves exact fractional quantities, units and date; undo reverses the later edit then removes the copy")
 
     enter("from_account", "Warehouse")
     enter("to_account", "Market")

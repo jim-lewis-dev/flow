@@ -95,7 +95,7 @@ class UnitRepositoryTests(unittest.TestCase):
     def test_displayed_account_pairs_derive_from_flows_including_void(self):
         self.repo.save_account("Store", "100", units="USD")
         self.repo.save_account("Store", "5", units="kg")
-        saved = self.flow(status="Void")
+        saved = self.flow(status="Canceled")
         self.assertEqual([(a["name"], a["units"]) for a in self.repo.list_accounts(referenced_only=True)],
                          [("Home", "kg"), ("Store", "kg")])
         self.repo.conn.execute("DELETE FROM flows WHERE flow_id=?", (saved["flow_id"],))
@@ -224,7 +224,7 @@ class UnitMigrationTests(unittest.TestCase):
         self.assertEqual(repo.get_account("Cash")["opening_amount"], "-92233720368547758.07")
         self.assertIsNone(repo.get_account("Shop")["opening_amount"])
         self.assertEqual(json.loads(repo.history()[0]["after_json"]), {"amount_cents": 9223372036854775807})
-        self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 5)
+        self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 6)
         self.assertIsNone(repo.conn.execute("PRAGMA foreign_key_check").fetchone())
         self.assertEqual(self.snapshot(repo.migration_backup_path), original)
         backup = repo.migration_backup_path
@@ -233,21 +233,21 @@ class UnitMigrationTests(unittest.TestCase):
         self.addCleanup(reopened.close)
         self.assertIsNone(reopened.migration_backup_path)
         self.assertEqual(reopened.list_flows(), [saved])
-        self.assertEqual(list(self.root.glob("*.pre-v5-*.bak")), [Path(backup)])
+        self.assertEqual(list(self.root.glob("*.pre-v6-*.bak")), [Path(backup)])
 
     def test_failed_v4_migration_rolls_back_all_data_and_retains_original_backup(self):
         path = self.old_database()
         original = self.snapshot(path)
         validate = Repository._validate_database
         def fail_at_v5(conn, **kwargs):
-            if conn.execute("PRAGMA user_version").fetchone()[0] == 5:
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 6:
                 raise ValueError("deliberate upgrade failure")
             validate(conn, **kwargs)
         with patch.object(Repository, "_validate_database", side_effect=fail_at_v5):
             with self.assertRaisesRegex(ValueError, "deliberate"):
                 Repository(path)
         self.assertEqual(self.snapshot(path), original)
-        backups = list(self.root.glob("*.pre-v5-*.bak"))
+        backups = list(self.root.glob("*.pre-v6-*.bak"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(self.snapshot(backups[0]), original)
 

@@ -36,7 +36,7 @@ try:
     for number in range(18):
         repo.save_account(f"A{number:02d}", '0')
         repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                            to_account=f"A{number:02d}", amount="1", units="USD", status="Void"))
+                            to_account=f"A{number:02d}", amount="1", units="USD", status="Canceled"))
     app.refresh_all()
     pump()
     row(app.ledger, fixture["flow_id"])

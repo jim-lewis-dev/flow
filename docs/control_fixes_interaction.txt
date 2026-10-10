@@ -8,7 +8,7 @@ PASS The upper Starting Balance caret begins at the right edge even when first c
 PASS Inline Starting Balance editing also begins at the right; a second focused click still permits deliberate cursor placement
 PASS Delete inside the upper text field removes text instead of a selected flow, with ordinary autosave and Undo
 PASS Delete inside an inline ledger text editor edits its characters instead of deleting the flow
-PASS The visible Delete action uses the same immediate undoable deletion as the keyboard
+PASS Repeated keyboard deletion remains immediate and undoable
 PASS Delete with no selected row leaves records unchanged and entry in clean New Flow
 PASS Units checkboxes distinguish mW from MW, keep multiple selected values through search, and remain synchronized during popup Undo/Redo
 PASS Units choice-search and All participate in session Undo/Redo; leaving the filter button dismisses its tooltip

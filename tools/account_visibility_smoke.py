@@ -111,8 +111,8 @@ try:
     ok("Clicking blank ledger space saves a valid edit once and resets selection and every entry field")
 
     row(app.ledger, first)
-    click_text("Repeat")
-    replace_all(entry("name"), "Unadded copy")
+    click(app.new_flow_button)
+    replace_all(entry("name"), "Unadded draft")
     blank_click()
     cleared()
     replace_all(entry("from_account"), "Unadded account")
@@ -120,7 +120,7 @@ try:
     blank_click()
     cleared()
     assert len(repo.list_flows()) == 2 and repo.get_account("Unadded account") is None
-    ok("Blank-space clicks discard repeated/new drafts and close an open dropdown without reopening it")
+    ok("Blank-space clicks discard new drafts and close an open dropdown without reopening it")
 
     row(app.ledger, first, "amount", count=2)
     assert app.ledger_editor.field == "amount"
@@ -175,8 +175,9 @@ try:
     assert repo.get_flow(first)["date"] == "2026-10-09 18:04:03"
     from PIL import ImageGrab
     ImageGrab.grab().save(Path(__file__).resolve().parents[1] / "docs" / "Flow_Ledger_Edit.png")
-    click_text("Repeat")
+    chord("Control_L", "c"); chord("Control_L", "v")
     assert app.form_vars["date"].get() == "2026-10-09 18:04:03"
+    key("Delete")
     blank_click()
     cleared()
     row(app.ledger, first)
@@ -245,7 +246,8 @@ try:
     assert repo.list_flows() == persisted and repo.get_account("Unadded endpoint") is None
     blank_click()
     row(app.ledger, first)
-    click_text("Repeat")
+    click(app.new_flow_button)
+    replace_all(entry("name"), "Unadded draft")
     draft = app._flow_snapshot()
     chord("Control_L", "s")
     assert app._flow_snapshot() == draft and repo.list_flows() == persisted
@@ -256,7 +258,7 @@ try:
         reopened.close()
     blank_click()
     cleared()
-    ok("Ctrl+S leaves blank, partial, invalid and repeated new drafts unadded; ledger records are already saved in the database")
+    ok("Ctrl+S leaves blank, partial and invalid new drafts unadded; ledger records are already saved in the database")
     success = True
     print(f"PASS {len(results)} native workflows; no callback exceptions.", flush=True)
 except BaseException:

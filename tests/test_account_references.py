@@ -33,10 +33,10 @@ class ReferencedAccountsTests(unittest.TestCase):
 
     def test_both_directions_all_statuses_and_canonical_names_count(self):
         self.repo.save_account("Checking", '1000')
-        for status in ("Complete", "Pending", "Planned", "Void"):
+        for status in ("Complete", "Pending", "Planned", "Canceled"):
             self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account=" checking ",
                                     to_account=status, amount="1", status=status))
-        self.assertEqual(self.names(), ["Checking", "Complete", "Pending", "Planned", "Void"])
+        self.assertEqual(self.names(), ["Canceled", "Checking", "Complete", "Pending", "Planned"])
         self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '1000')
 
     def test_last_reference_in_either_direction_controls_visibility(self):

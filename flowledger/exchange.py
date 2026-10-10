@@ -154,8 +154,10 @@ def _canonical(row: Any, accounts: dict[str, str],
     if amount <= 0:
         raise ValueError("amount must be greater than zero.")
     status = _text(row.get("status", "Complete"), "status") or "Complete"
+    if status == "Void":
+        status = "Canceled"  # Files exported before the status rename.
     if status not in STATUSES:
-        raise ValueError("status must be Complete, Pending, Planned, or Void.")
+        raise ValueError("status must be Complete, Pending, Planned, or Canceled.")
     name = _text(row.get("name", ""), "name") or f"{source} -> {destination}"
     notes = _text(row.get("notes", ""), "notes", strip=False)
     category = _text(row.get("category", ""), "category") or "Uncategorized"

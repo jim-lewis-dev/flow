@@ -19,7 +19,7 @@ class AccountFilterTests(unittest.TestCase):
             (1, "Checking", "Diner", "Complete", "Lunch", "Dining", "Trip", "12"),
             (2, "AmEx", "Shop", "Pending", "Groceries", "Groceries", "Work", "25"),
             (3, "Shop", "Checking", "Complete", "Refund", "Refund", "Trip", "5"),
-            (4, "Checking Reserve", "Diner", "Void", "Correction", "Other", "Work", "4"),
+            (4, "Checking Reserve", "Diner", "Canceled", "Correction", "Other", "Work", "4"),
             (5, "Cash", "Shop", "Planned", "Supplies", "Groceries", "Trip", "8"),
         ):
             self.flows[name] = self.repo.save_flow(dict(units="USD", date=f"2026-10-0{day} 12:34:56",
@@ -104,7 +104,7 @@ class AccountFilterTests(unittest.TestCase):
         self.app.refresh_ledger()
         self.assertEqual(self.names(), {"Lunch"})
         self.assertEqual([value.get() for value in self.app.metric_vars], ["1", "0", "1"])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 12 USD')
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 12.00 USD')
 
     def test_choices_use_saved_endpoints_independent_of_other_filters(self):
         expected_from = {"Checking", "AmEx", "Shop", "Checking Reserve", "Cash"}
