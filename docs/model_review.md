@@ -85,6 +85,10 @@ A flow at the graph start has before/after values at that same timestamp. Hover 
 
 SessionHistory groups successful writes, including account_balances, into atomic undo actions using temporary SQLite triggers. Undo/redo restores changed rows and foreign keys, retains IDs and appends audit events. It does not rewrite old audit or add persistent undo tables. Import is one action.
 
+Repository.delete_flow() atomically removes a flow and its tag links, appending audit before/after history. SessionHistory restores the exact ID and all fields on undo; redo removes them again. Starting balances remain stored, while referenced account/unit lists refresh. Void remains a separate status. The Delete key targets the ledger; text editors use Delete for text.
+
+Six ledger filters cover From, To, Status, Categories, Tags and Units. Empty captions use <label>: All; hover lists every selection. Units match exact case, all selected values within one list are ORed, and different lists combine. Selection/search changes use the same session history.
+
 ViewHistory keeps draft fields, clearing, Repeat, discarded drafts, filters/search, sorting/dates, graph pair selections/controls/plot/line visibility/axis limits and column changes in the same session order. Restoring a view preserves unfinished record text. Consecutive typing in one focused field is one step; new actions clear redo. Popup and Notes shortcuts use the same history. Closing/restoring ends the session; saved records stay saved.
 
 ColumnDrag changes displaycolumns, keeping stored field order stable. Hit testing and Tab follow visible field order. Header clicks still sort and edges resize. Order and widths are session state. Read-only navigation, scrolling and file exports do not create undo actions.

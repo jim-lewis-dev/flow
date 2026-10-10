@@ -39,14 +39,21 @@ class CheckFilter(ttk.Frame):
         self._all_variable = None
         self._search_trace = None
         self._focus_check_id = None
+        self._tooltip_after_id = None
+        self._tooltip_popup = None
+        self._tooltip_label = None
+        self._tooltip_position = (0, 0)
         self.button = ttk.Button(self, width=22, command=self._toggle_popup)
         self.button.pack(fill="x", expand=True)
         self.button.bind("<Return>", self._toggle_popup)
         self.button.bind("<Down>", self._open_from_key)
         self.button.bind("<Escape>", self._escape)
         self.button.bind("<FocusOut>", self._defer_focus_check)
+        self.button.bind("<Enter>", self._queue_tooltip, add="+")
+        for sequence in ("<Leave>", "<ButtonPress>", "<Unmap>"):
+            self.button.bind(sequence, self._hide_tooltip, add="+")
         self.bind("<Destroy>", self._destroyed)
-        self.bind("<Unmap>", lambda event: self.close_popup())
+        self.bind("<Unmap>", self._unmapped)
         top = self.winfo_toplevel()
         if not getattr(top, "_flow_check_click_binding", None):
             top._flow_check_click_binding = top.bind(
@@ -57,6 +64,10 @@ class CheckFilter(ttk.Frame):
     def get(self) -> tuple[str, ...]:
         """Return selected values; an empty tuple means All."""
         return self._selected
+
+    def tooltip_text(self) -> str:
+        """Return every selected value, without shortening long names."""
+        return "\n".join(self._selected) if self._selected else "All"
 
     def set_selected(self, values: Iterable[str], notify: bool = False):
         selected = tuple(dict.fromkeys(str(value) for value in values))
@@ -89,17 +100,69 @@ class CheckFilter(ttk.Frame):
             self.button.state(("disabled",) if disabled else ("!disabled",))
             if disabled:
                 self.close_popup()
+                self._hide_tooltip()
         return result
 
     def _update_caption(self):
         count = len(self._selected)
         if not count:
-            caption = self.all_label or f"All {self.label}"
+            caption = self.all_label or f"{self.label}: All"
         elif count == 1:
             caption = f"{self.label}: {self._selected[0]}"
         else:
             caption = f"{self.label} · {count}"
         self.button.configure(text=(caption if len(caption) <= 25 else caption[:24] + "…") + " ▾")
+        if self._tooltip_popup is not None:
+            self._tooltip_label.configure(text=self.tooltip_text())
+            self._position_tooltip()
+
+    def _queue_tooltip(self, event):
+        self._hide_tooltip()
+        if self.popup is None and self._enabled():
+            self._tooltip_position = (event.x_root + 14, event.y_root + 20)
+            self._tooltip_after_id = self.after(450, self._show_tooltip)
+
+    def _show_tooltip(self):
+        self._tooltip_after_id = None
+        if self.popup is not None or not self.winfo_viewable() or not self._enabled():
+            return
+        self._tooltip_popup = tk.Toplevel(self)
+        # Set size and position before mapping, without nested event dispatch.
+        self._tooltip_popup.withdraw()
+        self._tooltip_popup.overrideredirect(True)
+        self._tooltip_popup.transient(self.winfo_toplevel())
+        self._tooltip_label = tk.Label(self._tooltip_popup, text=self.tooltip_text(),
+            justify="left", anchor="w", bg="#213b35", fg="#ffffff",
+            padx=10, pady=7, font=("DejaVu Sans", 9), wraplength=500)
+        self._tooltip_label.pack()
+        self._position_tooltip()
+        self._tooltip_popup.deiconify()
+
+    def _position_tooltip(self):
+        width = self._tooltip_label.winfo_reqwidth()
+        height = self._tooltip_label.winfo_reqheight()
+        x = max(0, min(self._tooltip_position[0], self.winfo_screenwidth() - width))
+        y = max(0, min(self._tooltip_position[1], self.winfo_screenheight() - height))
+        self._tooltip_popup.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _hide_tooltip(self, event=None):
+        if self._tooltip_after_id is not None:
+            try:
+                self.after_cancel(self._tooltip_after_id)
+            except tk.TclError:
+                pass
+            self._tooltip_after_id = None
+        if self._tooltip_popup is not None:
+            try:
+                self._tooltip_popup.destroy()
+            except tk.TclError:
+                pass
+            self._tooltip_popup = None
+            self._tooltip_label = None
+
+    def _unmapped(self, event):
+        self._hide_tooltip()
+        self.close_popup()
 
     def _available_values(self):
         return list(dict.fromkeys([*self.values, *self._selected]))
@@ -119,6 +182,7 @@ class CheckFilter(ttk.Frame):
         return "break"
 
     def open_popup(self):
+        self._hide_tooltip()
         if not self._enabled() or not self.winfo_viewable():
             self.close_popup()
             return
@@ -321,6 +385,7 @@ class CheckFilter(ttk.Frame):
 
     def _destroyed(self, event):
         if event.widget is self:
+            self._hide_tooltip()
             self.close_popup()
 
     def close_popup(self):

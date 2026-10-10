@@ -36,7 +36,7 @@ class CheckFilterTests(unittest.TestCase):
 
     def test_explicit_selection_callbacks_caption_and_all(self):
         self.assertEqual(self.filter.get(), ())
-        self.assertEqual(self.filter.button.cget("text"), "All Categories ▾")
+        self.assertEqual(self.filter.button.cget("text"), "Categories: All ▾")
         popup = self.open()
         self.filter.checkbuttons["Boat"].invoke()
         self.filter.checkbuttons["Dining"].invoke()
@@ -238,6 +238,85 @@ class CheckFilterTests(unittest.TestCase):
         self.root.update()
         self.assertIsNone(other.popup)
         self.assertIs(self.root.focus_get(), other.button)
+
+    def test_hover_lists_all_choices_and_updates_with_restored_selection(self):
+        names = ("Boat", "Dining", "A category whose full name is longer than the button")
+        self.filter.set_selected(names)
+        self.assertEqual(self.filter.tooltip_text(), "\n".join(names))
+        maps = []
+        self.root.bind_all("<Map>", lambda event: maps.append(
+            (event.widget, event.widget.winfo_rootx(), event.widget.winfo_rooty())))
+        self.filter.button.event_generate("<Enter>", x=5, y=5)
+        self.root.after(500, self.root.quit)
+        self.root.mainloop()
+        popup = self.filter._tooltip_popup
+        self.assertIsNotNone(popup)
+        self.assertEqual(self.filter._tooltip_label.cget("text"), "\n".join(names))
+        self.assertIs(self.root.focus_get(), self.filter.button)
+        popup_maps = [item for item in maps if item[0] is popup]
+        self.assertEqual(len(popup_maps), 1)
+        self.assertEqual(popup_maps[0][1:], self.filter._tooltip_position)
+        # Undo/redo restores filters through silent set_selected calls. A
+        # visible tooltip must read that restored state without stale names.
+        self.filter.set_selected(("Dining",))
+        self.root.update()
+        self.assertIs(self.filter._tooltip_popup, popup)
+        self.assertEqual(self.filter._tooltip_label.cget("text"), "Dining")
+        self.filter.set_selected(names)
+        self.root.update()
+        self.assertEqual(self.filter._tooltip_label.cget("text"), "\n".join(names))
+        self.filter.set_selected(())
+        self.root.update()
+        self.assertEqual(self.filter._tooltip_label.cget("text"), "All")
+        self.assertEqual(self.changes, [])
+        self.filter.button.event_generate("<Leave>")
+        self.root.update()
+        self.assertIsNone(self.filter._tooltip_popup)
+
+    def test_tooltip_is_dismissed_on_open_and_pending_work_on_unmap_or_destroy(self):
+        self.filter.button.event_generate("<Enter>", x=5, y=5)
+        self.assertIsNotNone(self.filter._tooltip_after_id)
+        self.open()
+        self.assertIsNone(self.filter._tooltip_after_id)
+        self.assertIsNone(self.filter._tooltip_popup)
+        self.filter.close_popup()
+        self.filter.button.event_generate("<Enter>", x=5, y=5)
+        self.filter.pack_forget()
+        self.root.update()
+        self.assertIsNone(self.filter._tooltip_after_id)
+        self.filter.pack()
+        self.root.update()
+        self.filter.button.event_generate("<Enter>", x=5, y=5)
+        self.assertIsNotNone(self.filter._tooltip_after_id)
+        self.filter.destroy()
+        self.root.update()
+        self.assertIsNone(self.filter._tooltip_after_id)
+
+    def test_units_keep_case_sensitive_choices_and_full_tooltip_names(self):
+        from flowledger.filters import CheckFilter
+        units = CheckFilter(self.root, "Units", values=("mW", "MW", "mW"))
+        units.pack()
+        self.root.update()
+        self.assertEqual(units.button.cget("text"), "Units: All ▾")
+        units.open_popup()
+        units.search_variable.set("mw")
+        self.root.update()
+        self.assertEqual(list(units.checkbuttons), ["mW", "MW"])
+        units.checkbuttons["mW"].invoke()
+        self.assertEqual(units.get(), ("mW",))
+        units.checkbuttons["MW"].invoke()
+        self.assertEqual(units.get(), ("mW", "MW"))
+        self.assertEqual(units.tooltip_text(), "mW\nMW")
+
+    def test_empty_captions_are_consistent_and_custom_all_label_is_retained(self):
+        from flowledger.filters import CheckFilter
+        for label in ("From", "To", "Status", "Categories", "Tags", "Units"):
+            choice = CheckFilter(self.root, label)
+            self.assertEqual(choice.button.cget("text"), f"{label}: All ▾")
+            self.assertEqual(choice.tooltip_text(), "All")
+            choice.destroy()
+        custom = CheckFilter(self.root, "From", all_label="From: All")
+        self.assertEqual(custom.button.cget("text"), "From: All ▾")
 
 
 if __name__ == "__main__":

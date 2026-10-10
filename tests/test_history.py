@@ -68,7 +68,7 @@ class SessionHistoryTests(unittest.TestCase):
 
     def test_void_flow_restored_with_same_id(self):
         saved = self.add()
-        self.history.perform("Delete Flow", lambda: self.repo.void_flow(saved["flow_id"]))
+        self.history.perform("Void Flow", lambda: self.repo.void_flow(saved["flow_id"]))
         self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Void")
         self.history.undo()
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
@@ -77,13 +77,25 @@ class SessionHistoryTests(unittest.TestCase):
 
     def test_actual_delete_restores_flow_and_cascaded_tags(self):
         saved = self.add()
-        self.history.perform("Delete Flow", lambda: self.repo.conn.execute(
-            "DELETE FROM flows WHERE flow_id=?", (saved["flow_id"],)))
+        before = self.state()
+        audit = self.repo.history()
+        deleted = self.history.perform("Delete Flow", lambda: self.repo.delete_flow(saved["flow_id"]))
+        self.assertEqual(deleted, saved)
         self.assertIsNone(self.repo.get_flow(saved["flow_id"]))
+        self.assertEqual(self.repo.conn.execute("SELECT COUNT(*) FROM flow_tags WHERE flow_id=?",
+                                               (saved["flow_id"],)).fetchone()[0], 0)
+        self.assertEqual(self.repo.history()[:len(audit)], audit)
+        deletion = self.repo.history(saved["flow_id"])[-1]
+        self.assertEqual(deletion["action"], "delete")
+        self.assertEqual(json.loads(deletion["before_json"]), saved)
+        self.assertIsNone(deletion["after_json"])
         self.history.undo()
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
+        self.assertEqual(self.state(), before)
+        self.assertEqual(self.repo.history(saved["flow_id"])[-1]["action"], "undo")
         self.history.redo()
         self.assertIsNone(self.repo.get_flow(saved["flow_id"]))
+        self.assertEqual(self.repo.history(saved["flow_id"])[-1]["action"], "redo")
         self.consistent()
 
     def test_account_add_and_edit(self):

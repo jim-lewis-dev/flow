@@ -144,6 +144,49 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.account_vars["opening"].get(), "-300")
         self.assertEqual(self.repo.list_accounts(), originals)
 
+    def test_inline_starting_balance_opens_with_cursor_after_last_digit(self):
+        for name in ("Checking", "AmEx"):
+            with self.subTest(account=name):
+                self.click_cell(name, "balance", twice=True)
+                entry = self.app.account_cell_editor.input
+                self.assertIsNotNone(entry)
+                self.assertEqual(entry.index("insert"), len(entry.get()))
+                self.assertEqual(entry.index("sel.first"), 0)
+                self.assertEqual(entry.index("sel.last"), len(entry.get()))
+                self.app.account_cell_editor.close()
+                self.pump()
+                self.app.accounts_tree.focus_force()
+                self.pump()
+                self.app.accounts_tree.event_generate("<F2>")
+                self.pump()
+                entry = self.app.account_cell_editor.input
+                self.assertEqual(entry.index("insert"), len(entry.get()))
+                self.app.account_cell_editor.close()
+                self.pump()
+
+    def test_upper_starting_balance_first_click_places_cursor_at_end(self):
+        self.click_cell("Checking")
+        self.app.accounts_tree.focus_force()
+        self.pump()
+        entry = self.app.account_widgets["opening"]
+        self.click_time += 1000
+        entry.event_generate("<ButtonPress-1>", x=2, y=entry.winfo_height() // 2,
+                             time=self.click_time)
+        entry.event_generate("<ButtonRelease-1>", x=2, y=entry.winfo_height() // 2,
+                             time=self.click_time + 40)
+        self.pump()
+        self.assertIs(self.app.focus_get(), entry)
+        self.assertEqual(entry.index("insert"), len(entry.get()))
+        # Once the field is focused, normal cursor positioning still works.
+        self.click_time += 1000
+        entry.event_generate("<ButtonPress-1>", x=2, y=entry.winfo_height() // 2,
+                             time=self.click_time)
+        entry.event_generate("<ButtonRelease-1>", x=2, y=entry.winfo_height() // 2,
+                             time=self.click_time + 40)
+        self.pump()
+        self.assertEqual(entry.index("insert"), 0)
+        self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "1000")
+
     def test_cells_and_upper_fields_share_values_and_completed_fields_save(self):
         original = self.repo.get_account("Checking")
         entry = self.replace_cell("Checking", "balance", "38.20")

@@ -87,8 +87,9 @@ page('Objects and editing', '01 / Flow - 10 October 2026', [
  ], [113,411]),
  ('sub', 'The GUI edits these objects'),
  ('p', 'Default order: Date, Name, From, To, Amount, Units, Status, Category, Tags, Notes. Defaults: today, USD, Complete and Uncategorized. Units uses the learned dropdown with filtering, Enter and X. Accounts has Name, Units, Starting Balance and Starting Date/Time.'),
- ('p', 'Existing records save completed fields on Enter, Tab or leaving them. Ctrl+S finishes existing edits; new drafts wait for Add. Notes: Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error. New clears; Repeat copies every value, including units and date.'),
- ('p', 'Row/page changes and blank ledger clicks discard unadded drafts without prompts; undo restores them. Drag titles to move columns; cell editing and Tab follow their visible order. Account Name/Units identify a row; starting balance/date remain editable.'),
+ ('p', 'Existing records save completed fields on Enter, Tab or leaving them. Ctrl+S finishes existing edits; new drafts wait for Add. Notes: Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error. New clears; Repeat copies every value, including units and date. Delete removes a selected row without confirmation; undo restores its record. Delete inside text edits text.'),
+ ('p', 'Row/page changes and blank ledger clicks discard unadded drafts without prompts; undo restores them. Drag titles to move columns; cell editing and Tab follow their visible order. Account Name/Units identify a row; starting balance/date remain editable. Starting Balance enters with the caret at the end.'),
+ ('p', 'Filters: From, To, Status, Categories, Tags and Units. Checkboxes select multiple values; hover lists every selection. Filter selections and choice search support session undo/redo. Unit matches keep exact case.'),
  ('small', 'Actual objects and SQL rows: examples/record_objects.json and examples/review.sql. Source walkthrough: docs/model_review.md. Controls and update/export commands: README.md.'),
 ])
 
@@ -105,7 +106,7 @@ page('Storage and calculations', '02 / Schema 5 - seven tables', [
  ], [122,402]),
  ('p', 'account_balances is keyed by (account_key, units); each flow references matching endpoint/unit pairs. Lists show pairs used by saved flows, including Void. Unreferenced anchors remain stored for reuse/undo. audit retains before/after history. SQL: flowledger/schema.sql.'),
  ('sub', 'Save, calculate and inspect'),
- ('p', 'GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records, drafts, filters, searches, graph controls and all plot/column changes in one session order.'),
+ ('p', 'GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records/deletion, drafts, filters, searches, graph controls and all plot/column changes in one session order.'),
  ('p', 'Within its unit, a flow contributes +amount to To and -amount to From. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Void contributes zero. Each pair has a confirmed anchor immediately before events at its own timestamp; unknown remains unknown.'),
  ('p', 'Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Ledger/category totals stay separate by unit.'),
  ('sub', 'Migration and scope'),
