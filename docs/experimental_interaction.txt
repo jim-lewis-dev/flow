@@ -1,0 +1,14 @@
+Flow Experimental native interaction audit
+Result: PASS (11 checks)
+PASS Experimental is the last tab; Confirmed USD groups date-only and explicit midnight together
+PASS Previous and Next step by timestamp, showing simultaneous flows with exact amount labels
+PASS Play animates moving pulses; Pause cancels its scheduled callback
+PASS Physical node drag changes only the layout and Ctrl+Z/Y reverses and reapplies it
+PASS Dragged node stays placed across 1920 and 1280 window sizes; both layouts render with pulses
+PASS Clicking a moving flow opens its saved ledger row
+PASS Status basis includes Pending and Planned in order, while Canceled is always excluded
+PASS Unit switching and typed From/Through dates honor exact second boundaries
+PASS The map respects live ledger filters and double-click opens the selected visible ledger flow
+PASS Leaving during playback stops the timer; reentry retains filters and the database/audit are untouched
+PASS Window close leaves no pending playback callback and makes no record or audit changes
+No callback exceptions.

@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.16 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
+Flow 0.5.17 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
 
 ## Install and update
 
@@ -156,6 +156,12 @@ From and Through have calendar buttons. Typed graph dates accept omitted leading
 
 Hover near a line to see its account, exact quantity and units. Overlapping lines can show multiple accounts; vertical changes show the quantities before and after the change. Hidden lines are excluded. Click a time to inspect selected pairs, use the toolbar to pan/zoom, or export PNG/PDF. Calculations and hover quantities remain exact; Matplotlib uses floating-point coordinates to draw them. A quantity outside that display range gets an inline error rather than an infinite or silently zero plot; its stored value remains exact. Hover labels are excluded from exports.
 
+## Experimental flow map
+
+The last tab, **Experimental**, animates transfers between account nodes. It starts from the flows currently visible under the Flow Ledger filters. Select a date range, one unit and a status basis for this view. **Previous/Next** steps through timestamps; **Play/Pause** advances automatically. Flows sharing a timestamp move together. Each moving pulse scales with the quantity while its label gives the exact amount and unit. Drag account nodes to arrange the map; positions last only for this app session.
+
+This view reads saved flows and does not edit records or create forecasts. Canceled flows do not animate. Changing ledger filters changes which transfers are shown; it does not change stored balances or the existing graphs. Account placement and playback add no fields, tables or backup files.
+
 The ledger has a compact Search field and six checkbox filters: **From**, **To**, **Status**, **Categories**, **Tags** and **Units**. Empty filters display `<label>: All`; hover over a filter to see every selected value. Each dropdown supports multiple selections and a search box for finding choices. Checking an item updates results immediately and keeps the dropdown open. **All** removes that group's restriction; no checked items also means All. From lists saved source accounts; To lists saved destination accounts, including refunds and Canceled flows. Other filters and removed entry suggestions do not hide these choices.
 
 Selections match **any** selected value within a group. Different groups combine: From Checking/Amex and To Grocery/Diner shows flows from either selected source to either selected destination. Status, category, tags, units, text and dates further narrow those results. Units match exact case: selecting mW does not match MW. Unit choices come from all saved flows, including Canceled, independently of other filters and entry suggestion preferences. Search includes Units. Account matches use the complete account name, ignoring case. Searching within a dropdown does not discard checked choices. Filters remain in place after editing, adding or clearing the form, and support session Undo/Redo. A date-only Through includes the full day. Category totals show **flow volume by unit**, counting each matching non-Canceled flow once, including transfers. Ledger totals also stay separate per unit.
@@ -195,6 +201,8 @@ Git rollback restores application code, not schema 6 records. Schema 5 code cann
 | `flowledger/suggestions.py` | Remembers removed dropdown suggestions separately from records. |
 | `flowledger/filters.py` | Searchable checkbox dropdowns for ledger filtering. |
 | `flowledger/graphing.py` | Graph boundary points and permissive graph date entry. |
+| `flowledger/experimental.py` | View-only account map and transfer animation. |
+| `flowledger/flow_motion.py` | Read-only event selection, timestamp grouping and visual pulse sizing. |
 | `flowledger/calendar_widget.py` | Calendar pickers used only by the graph date controls. |
 | `flowledger/exchange.py` | CSV/JSON parsing, preview and atomic import/export. |
 | `flowledger/demo.py` | Isolated example data. |
@@ -208,6 +216,7 @@ Git rollback restores application code, not schema 6 records. Schema 5 code cann
 | `docs/units_interaction.txt` | Native checks for Units, exact quantities, per-unit starting balances and mixed-unit graphs. |
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
 | `docs/clipboard_interaction.txt` | Native row/text clipboard, deletion, status, precision and layout checks. |
+| `docs/experimental_interaction.txt` | Native checks for map controls, playback and node dragging. |
 | `docs/ledger_interaction.txt` | Mouse/keyboard checks for automatic flow edits, Add, row paste and undo/redo. |
 | `docs/account_interaction.txt` | Mouse/keyboard checks for automatic account edits, timestamps and undo/redo. |
 | `docs/view_history_interaction.txt` | Native checks for filter/draft/graph undo and table dragging/editing. |

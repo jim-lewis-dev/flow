@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard; window close via protocol callback",
+  "passed": [
+    "Experimental is the last tab; Confirmed USD groups date-only and explicit midnight together",
+    "Previous and Next step by timestamp, showing simultaneous flows with exact amount labels",
+    "Play animates moving pulses; Pause cancels its scheduled callback",
+    "Physical node drag changes only the layout and Ctrl+Z/Y reverses and reapplies it",
+    "Dragged node stays placed across 1920 and 1280 window sizes; both layouts render with pulses",
+    "Clicking a moving flow opens its saved ledger row",
+    "Status basis includes Pending and Planned in order, while Canceled is always excluded",
+    "Unit switching and typed From/Through dates honor exact second boundaries",
+    "The map respects live ledger filters and double-click opens the selected visible ledger flow",
+    "Leaving during playback stops the timer; reentry retains filters and the database/audit are untouched",
+    "Window close leaves no pending playback callback and makes no record or audit changes"
+  ],
+  "errors": [],
+  "failure": "",
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel",
+      "geometry": "300x193+540+365",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-yt0m49h8/demo.sqlite3",
+  "record_count": 7
+}

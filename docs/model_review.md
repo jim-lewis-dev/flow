@@ -81,6 +81,12 @@ Graph selections identify account/unit pairs. Units have separate plots on one t
 
 A flow at the graph start has before/after values at that same timestamp. Hover uses exact quantity/unit values, including both sides of a jump. Plot drawing uses Matplotlib floating-point coordinates; stored values and calculations do not. Ledger and category totals group by units.
 
+## Experimental flow map
+
+Experimental reads saved flows matching the current Flow Ledger filters, then narrows events to its own date range, exact-case unit and status basis. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Canceled never creates an animation event. Identical timestamps form one step, so simultaneous records do not acquire an invented order. Previous/Next and Play/Pause move between these groups. Node labels are existing account names; the moving pulse gives relative visual scale and its text gives the exact amount/unit. Dragged positions are session-only UI state.
+
+The map writes no account or flow records, starting balances, session audit or layout preferences. It adds no object field, table, migration or backup. Ledger filters still control the ledger and the existing balance graphs keep their own semantics; the map shows only its eligible subset.
+
 ## Session history and view state
 
 SessionHistory groups successful writes, including account_balances, into atomic undo actions using temporary SQLite triggers. Undo/redo restores changed rows and foreign keys, retains IDs and appends audit events. It does not rewrite old audit or add persistent undo tables. Import is one action. Paste is one action; later edits to the copy are separate actions.

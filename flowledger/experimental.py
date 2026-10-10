@@ -1,0 +1,602 @@
+"""An optional, read-only map of the flows visible in the Flow Ledger.
+
+This view owns only its display settings and node positions. It derives every
+event from the normal public flow records; it neither saves flows nor invents
+balances from a filtered subset of the ledger.
+"""
+from __future__ import annotations
+
+from collections import Counter
+from datetime import date
+import math
+import time
+import tkinter as tk
+from tkinter import ttk
+from typing import Callable
+
+from .calendar_widget import CalendarEntry
+from .core import format_quantity, normalize_date, parse_quantity
+from .flow_motion import grouped_events, pulse_radius, select_events
+from .graphing import normalize_graph_date
+
+
+BG = "#f2f5f2"
+CARD = "#ffffff"
+INK = "#18382f"
+MUTED = "#6d8179"
+TEAL = "#167d67"
+LINE = "#dce5df"
+FONT = "DejaVu Sans"
+FLOW_COLORS = {"Complete": "#16836c", "Pending": "#d38a25", "Planned": "#497fbb"}
+BASIS = {
+    "Confirmed": ("Complete",),
+    "Including Pending": ("Complete", "Pending"),
+    "Including Planned": ("Complete", "Pending", "Planned"),
+}
+SPEEDS = {"0.5×": 0.5, "1×": 1.0, "2×": 2.0, "4×": 4.0}
+
+
+class ExperimentalView(ttk.Frame):
+    """Account nodes, directed edges, and quantity-sized moving flow pulses.
+
+    ``get_flows`` supplies exactly the currently visible Flow Ledger records.
+    Copying those records prevents this view from mutating its input. UI state
+    can be included in session undo/redo through get_state()/put_state().
+    """
+
+    def __init__(self, master, repo, get_flows: Callable[[], list[dict]],
+                 on_select_flow: Callable[[str], None],
+                 on_view_change: Callable[[dict, str], None] | None = None):
+        super().__init__(master)
+        self.repo = repo
+        self.get_flows = get_flows
+        self.on_select_flow = on_select_flow
+        self.on_view_change = on_view_change
+        self.from_var = tk.StringVar(self)
+        self.through_var = tk.StringVar(self)
+        self.units_var = tk.StringVar(self)
+        self.basis_var = tk.StringVar(self, "Confirmed")
+        self.speed_var = tk.StringVar(self, "1×")
+        self.progress_var = tk.StringVar(self, "No flows selected")
+        self.message_var = tk.StringVar(self, "")
+        self.hover_var = tk.StringVar(self, "Drag accounts to arrange the map · Click a pulse to open its flow")
+        self._initialized_dates = False
+        self._all_visible: list[dict] = []
+        self._events: list[dict] = []
+        self._groups: list[tuple[str, list[dict]]] = []
+        self._directed_pairs: set[tuple[str, str]] = set()
+        self._max_amount = 1
+        self._invalid_message = ""
+        self._index = -1
+        self._progress = 0.0
+        self._stepped = False
+        self._playing = False
+        self._after_id = None
+        self._started_at = 0.0
+        self._positions: dict[str, tuple[float, float]] = {}
+        self._drag_name: str | None = None
+        self._drag_before: dict | None = None
+        self._node_items: dict[int, str] = {}
+        self._pulse_items: dict[int, dict] = {}
+        self._scene_width = 1000
+        self._scene_height = 510
+        self._history_state: dict | None = None
+        self._build()
+
+    def _build(self):
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(2, weight=1)
+
+        controls = ttk.Frame(self, style="Card.TFrame", padding=(16, 12))
+        controls.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        for column in (0, 1):
+            controls.columnconfigure(column, weight=1)
+        ttk.Label(controls, text="Account Flow Map", style="Section.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(controls, text="Uses current Flow Ledger filters", style="CardMuted.TLabel").grid(
+            row=0, column=3, columnspan=5, sticky="e", pady=(0, 8))
+        labels = (("FROM", 0), ("THROUGH", 1), ("UNITS", 2),
+                  ("STATUS BASIS", 3), ("SPEED", 4))
+        for title, column in labels:
+            ttk.Label(controls, text=title, style="Field.TLabel").grid(
+                row=1, column=column, sticky="w", padx=(0, 12))
+        self.from_entry = CalendarEntry(controls, variable=self.from_var, width=14)
+        self.from_entry.grid(row=2, column=0, sticky="ew", padx=(0, 12))
+        self.through_entry = CalendarEntry(controls, variable=self.through_var, width=14)
+        self.through_entry.grid(row=2, column=1, sticky="ew", padx=(0, 12))
+        self.units_combo = ttk.Combobox(controls, textvariable=self.units_var,
+                                        state="readonly", width=12)
+        self.units_combo.grid(row=2, column=2, sticky="ew", padx=(0, 12))
+        self.basis_combo = ttk.Combobox(controls, textvariable=self.basis_var,
+                                        values=tuple(BASIS), state="readonly", width=19)
+        self.basis_combo.grid(row=2, column=3, sticky="ew", padx=(0, 12))
+        self.speed_combo = ttk.Combobox(controls, textvariable=self.speed_var,
+                                        values=tuple(SPEEDS), state="readonly", width=6)
+        self.speed_combo.grid(row=2, column=4, sticky="ew", padx=(0, 12))
+        self.update_button = ttk.Button(controls, text="Update", style="Primary.TButton",
+                                        command=self.update)
+        self.update_button.grid(row=2, column=5, sticky="ew")
+        self.units_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose unit"))
+        self.basis_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose status basis"))
+        self.speed_combo.bind("<<ComboboxSelected>>", self._speed_changed)
+        for entry in (self.from_entry.entry, self.through_entry.entry):
+            entry.bind("<Return>", lambda event: self.update())
+
+        playback = ttk.Frame(self, style="Card.TFrame", padding=(12, 7))
+        playback.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        playback.columnconfigure(3, weight=1)
+        self.previous_button = ttk.Button(playback, text="◀ Previous", style="Small.TButton",
+                                          command=self.previous)
+        self.previous_button.grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.play_button = ttk.Button(playback, text="▶ Play", style="Small.TButton",
+                                      command=self.toggle_play)
+        self.play_button.grid(row=0, column=1, sticky="w", padx=(0, 5))
+        self.next_button = ttk.Button(playback, text="Next ▶", style="Small.TButton",
+                                      command=self.next)
+        self.next_button.grid(row=0, column=2, sticky="w", padx=(0, 13))
+        ttk.Label(playback, textvariable=self.progress_var, style="Card.TLabel",
+                  font=(FONT, 10, "bold")).grid(row=0, column=3, sticky="w")
+        self.message_label = ttk.Label(playback, textvariable=self.message_var,
+                                       style="CardMuted.TLabel", wraplength=1100)
+        self.message_label.grid(row=1, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        self.message_label.grid_remove()
+
+        scene = ttk.Frame(self, style="Card.TFrame")
+        scene.grid(row=2, column=0, sticky="nsew")
+        scene.columnconfigure(0, weight=1)
+        scene.rowconfigure(0, weight=1)
+        self.canvas = tk.Canvas(scene, bg=CARD, highlightthickness=0, relief="flat",
+                                xscrollincrement=1, yscrollincrement=1)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        xbar = ttk.Scrollbar(scene, orient="horizontal", command=self.canvas.xview)
+        ybar = ttk.Scrollbar(scene, orient="vertical", command=self.canvas.yview)
+        self.xbar, self.ybar = xbar, ybar
+        xbar.grid(row=1, column=0, sticky="ew")
+        ybar.grid(row=0, column=1, sticky="ns")
+        self.canvas.configure(xscrollcommand=xbar.set, yscrollcommand=ybar.set)
+        self.canvas.bind("<Configure>", self._canvas_resized)
+        self.canvas.bind("<ButtonPress-1>", self._pointer_down)
+        self.canvas.bind("<B1-Motion>", self._pointer_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._pointer_up)
+        self.canvas.bind("<Motion>", self._pointer_hover)
+        self.canvas.bind("<Leave>", lambda event: self.hover_var.set(
+            "Drag accounts to arrange the map · Click a pulse to open its flow"))
+
+        detail = ttk.Frame(self, style="Card.TFrame", padding=(12, 7))
+        detail.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        detail.columnconfigure(0, weight=1)
+        ttk.Label(detail, textvariable=self.hover_var, style="CardMuted.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 5))
+        self.flow_list = ttk.Treeview(detail, height=3, show="headings",
+                                      selectmode="browse", columns=("from", "to", "quantity", "status", "name"))
+        for key, title, weight in (("from", "From", 2), ("to", "To", 2),
+                                   ("quantity", "Quantity", 1), ("status", "Status", 1),
+                                   ("name", "Name", 3)):
+            self.flow_list.heading(key, text=title)
+            self.flow_list.column(key, width=weight * 90, minwidth=70, stretch=True,
+                                  anchor="e" if key == "quantity" else
+                                         "center" if key == "status" else "w")
+        self.flow_list.grid(row=1, column=0, sticky="ew")
+        flow_scroll = ttk.Scrollbar(detail, orient="vertical", command=self.flow_list.yview)
+        flow_scroll.grid(row=1, column=1, sticky="ns")
+        self.flow_list.configure(yscrollcommand=flow_scroll.set)
+        self.flow_list.bind("<Double-1>", self._open_detail)
+        self.flow_list.bind("<Return>", self._open_detail)
+
+    def get_state(self) -> dict:
+        """Return view-only settings for the app's session undo/redo."""
+        return {
+            "from": self.from_var.get(), "through": self.through_var.get(),
+            "units": self.units_var.get(), "basis": self.basis_var.get(),
+            "speed": self.speed_var.get(), "index": self._index,
+            "positions": {name: [x, y] for name, (x, y) in self._positions.items()},
+        }
+
+    def put_state(self, state: dict) -> None:
+        self.pause()
+        self.from_var.set(state.get("from", ""))
+        self.through_var.set(state.get("through", ""))
+        self.units_var.set(state.get("units", ""))
+        self.basis_var.set(state.get("basis", "Confirmed"))
+        self.speed_var.set(state.get("speed", "1×"))
+        self._positions = {name: (float(pos[0]), float(pos[1]))
+                           for name, pos in state.get("positions", {}).items()}
+        self._initialized_dates = True
+        self._load_data(reset_index=True)
+        self._index = min(max(-1, int(state.get("index", -1))), len(self._groups) - 1)
+        self._progress = 0.55 if self._index >= 0 else 0.0
+        self._stepped = self._index >= 0
+        self._draw_scene()
+        self._update_progress()
+        self._history_state = self.get_state()
+
+    def _notify(self, before: dict | None, label: str) -> None:
+        after = self.get_state()
+        self._history_state = after
+        if before is not None and before != after and self.on_view_change is not None:
+            self.on_view_change(before, label)
+
+    def refresh(self) -> None:
+        """Re-read current ledger filter results; preserve the current timestamp."""
+        self.pause()
+        self._load_data(reset_index=False)
+        self._history_state = self.get_state()
+
+    def update(self) -> None:
+        """Apply typed dates; invalid input clears stale animation and shows why."""
+        before = self._history_state or self.get_state()
+        if self._load_data(reset_index=True):
+            self._notify(before, "Update flow map")
+
+    def _control_changed(self, label: str) -> None:
+        before = self._history_state or self.get_state()
+        if self._load_data(reset_index=True):
+            self._notify(before, label)
+
+    def _speed_changed(self, event=None) -> None:
+        before = self._history_state or self.get_state()
+        if self._playing:
+            self._started_at = time.monotonic() - self._progress * self._duration() / 1000
+        self._notify(before, "Change flow map speed")
+
+    def _load_data(self, *, reset_index: bool) -> bool:
+        visible = [dict(flow) for flow in self.get_flows()]
+        if not self._initialized_dates:
+            days = sorted(flow["date"][:10] for flow in visible)
+            self.from_var.set(days[0] if days else date.today().isoformat())
+            self.through_var.set(days[-1] if days else date.today().isoformat())
+            self._initialized_dates = True
+        units = sorted({flow["units"] for flow in visible})
+        self.units_combo.configure(values=units)
+        if self.units_var.get() not in units:
+            self.units_var.set("USD" if "USD" in units else (units[0] if units else ""))
+        try:
+            start = normalize_graph_date(self.from_var.get())
+            end = normalize_graph_date(self.through_var.get())
+            if normalize_date(start) > normalize_date(end):
+                raise ValueError("From must be on or before Through.")
+            if self.basis_var.get() not in BASIS:
+                raise ValueError("Choose a status basis.")
+            previous_at = (self._groups[self._index][0]
+                           if not reset_index and 0 <= self._index < len(self._groups) else None)
+            chosen = select_events(visible, start, end, self.units_var.get(),
+                                   BASIS[self.basis_var.get()]) if self.units_var.get() else []
+            groups = grouped_events(chosen)
+        except ValueError as error:
+            self.pause()
+            self._events = []
+            self._groups = []
+            self._index = -1
+            self._invalid_message = str(error)
+            self.message_var.set(str(error))
+            self.message_label.grid()
+            self._draw_scene()
+            self._update_progress()
+            return False
+        self.pause()
+        self._all_visible = visible
+        self._events = chosen
+        self._groups = groups
+        self._directed_pairs = {(flow["from_account"], flow["to_account"]) for flow in chosen}
+        self._max_amount = max((parse_quantity(flow["amount"]) for flow in chosen), default=1)
+        self._invalid_message = ""
+        self._index = (next((i for i, (at, _) in enumerate(groups) if at == previous_at), -1)
+                       if not reset_index else -1)
+        self._progress = 0.55 if self._index >= 0 else 0.0
+        self._stepped = self._index >= 0
+        self.message_var.set("")
+        self.message_label.grid_remove()
+        self._draw_scene()
+        self._update_progress()
+        return True
+
+    def _scene_dimensions(self, number: int) -> tuple[int, int]:
+        width = max(700, self.canvas.winfo_width() - 4)
+        height = max(280, self.canvas.winfo_height() - 4)
+        # Expand a scrollable drawing surface instead of hiding crowded nodes.
+        radius = max(0, number - 1) * 112 / (2 * math.pi) + 110
+        side = int(2 * radius)
+        return max(width, side), max(height, side)
+
+    def _auto_layout(self, names: list[str]) -> None:
+        count = len(names)
+        if not count:
+            return
+        degree = Counter()
+        for flow in self._events:
+            degree[flow["from_account"]] += 1
+            degree[flow["to_account"]] += 1
+        ordered = sorted(names, key=lambda name: (-degree[name], name.casefold(), name))
+        hub = ordered.pop(0) if count >= 7 and degree[ordered[0]] >= max(3, count // 3) else None
+        if hub is not None:
+            self._positions.setdefault(hub, (0.5, 0.5))
+        if count == 1:
+            self._positions.setdefault(names[0], (0.5, 0.5))
+            return
+        if count == 2:
+            self._positions.setdefault(ordered[0], (0.24, 0.47))
+            self._positions.setdefault(ordered[1], (0.76, 0.47))
+            return
+        for i, name in enumerate(ordered):
+            angle = -math.pi / 2 + 2 * math.pi * i / len(ordered)
+            self._positions.setdefault(name, (0.5 + 0.39 * math.cos(angle),
+                                               0.48 + 0.31 * math.sin(angle)))
+
+    def _canvas_resized(self, event=None) -> None:
+        self._draw_scene()
+
+    def _segment(self, source: str, target: str, directed_pairs: set) -> tuple[float, ...]:
+        x1, y1 = self._xy(source)
+        x2, y2 = self._xy(target)
+        dx, dy = x2 - x1, y2 - y1
+        distance = max(1, math.hypot(dx, dy))
+        px, py = -dy / distance, dx / distance
+        lane = 12 if (target, source) in directed_pairs else 0
+        margin = min(40, distance * 0.3)
+        return (x1 + dx * margin / distance + px * lane,
+                y1 + dy * margin / distance + py * lane,
+                x2 - dx * margin / distance + px * lane,
+                y2 - dy * margin / distance + py * lane)
+
+    def _xy(self, name: str) -> tuple[float, float]:
+        x, y = self._positions[name]
+        return x * self._scene_width, y * self._scene_height
+
+    def _draw_scene(self) -> None:
+        canvas = self.canvas
+        canvas.delete("all")
+        self._node_items.clear()
+        self._pulse_items.clear()
+        names = sorted({name for flow in self._events
+                        for name in (flow["from_account"], flow["to_account"])},
+                       key=lambda s: (s.casefold(), s))
+        self._scene_width, self._scene_height = self._scene_dimensions(len(names))
+        canvas.configure(scrollregion=(0, 0, self._scene_width, self._scene_height))
+        # Scrollbars are useful for crowded maps, not for a two-account line.
+        for bar, needed in ((self.xbar, self._scene_width > canvas.winfo_width()),
+                            (self.ybar, self._scene_height > canvas.winfo_height())):
+            (bar.grid if needed else bar.grid_remove)()
+        if not names:
+            canvas.create_text(self._scene_width / 2, self._scene_height / 2,
+                               text=(self._invalid_message or
+                                     "No flows match this period, unit, and status basis."),
+                               fill=MUTED, font=(FONT, 11))
+            self._fill_details()
+            return
+        self._auto_layout(names)
+        legend_x = 20
+        for status in BASIS[self.basis_var.get()]:
+            canvas.create_oval(legend_x, 18, legend_x + 10, 28,
+                               fill=FLOW_COLORS[status], outline="")
+            canvas.create_text(legend_x + 16, 23, text=status, anchor="w",
+                               fill=MUTED, font=(FONT, 9))
+            legend_x += 26 + len(status) * 7
+        for source, target in sorted(self._directed_pairs):
+            if source == target:
+                x, y = self._xy(source)
+                cx, cy, radius = x + 48, y - 42, 45
+                canvas.create_arc(cx - radius, cy - radius, cx + radius, cy + radius,
+                                  start=242, extent=316, style="arc", outline="#b3c8bd",
+                                  width=2, tags=("edge",))
+                end_angle = math.radians(242 + 316)
+                end_x = cx + radius * math.cos(end_angle)
+                end_y = cy - radius * math.sin(end_angle)
+                canvas.create_line(end_x - 4, end_y - 13, end_x, end_y,
+                                   fill="#b3c8bd", width=2, arrow="last",
+                                   arrowshape=(9, 11, 4), tags=("edge",))
+                continue
+            segment = self._segment(source, target, self._directed_pairs)
+            canvas.create_line(*segment, fill="#b3c8bd", width=2, arrow="last",
+                               arrowshape=(9, 11, 4), tags=("edge",))
+        for name in names:
+            x, y = self._xy(name)
+            node = canvas.create_oval(x - 26, y - 26, x + 26, y + 26,
+                                      fill="#dbefe5", outline=TEAL, width=2,
+                                      tags=("node",))
+            self._node_items[node] = name
+            icon = canvas.create_text(x, y, text=name[:1].upper(), fill=INK,
+                                      font=(FONT, 15, "bold"), tags=("node",))
+            self._node_items[icon] = name
+            label = canvas.create_text(x, y + 43, text=name, width=140,
+                                       fill=INK, font=(FONT, 9, "bold"),
+                                       justify="center", tags=("node",))
+            self._node_items[label] = name
+        self._render_pulses()
+        self._fill_details()
+
+    def _render_pulses(self) -> None:
+        canvas = self.canvas
+        canvas.delete("moving_flow")
+        self._pulse_items.clear()
+        if not (0 <= self._index < len(self._groups)):
+            return
+        flows = self._groups[self._index][1]
+        counts = Counter((flow["from_account"], flow["to_account"]) for flow in flows)
+        ordinal = Counter()
+        for flow in flows:
+            key = (flow["from_account"], flow["to_account"])
+            number = ordinal[key]
+            ordinal[key] += 1
+            # Parallel lanes keep simultaneous flows on one route distinct.
+            spread = max(-90, min(90, (number - (counts[key] - 1) / 2) * 48))
+            if key[0] == key[1]:
+                node_x, node_y = self._xy(key[0])
+                theta = math.radians(242 + 316 * self._progress)
+                radius = max(20, 45 + spread * 0.3)
+                x = node_x + 48 + radius * math.cos(theta)
+                y = node_y - 42 - radius * math.sin(theta)
+            else:
+                x1, y1, x2, y2 = self._segment(*key, self._directed_pairs)
+                distance = max(1, math.hypot(x2 - x1, y2 - y1))
+                x = x1 + (x2 - x1) * self._progress - (y2 - y1) / distance * spread
+                y = y1 + (y2 - y1) * self._progress + (x2 - x1) / distance * spread
+            radius = pulse_radius(flow["amount"], self._max_amount)
+            color = FLOW_COLORS[flow["status"]]
+            oval = canvas.create_oval(x - radius, y - radius, x + radius, y + radius,
+                                      fill=color, outline="white", width=2,
+                                      tags=("moving_flow",))
+            self._pulse_items[oval] = flow
+            if len(flows) <= 8:
+                label = canvas.create_text(x, y - radius - 10,
+                                           text=f"{format_quantity(flow['amount'])} {flow['units']}",
+                                           fill=INK, font=(FONT, 9, "bold"),
+                                           tags=("moving_flow",))
+                self._pulse_items[label] = flow
+        canvas.tag_raise("node")
+
+    def _fill_details(self) -> None:
+        self.flow_list.delete(*self.flow_list.get_children())
+        if 0 <= self._index < len(self._groups):
+            for flow in self._groups[self._index][1]:
+                self.flow_list.insert("", "end", iid=flow["flow_id"], values=(
+                    flow["from_account"], flow["to_account"],
+                    f"{format_quantity(flow['amount'])} {flow['units']}",
+                    flow["status"], flow["name"]))
+
+    def _update_progress(self) -> None:
+        total = len(self._groups)
+        if not total:
+            self.progress_var.set("No flows selected")
+        elif self._index < 0:
+            self.progress_var.set(f"Ready · 0 of {total} times · {len(self._events)} flows")
+        else:
+            stamp, simultaneous = self._groups[self._index]
+            self.progress_var.set(f"{stamp} · {self._index + 1} of {total} times"
+                                  f" · {len(simultaneous)} flow{'s' if len(simultaneous) != 1 else ''}")
+        self.previous_button.configure(state="normal" if self._index >= 0 else "disabled")
+        self.next_button.configure(state="normal" if self._index < total - 1 else "disabled")
+        self.play_button.configure(state="normal" if total else "disabled",
+                                   text="❚❚ Pause" if self._playing else "▶ Play")
+
+    def next(self) -> None:
+        self.pause()
+        if self._index < len(self._groups) - 1:
+            self._index += 1
+            self._progress = 0.55
+            self._stepped = True
+            self._render_pulses()
+            self._fill_details()
+            self._update_progress()
+        self._history_state = self.get_state()
+
+    def previous(self) -> None:
+        self.pause()
+        if self._index >= 0:
+            self._index -= 1
+            self._progress = 0.55 if self._index >= 0 else 0.0
+            self._stepped = self._index >= 0
+            self._render_pulses()
+            self._fill_details()
+            self._update_progress()
+        self._history_state = self.get_state()
+
+    def _duration(self) -> float:
+        return 1000 / SPEEDS.get(self.speed_var.get(), 1)
+
+    def toggle_play(self) -> None:
+        if self._playing:
+            self.pause()
+            return
+        if not self._groups:
+            return
+        if self._index < 0 or (self._index == len(self._groups) - 1 and self._progress >= 1):
+            self._index = 0
+            self._progress = 0
+        elif self._stepped:
+            self._progress = 0
+        self._stepped = False
+        self._playing = True
+        self._started_at = time.monotonic() - self._progress * self._duration() / 1000
+        self._fill_details()
+        self._update_progress()
+        self._tick()
+
+    def _tick(self) -> None:
+        self._after_id = None
+        if not self._playing or not self.winfo_exists():
+            return
+        self._progress = min(1.0, (time.monotonic() - self._started_at) * 1000 / self._duration())
+        self._render_pulses()
+        if self._progress >= 1:
+            if self._index == len(self._groups) - 1:
+                self.pause()
+                return
+            self._index += 1
+            self._progress = 0.0
+            self._started_at = time.monotonic()
+            self._fill_details()
+            self._update_progress()
+        self._after_id = self.after(33, self._tick)
+
+    def pause(self) -> None:
+        self._playing = False
+        if self._after_id is not None:
+            try:
+                self.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+            self._after_id = None
+        self._update_progress()
+        self._history_state = self.get_state()
+
+    def close(self) -> None:
+        self.pause()
+        self.from_entry.close_popup()
+        self.through_entry.close_popup()
+
+    def _item_at(self, event) -> int | None:
+        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        for item in reversed(self.canvas.find_overlapping(x - 1, y - 1, x + 1, y + 1)):
+            if item in self._node_items or item in self._pulse_items:
+                return item
+        return None
+
+    def _pointer_down(self, event) -> None:
+        item = self._item_at(event)
+        name = self._node_items.get(item)
+        if name is not None:
+            self._drag_name = name
+            self._drag_before = self.get_state()
+            self.canvas.configure(cursor="fleur")
+
+    def _pointer_drag(self, event) -> None:
+        if self._drag_name is None:
+            return
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+        self._positions[self._drag_name] = (
+            min(0.94, max(0.06, x / self._scene_width)),
+            min(0.91, max(0.06, y / self._scene_height)))
+        self._draw_scene()
+
+    def _pointer_up(self, event) -> None:
+        if self._drag_name is not None:
+            name = self._drag_name
+            before = self._drag_before
+            self._drag_name = None
+            self._drag_before = None
+            self.canvas.configure(cursor="")
+            self._notify(before, f"Move {name} in flow map")
+            return
+        flow = self._pulse_items.get(self._item_at(event))
+        if flow is not None:
+            self.on_select_flow(flow["flow_id"])
+
+    def _pointer_hover(self, event) -> None:
+        if self._drag_name:
+            return
+        current = self.canvas.find_withtag("current")
+        item = current[-1] if current else None
+        flow = self._pulse_items.get(item)
+        if flow is not None:
+            self.hover_var.set(f"{flow['name']} · {flow['status']} · {flow['from_account']} → {flow['to_account']}"
+                               f" · {format_quantity(flow['amount'])} {flow['units']}")
+        elif item in self._node_items:
+            self.hover_var.set(self._node_items[item] + " · Drag to reposition")
+        else:
+            self.hover_var.set("Drag accounts to arrange the map · Click a pulse to open its flow")
+
+    def _open_detail(self, event=None) -> None:
+        chosen = self.flow_list.selection()
+        if chosen:
+            self.on_select_flow(chosen[0])
