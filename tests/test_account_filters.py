@@ -195,7 +195,7 @@ class AccountFilterTests(unittest.TestCase):
         self.assertIsNone(self.app.editing_id)
         self.assertEqual(self.app._flow_snapshot(), self.app._clean_flow)
 
-    def test_search_and_five_filter_buttons_fit_supported_window_sizes(self):
+    def test_search_and_six_filter_buttons_fit_supported_window_sizes(self):
         from tkinter import ttk
         primary = self.app.search_entry.master
         dates = next(widget for widget in primary.winfo_children()

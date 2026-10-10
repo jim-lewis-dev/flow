@@ -606,6 +606,21 @@ class Repository:
         rows = self._records(self.conn.execute(self._FLOW_QUERY + " WHERE f.flow_id=?", (flow_id,)))
         return rows[0] if rows else None
 
+    def delete_flow(self, flow_id: str) -> dict:
+        """Atomically remove a flow and its tag links, retaining its audit.
+
+        Return the deleted record. Account/unit starting balances and learned
+        categories/tags remain stored for reuse. Use SessionHistory.perform
+        around this action when session undo/redo is required.
+        """
+        with self.atomic():
+            record = self.get_flow(flow_id)
+            if record is None:
+                raise ValueError("Unknown flow.")
+            self.conn.execute("DELETE FROM flows WHERE flow_id=?", (flow_id,))
+            self._audit("flow", flow_id, "delete", record, None)
+            return record
+
     def void_flow(self, flow_id: str) -> dict:
         record = self.get_flow(flow_id)
         if record is None:

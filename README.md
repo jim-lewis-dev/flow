@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.14 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
+Flow 0.5.15 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
 
 ## Install and update
 
@@ -105,7 +105,9 @@ Click empty space below the ledger rows to deselect and return to New Flow. Vali
 
 **Repeat** copies every field, including date, time, units, status, notes and tags, into a new draft. It creates a new record only when you press **Add Flow**. Selecting a ledger row discards the copy without changing the original.
 
-**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons use the same history. Record edits, additions, Void, imports, suggestion removal/restoration, draft typing, New Flow/New Account clearing and Repeat are reversible. Filters, ledger search, date ranges, sorting, graph account selections, basis, dates, combined balance, Update Graph, line visibility, pan/zoom and table column changes join that same action order. A filter changed after an edit undoes first; the next undo reverses the edit. Shortcuts work inside custom dropdowns and Notes. Consecutive typing in one focused field is one step. New changes discard redo. Closing the app or successfully restoring a database clears history; saved records stay saved. File exports, scrolling and opening a page or popup do not create undo steps.
+Select a ledger row and press **Delete**, or click **Delete**, to remove its saved flow without confirmation. The top form resets to New Flow. **Ctrl+Z** restores the complete record, including its ID, units, notes and tags; **Ctrl+Y** removes it again. Inside an entry or Notes, Delete edits text. **Void** retains a record with Void status; **Delete** removes it. Deletion hides account/unit pairs no longer referenced by any saved flow while retaining their starting balances for reuse and undo.
+
+**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons use the same history. Record edits, additions, deletion, Void, imports, suggestion removal/restoration, draft typing, New Flow/New Account clearing and Repeat are reversible. Filters, ledger search, date ranges, sorting, graph account selections, basis, dates, combined balance, Update Graph, line visibility, pan/zoom and table column changes join that same action order. A filter changed after an edit undoes first; the next undo reverses the edit. Shortcuts work inside custom dropdowns and Notes. Consecutive typing in one focused field is one step. New changes discard redo. Closing the app or successfully restoring a database clears history; saved records stay saved. File exports, scrolling and opening a page or popup do not create undo steps.
 
 **Drag a column title** to move it in Flow Ledger or Accounts. Click a ledger title to sort; drag its edge to resize. Cell editing and Tab follow the displayed column order. Moves and resizing are undoable. Column order and view settings last for the current session.
 
@@ -130,7 +132,7 @@ Every endpoint is an account, including merchants, warehouses or other resource 
 
 From/To suggestions show names referenced by saved flows. Accounts and graph choices show the referenced **account/unit pairs**. Any status counts, including Void; ledger filters do not change these lists. Correcting the last reference hides the unused name or pair. Its starting balance remains available for reuse and undo. Add Account can prepare a starting balance, but the pair appears in these lists only after a flow uses it.
 
-Accounts uses the same editing gestures as the Flow Ledger: click a row to load it, then double-click **Starting Balance** or **Starting Date** to edit directly. **F2** opens Starting Balance; **Tab** moves between those fields. Enter, Tab or leaving the field saves an existing account and updates calculated balances. **New Account** clears the form; **Add Account** inserts a new one. Starting Date/Time follows the same entry rules as flows, including midnight when time is omitted. Account names remain fixed identities.
+Accounts uses the same editing gestures as the Flow Ledger: click a row to load it, then double-click **Starting Balance** or **Starting Date** to edit directly. **F2** opens Starting Balance; **Tab** moves between those fields. The starting-balance cursor begins at the end; later clicks place it normally. Enter, Tab or leaving the field saves an existing account and updates calculated balances. **New Account** clears the form; **Add Account** inserts a new one. Starting Date/Time follows the same entry rules as flows, including midnight when time is omitted. Account names remain fixed identities.
 
 Balances are calculated independently for each account/unit pair, from its starting balance and eligible flows in that unit:
 
@@ -152,9 +154,9 @@ From and Through have calendar buttons. Typed graph dates accept omitted leading
 
 Hover near a line to see its account, exact quantity and units. Overlapping lines can show multiple accounts; vertical changes show the quantities before and after the change. Hidden lines are excluded. Click a time to inspect selected pairs, use the toolbar to pan/zoom, or export PNG/PDF. Calculations and hover quantities remain exact; Matplotlib uses floating-point coordinates to draw them. A quantity outside that display range gets an inline error rather than an infinite or silently zero plot; its stored value remains exact. Hover labels are excluded from exports.
 
-The ledger has a compact Search field and separate **From**, **To**, **Status**, **Category** and **Tag** checkbox filters. Each dropdown supports multiple selections and a search box for finding choices. Checking an item updates results immediately and keeps the dropdown open. **All** removes that group's restriction; no checked items also means All. From lists saved source accounts; To lists saved destination accounts, including refunds and Void flows. Other filters and removed entry suggestions do not hide these choices.
+The ledger has a compact Search field and six checkbox filters: **From**, **To**, **Status**, **Categories**, **Tags** and **Units**. Empty filters display `<label>: All`; hover over a filter to see every selected value. Each dropdown supports multiple selections and a search box for finding choices. Checking an item updates results immediately and keeps the dropdown open. **All** removes that group's restriction; no checked items also means All. From lists saved source accounts; To lists saved destination accounts, including refunds and Void flows. Other filters and removed entry suggestions do not hide these choices.
 
-Selections match **any** selected value within a group. Different groups combine: From Checking/Amex and To Grocery/Diner shows flows from either selected source to either selected destination. Status, category, tags, text and dates further narrow those results. Search includes Units. Account matches use the complete account name, ignoring case. Searching within a dropdown does not discard checked choices. Filters remain in place after editing, adding or clearing the form, and support session Undo/Redo. A date-only Through includes the full day. Category totals show **flow volume by unit**, counting each matching non-Void flow once, including transfers. Ledger totals also stay separate per unit.
+Selections match **any** selected value within a group. Different groups combine: From Checking/Amex and To Grocery/Diner shows flows from either selected source to either selected destination. Status, category, tags, units, text and dates further narrow those results. Units match exact case: selecting mW does not match MW. Unit choices come from all saved flows, including Void, independently of other filters and entry suggestion preferences. Search includes Units. Account matches use the complete account name, ignoring case. Searching within a dropdown does not discard checked choices. Filters remain in place after editing, adding or clearing the form, and support session Undo/Redo. A date-only Through includes the full day. Category totals show **flow volume by unit**, counting each matching non-Void flow once, including transfers. Ledger totals also stay separate per unit.
 
 ## Import, export and recovery
 
@@ -196,6 +198,7 @@ Git rollback restores application code, not schema 5 records. An older app canno
 | `docs/test_results.txt` / `interaction_check.txt` | Executed regression and GUI verification. |
 | `docs/dropdown_interaction.txt` | Mouse/keyboard checks for suggestion removal and restoration. |
 | `docs/filter_interaction.txt` | Mouse/keyboard checks for multiple filters and resetting after an addition. |
+| `docs/control_fixes_interaction.txt` | Native checks for deletion, cursor placement, six filters and selection tooltips. |
 | `docs/account_filter_interaction.txt` | Native checks for From/To selections, search, undo/redo, editing, Add and compact layout. |
 | `docs/units_interaction.txt` | Native checks for Units, exact quantities, per-unit starting balances and mixed-unit graphs. |
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |

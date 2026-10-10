@@ -118,7 +118,7 @@ try:
         assert choice.get() == ()
         key("Escape")
     assert names() == set(fixtures)
-    ok("All clears each of the five restrictions without changing saved records")
+    ok("All clears each of the six restrictions without changing saved records")
 
     destination = open_filter("To")
     click(destination.checkbuttons["Checking"])
@@ -178,7 +178,7 @@ try:
             key("Escape")
         if width == 1280:
             ImageGrab.grab(bbox=(0, 0, width, height)).save(docs / "Flow_Account_Filters_1280.png")
-    ok("Compact Search, all five filters, Dates and ledger columns fit widths 1920, 1280 and 1120")
+    ok("Compact Search, all six filters, Dates and ledger columns fit widths 1920, 1280 and 1120")
 
     app.geometry("1920x1200+0+0")
     pump()

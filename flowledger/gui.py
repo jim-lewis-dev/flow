@@ -950,19 +950,20 @@ class FlowApp(tk.Tk):
         self.search_entry.grid(row=0, column=1, sticky="ew")
         for col, key, label, values in ((2, "From", "From", ()),
                                         (3, "To", "To", ()),
-                                        (4, "Status", "Statuses", STATUSES),
+                                        (4, "Status", "Status", STATUSES),
                                         (5, "Category", "Categories", ()),
-                                        (6, "Tag", "Tags", ())):
+                                        (6, "Tag", "Tags", ()),
+                                        (7, "Units", "Units", ())):
             primary.columnconfigure(col, weight=1, uniform="ledger_filters")
             choice = CheckFilter(primary, label=label, values=values,
-                                 all_label=f"{label}: All" if key in ("From", "To") else None,
+                                 all_label=f"{label}: All",
                                  on_change=lambda k=key: self._ledger_filter_changed(k))
-            # Search has a compact fixed request. The five filter buttons share
+            # Search has a compact fixed request. The six filter buttons share
             # the remaining width, including in the smallest supported window.
             choice.button.configure(width=1)
             choice.grid(row=0, column=col, sticky="ew", padx=(10, 0))
             self.ledger_filters[key] = choice
-        ttk.Button(primary, text="Dates…", style="Small.TButton", command=self.edit_date_filters).grid(row=0, column=7, padx=(10, 0))
+        ttk.Button(primary, text="Dates…", style="Small.TButton", command=self.edit_date_filters).grid(row=0, column=8, padx=(10, 0))
         self.date_filter_label = ttk.Label(top, text="All Dates", style="CardMuted.TLabel")
         self.date_filter_label.pack(side="right")
         tree_box = ttk.Frame(ledger_card, style="Card.TFrame")
@@ -993,6 +994,8 @@ class FlowApp(tk.Tk):
         self.ledger.bind("<<TreeviewSelect>>", self._select_flow)
         self.ledger.bind("<Button-1>", self._ledger_background_click)
         self.ledger.bind("<Triple-1>", self._repeat_row_click)
+        # Bind to the table only: Delete inside a form/cell/Notes edits text.
+        self.ledger.bind("<Delete>", self.delete_selected)
         self.ledger_tooltip = TreeTooltip(self.ledger, self.flow_tooltip)
         self.ledger_editor = LedgerEditor(self, _NotesPeer,
             font=FONT, background="#fbfcfa", foreground=INK)
@@ -1003,7 +1006,7 @@ class FlowApp(tk.Tk):
             click=self.sort_ledger)
         actions = ttk.Frame(ledger_card, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 8))
-        for label, command in [("Repeat", self.repeat_selected), ("Void", self.void_selected), ("History", self.show_history), ("Record JSON", self.show_flow_json)]:
+        for label, command in [("Repeat", self.repeat_selected), ("Delete", self.delete_selected), ("Void", self.void_selected), ("History", self.show_history), ("Record JSON", self.show_flow_json)]:
             ttk.Button(actions, text=label, command=command, style="Small.TButton").pack(side="left", padx=(0, 6))
         ttk.Button(actions, text="Category Totals", style="Small.TButton", command=self.show_report).pack(side="right")
         self.report_summary = tk.StringVar(self, "")
@@ -1272,6 +1275,25 @@ class FlowApp(tk.Tk):
         except (ValueError, sqlite3.Error) as exc:
             self._feedback(str(exc), True)
 
+    def delete_selected(self, event=None):
+        """Remove a saved row; session history restores its exact saved record."""
+        flow = self._selected()
+        if not flow:
+            return "break"
+        self.ledger_editor.close(commit=False)
+        self._committing = True
+        try:
+            self.history.perform("Delete flow", lambda: self.repo.delete_flow(flow["flow_id"]))
+            self.new_flow(focus=False, confirm=False)
+            self.refresh_all()
+            self._update_history_buttons()
+            self.status_message.set("Flow deleted · Ctrl+Z to undo")
+        except (ValueError, sqlite3.Error) as exc:
+            self._feedback(str(exc), True)
+        finally:
+            self._committing = False
+        return "break"
+
     def _show_selection(self, event=None):
         selection = self.ledger.selection()
         if not selection:
@@ -1353,6 +1375,7 @@ class FlowApp(tk.Tk):
         categories = {value.casefold() for value in self.ledger_filters["Category"].get()}
         tags = {value.casefold() for value in self.ledger_filters["Tag"].get()}
         statuses = set(self.ledger_filters["Status"].get())
+        units = set(self.ledger_filters["Units"].get())
         try:
             start_text = normalize_flow_date(self.filter_start.get()) if self.filter_start.get().strip() else ""
             end_text = normalize_flow_date(self.filter_end.get()) if self.filter_end.get().strip() else ""
@@ -1372,6 +1395,7 @@ class FlowApp(tk.Tk):
             return ((query in haystack or (query_quantity is not None and query_quantity == parse_quantity(flow["amount"])))
                     and (not from_accounts or flow["from_account"].casefold() in from_accounts)
                     and (not to_accounts or flow["to_account"].casefold() in to_accounts)
+                    and (not units or flow["units"] in units)
                     and (not categories or flow["category"].casefold() in categories)
                     and (not tags or tags.intersection(value.casefold() for value in flow["tags"]))
                     and (not date_start or normalize_date(flow["date"]) >= date_start)
@@ -1466,6 +1490,7 @@ class FlowApp(tk.Tk):
             self.ledger_filters[key].set_values(sorted({flow[field] for flow in flows}, key=str.casefold))
         self.ledger_filters["Category"].set_values(self.repo.list_categories())
         self.ledger_filters["Tag"].set_values(self.repo.list_tags())
+        self.ledger_filters["Units"].set_values(sorted({flow["units"] for flow in flows}))
         self.refresh_ledger()
         self.refresh_accounts()
         self.refresh_chart_accounts()
@@ -1509,6 +1534,8 @@ class FlowApp(tk.Tk):
             elif key == "units":
                 widget.on_remove = lambda value: self._remove_suggestion("units", value)
                 widget.on_accept = lambda w=widget: self._accept_suggestion("units", w, "account")
+            elif key == "opening":
+                widget.bind("<FocusIn>", self._starting_balance_focus, add="+")
         self.account_cells = cells
         self._reflow_cells(form, cells, [35, 15, 25, 25], threshold=700)
         card = self._card(page)
@@ -1546,6 +1573,16 @@ class FlowApp(tk.Tk):
         self.account_rows = {}
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda row: "Starting balance immediately before " + self._account_record(row)["opening_at"] if self._account_record(row) else None)
         ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date · Changes save automatically", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
+
+    def _starting_balance_focus(self, event):
+        # Mouse entry bindings place the caret after FocusIn; wait until they
+        # finish. Later clicks in the already-focused field can place it freely.
+        widget = event.widget
+        def move_to_end():
+            if widget.winfo_exists() and self.focus_get() is widget:
+                widget.icursor("end")
+                widget.xview_moveto(1)
+        widget.after_idle(move_to_end)
 
     def _accounts_yview(self, *args):
         if self.account_cell_editor.close():

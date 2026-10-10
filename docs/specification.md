@@ -38,9 +38,11 @@ A flow subtracts a quantity from one named account and adds it to another, in on
 
 Default order: Date, Name, From, To, Amount, Units, Status, Category, Tags, Notes. Defaults: today, USD, Complete and Uncategorized. Units uses the learned dropdown with filtering, Enter and X. Accounts has Name, Units, Starting Balance and Starting Date/Time.
 
-Existing records save completed fields on Enter, Tab or leaving them. Ctrl+S finishes existing edits; new drafts wait for Add. Notes: Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error. New clears; Repeat copies every value, including units and date.
+Existing records save completed fields on Enter, Tab or leaving them. Ctrl+S finishes existing edits; new drafts wait for Add. Notes: Ctrl+Enter or leaving/closing saves. Invalid edits stay unsaved with a silent error. New clears; Repeat copies every value, including units and date. Delete removes a selected row without confirmation; undo restores its record. Delete inside text edits text.
 
-Row/page changes and blank ledger clicks discard unadded drafts without prompts; undo restores them. Drag titles to move columns; cell editing and Tab follow their visible order. Account Name/Units identify a row; starting balance/date remain editable.
+Row/page changes and blank ledger clicks discard unadded drafts without prompts; undo restores them. Drag titles to move columns; cell editing and Tab follow their visible order. Account Name/Units identify a row; starting balance/date remain editable. Starting Balance enters with the caret at the end.
+
+Filters: From, To, Status, Categories, Tags and Units. Checkboxes select multiple values; hover lists every selection. Filter selections and choice search support session undo/redo. Unit matches keep exact case.
 
 Actual objects and SQL rows: examples/record_objects.json and examples/review.sql. Source walkthrough: docs/model_review.md. Controls and update/export commands: README.md.
 
@@ -64,7 +66,7 @@ account_balances is keyed by (account_key, units); each flow references matching
 
 ### Save, calculate and inspect
 
-GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records, drafts, filters, searches, graph controls and all plot/column changes in one session order.
+GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records/deletion, drafts, filters, searches, graph controls and all plot/column changes in one session order.
 
 Within its unit, a flow contributes +amount to To and -amount to From. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Void contributes zero. Each pair has a confirmed anchor immediately before events at its own timestamp; unknown remains unknown.
 
