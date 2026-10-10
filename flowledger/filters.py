@@ -16,9 +16,11 @@ class CheckFilter(ttk.Frame):
     """
 
     def __init__(self, master, label: str, values: Iterable[str] = (),
-                 on_change: Callable[[], None] | None = None, **kwargs):
+                 on_change: Callable[[], None] | None = None,
+                 all_label: str | None = None, **kwargs):
         super().__init__(master, **kwargs)
         self.label = label
+        self.all_label = all_label
         self.values = list(dict.fromkeys(str(value) for value in values))
         self.on_change = on_change
         self._selected: tuple[str, ...] = ()
@@ -92,7 +94,7 @@ class CheckFilter(ttk.Frame):
     def _update_caption(self):
         count = len(self._selected)
         if not count:
-            caption = f"All {self.label}"
+            caption = self.all_label or f"All {self.label}"
         elif count == 1:
             caption = f"{self.label}: {self._selected[0]}"
         else:

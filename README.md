@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.12 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
+Flow 0.5.13 records movements between named accounts and graphs their balances. It is a local Python/Tk desktop app using SQLite and exact integer cents.
 
 ## Install and update
 
@@ -151,9 +151,9 @@ From and Through have calendar buttons. Typed graph dates accept omitted leading
 
 Hover near a line to see its account and exact dollar amount. Overlapping lines can show multiple accounts; vertical changes show the amounts before and after the change. Hidden lines are excluded. Click a time to inspect all selected accounts, use the toolbar to pan/zoom, or export PNG/PDF. Hover labels are excluded from exports.
 
-The ledger filters by text, dates, statuses, categories and tags. Each checkbox dropdown supports multiple selections and a search box for finding choices. Checking an item updates results immediately and keeps the dropdown open. **All** removes that group's restriction; no checked items also means All.
+The ledger has a compact Search field and separate **From**, **To**, **Status**, **Category** and **Tag** checkbox filters. Each dropdown supports multiple selections and a search box for finding choices. Checking an item updates results immediately and keeps the dropdown open. **All** removes that group's restriction; no checked items also means All. From lists saved source accounts; To lists saved destination accounts, including refunds and Void flows. Other filters and removed entry suggestions do not hide these choices.
 
-Selections match **any** selected value within a group. Different groups combine: selecting Complete/Pending, Dining/Boat and Trip/Work shows flows with either status, either category, and at least one of those tags. Text and date limits further narrow those results. Searching within a dropdown does not discard checked choices. Filters remain in place after editing, adding or clearing the form. A date-only Through includes the full day. Category totals show **flow volume**, counting each matching non-Void flow once, including transfers.
+Selections match **any** selected value within a group. Different groups combine: From Checking/Amex and To Grocery/Diner shows flows from either selected source to either selected destination. Status, category, tags, text and dates further narrow those results. Account matches use the complete account name, ignoring case. Searching within a dropdown does not discard checked choices. Filters remain in place after editing, adding or clearing the form, and support session Undo/Redo. A date-only Through includes the full day. Category totals show **flow volume**, counting each matching non-Void flow once, including transfers.
 
 ## Import, export and recovery
 
@@ -193,6 +193,7 @@ If the old database contains named hypothetical collections, they remain in the 
 | `docs/test_results.txt` / `interaction_check.txt` | Executed regression and GUI verification. |
 | `docs/dropdown_interaction.txt` | Mouse/keyboard checks for suggestion removal and restoration. |
 | `docs/filter_interaction.txt` | Mouse/keyboard checks for multiple filters and resetting after an addition. |
+| `docs/account_filter_interaction.txt` | Native checks for From/To selections, search, undo/redo, editing, Add and compact layout. |
 | `docs/graph_interaction.txt` | Mouse/keyboard checks for graph boundaries, calendars, warnings and hover values. |
 | `docs/ledger_interaction.txt` | Mouse/keyboard checks for automatic flow edits, Add, Repeat and undo/redo. |
 | `docs/account_interaction.txt` | Mouse/keyboard checks for automatic account edits, timestamps and undo/redo. |

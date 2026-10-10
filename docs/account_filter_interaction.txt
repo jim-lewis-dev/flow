@@ -1,0 +1,14 @@
+Flow 0.5.13: native X11 XTest mouse and keyboard audit
+PASS: 11 workflows; 0 callback exceptions.
+
+PASS From checkboxes match whole source names and allow multiple selections
+PASS Searching accounts retains hidden checks; checkbox undo/redo keeps the popup synchronized
+PASS From choice-search undo/redo restores the query without changing account selections
+PASS To supports multiple choices and popup undo/redo; From and To combine correctly
+PASS Five filters combine with Search and totals; choices include Void/refunds and ignore other restrictions
+PASS All clears each of the five restrictions without changing saved records
+PASS Refunds are filterable in their actual From and To directions
+PASS Editing a source refreshes choices and hides the matching row; record undo/redo restores both correctly
+PASS Add resets entry and retains endpoint filters; addition undo/redo refreshes saved account choices
+PASS Compact Search, all five filters, Dates and ledger columns fit widths 1920, 1280 and 1120
+PASS Account dropdowns first map at their final position; native edits leave original records intact

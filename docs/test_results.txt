@@ -1,8 +1,16 @@
-Flow 0.5.12 / 9 October 2026
-Full automated suite with Tk on an isolated 1920x1200 Xvfb display.
-378 tests passed, including record/view history, column mapping, accounts, dates,
-notes, graphing, imports, schema migrations, update/export and rollback checks.
+Flow 0.5.13 automated tests, graphical DISPLAY enabled
 
+test_add_updates_choices_resets_form_and_retains_endpoint_filters (test_account_filters.AccountFilterTests.test_add_updates_choices_resets_form_and_retains_endpoint_filters) ... ok
+test_choices_use_saved_endpoints_independent_of_other_filters (test_account_filters.AccountFilterTests.test_choices_use_saved_endpoints_independent_of_other_filters) ... ok
+test_correcting_last_endpoint_reference_preserves_filter_and_undo (test_account_filters.AccountFilterTests.test_correcting_last_endpoint_reference_preserves_filter_and_undo) ... ok
+test_each_endpoint_popup_supports_multiselect_undo_and_search (test_account_filters.AccountFilterTests.test_each_endpoint_popup_supports_multiselect_undo_and_search) ... ok
+test_endpoint_names_ignore_case (test_account_filters.AccountFilterTests.test_endpoint_names_ignore_case) ... ok
+test_endpoints_combine_with_all_other_restrictions_and_totals (test_account_filters.AccountFilterTests.test_endpoints_combine_with_all_other_restrictions_and_totals) ... ok
+test_filter_history_preserves_unfinished_record_fields (test_account_filters.AccountFilterTests.test_filter_history_preserves_unfinished_record_fields) ... ok
+test_from_is_exact_and_directional (test_account_filters.AccountFilterTests.test_from_is_exact_and_directional) ... ok
+test_multiple_endpoints_use_or_within_and_between (test_account_filters.AccountFilterTests.test_multiple_endpoints_use_or_within_and_between) ... ok
+test_search_and_five_filter_buttons_fit_supported_window_sizes (test_account_filters.AccountFilterTests.test_search_and_five_filter_buttons_fit_supported_window_sizes) ... ok
+test_to_is_exact_and_directional (test_account_filters.AccountFilterTests.test_to_is_exact_and_directional) ... ok
 test_account_names_and_computed_balance_columns_are_read_only (test_account_inline.AccountInlineEditingTests.test_account_names_and_computed_balance_columns_are_read_only) ... ok
 test_cells_and_upper_fields_share_values_and_completed_fields_save (test_account_inline.AccountInlineEditingTests.test_cells_and_upper_fields_share_values_and_completed_fields_save) ... ok
 test_date_only_changes_reset_time_and_full_timestamp_keeps_seconds (test_account_inline.AccountInlineEditingTests.test_date_only_changes_reset_time_and_full_timestamp_keeps_seconds) ... ok
@@ -383,6 +391,6 @@ test_filter_button_without_popup_does_not_swallow_escape (test_window.WindowTest
 test_startup_requests_fullscreen_escape_preserves_draft (test_window.WindowTests.test_startup_requests_fullscreen_escape_preserves_draft) ... ok
 
 ----------------------------------------------------------------------
-Ran 378 tests in 69.658s
+Ran 389 tests in 69.984s
 
 OK
