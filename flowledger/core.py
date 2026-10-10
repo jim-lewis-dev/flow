@@ -22,9 +22,9 @@ import sqlite3
 from typing import Any, Iterable, Iterator
 import uuid
 
-STATUSES = ("Complete", "Pending", "Planned", "Void")
+STATUSES = ("Complete", "Pending", "Planned", "Canceled")
 DEFAULT_ANCHOR = "2026-10-01 00:00:00"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 APPLICATION_ID = 1179406167
 MAX_CENTS = 2**63 - 1
 
@@ -225,13 +225,18 @@ class Repository:
                 schema = Path(__file__).with_name("schema.sql").read_text(encoding="utf-8")
                 self.conn.executescript("BEGIN IMMEDIATE;\n" + schema + "\nCOMMIT;")
             self._validate_database(self.conn, allow_legacy=True)
-            if self.conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
-                # Preserve a consistent legacy snapshot before changing schema.
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                self.migration_backup_path = self.path + f".pre-v5-{stamp}.bak"
-                self.backup(self.migration_backup_path)
-                self.migration_forecasts_path = self._save_legacy_forecasts(
-                    self.conn, self.migration_backup_path + ".forecasts.json")
+            version = self.conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                if version < 5:
+                    # Older migrations remove legacy fields/forecast collections.
+                    # Preserve those original representations for recovery.
+                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+                    self.migration_backup_path = self.path + f".pre-v{SCHEMA_VERSION}-{stamp}.bak"
+                    self.backup(self.migration_backup_path)
+                    self.migration_forecasts_path = self._save_legacy_forecasts(
+                        self.conn, self.migration_backup_path + ".forecasts.json")
+                # v5 -> v6 only renames the status/constraint, in one transaction.
+                # Failure rolls back both schema and data; no retained copy.
                 self._migrate_legacy(self.conn)
             self._validate_database(self.conn)
         except Exception:
@@ -243,7 +248,7 @@ class Repository:
         if conn.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
             raise ValueError("This is not a Flowledger database.")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4)):
+        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4, 5)):
             raise ValueError(f"Unsupported database version {version}; expected {SCHEMA_VERSION}.")
         required = {
             "accounts": {"account_key", "name"},
@@ -316,6 +321,8 @@ class Repository:
                     "WHERE ft.flow_id=? ORDER BY ft.position", (flow["flow_id"],))]
                 flow["amount"] = _legacy_quantity(flow.pop("amount_cents"))
                 flow["units"] = "USD"
+                if flow["status"] == "Void":
+                    flow["status"] = "Canceled"
                 flows.append(flow)
             result.append({"name": name, "flows": flows,
                            "excluded_flow_ids": [r[0] for r in conn.execute(
@@ -326,7 +333,7 @@ class Repository:
 
     @staticmethod
     def _migrate_legacy(conn: sqlite3.Connection) -> None:
-        """Upgrade v1-v4 atomically; convert existing resource values to USD.
+        """Upgrade v1-v5 atomically; convert legacy amounts and rename Void.
 
         The caller preserves the complete original database before migration.
         Legacy optional-time flags become date precision. Version 1 did not
@@ -335,7 +342,7 @@ class Repository:
         never mixed into ordinary flows. Accounts and audit history are retained.
         """
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, 2, 3, 4):
+        if version not in (1, 2, 3, 4, 5):
             raise ValueError(f"Cannot migrate database version {version}.")
         if conn.in_transaction:
             raise ValueError("Finish the current write before migrating.")
@@ -343,45 +350,48 @@ class Repository:
         conn.execute("PRAGMA foreign_keys = OFF")
         try:
             conn.execute("BEGIN IMMEDIATE")
-            if version < 3:
-                conn.execute("CREATE TABLE accounts_v4 (account_key TEXT PRIMARY KEY, "
-                             "name TEXT NOT NULL, opening_cents INTEGER "
-                             "CHECK(opening_cents IS NULL OR typeof(opening_cents) = 'integer'), "
-                             "opening_at TEXT NOT NULL)")
-                conn.execute("INSERT INTO accounts_v4 SELECT account_key,name,opening_cents,opening_at FROM accounts")
+            if version < 5:
+                if version < 3:
+                    conn.execute("CREATE TABLE accounts_v4 (account_key TEXT PRIMARY KEY, "
+                                 "name TEXT NOT NULL, opening_cents INTEGER "
+                                 "CHECK(opening_cents IS NULL OR typeof(opening_cents) = 'integer'), "
+                                 "opening_at TEXT NOT NULL)")
+                    conn.execute("INSERT INTO accounts_v4 SELECT account_key,name,opening_cents,opening_at FROM accounts")
+                    conn.execute("DROP TABLE accounts")
+                    conn.execute("ALTER TABLE accounts_v4 RENAME TO accounts")
+                if version < 4:
+                    Repository._migrate_baseline(conn, version)
+                conn.execute("CREATE TABLE accounts_v5 (account_key TEXT PRIMARY KEY,name TEXT NOT NULL)")
+                conn.execute("INSERT INTO accounts_v5 SELECT account_key,name FROM accounts")
+                conn.execute("CREATE TABLE account_balances (account_key TEXT NOT NULL REFERENCES accounts_v5(account_key), "
+                             "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
+                             "opening_amount TEXT CHECK(opening_amount IS NULL OR typeof(opening_amount)='text'), "
+                             "opening_at TEXT NOT NULL, PRIMARY KEY(account_key,units))")
+                for key, cents, when in conn.execute("SELECT account_key,opening_cents,opening_at FROM accounts").fetchall():
+                    conn.execute("INSERT INTO account_balances VALUES(?,'USD',?,?)",
+                                 (key, None if cents is None else _legacy_quantity(cents), when))
                 conn.execute("DROP TABLE accounts")
-                conn.execute("ALTER TABLE accounts_v4 RENAME TO accounts")
-            if version < 4:
-                Repository._migrate_baseline(conn, version)
-            conn.execute("CREATE TABLE accounts_v5 (account_key TEXT PRIMARY KEY,name TEXT NOT NULL)")
-            conn.execute("INSERT INTO accounts_v5 SELECT account_key,name FROM accounts")
-            conn.execute("CREATE TABLE account_balances (account_key TEXT NOT NULL REFERENCES accounts_v5(account_key), "
-                         "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
-                         "opening_amount TEXT CHECK(opening_amount IS NULL OR typeof(opening_amount)='text'), "
-                         "opening_at TEXT NOT NULL, PRIMARY KEY(account_key,units))")
-            for key, cents, when in conn.execute("SELECT account_key,opening_cents,opening_at FROM accounts").fetchall():
-                conn.execute("INSERT INTO account_balances VALUES(?,'USD',?,?)",
-                             (key, None if cents is None else _legacy_quantity(cents), when))
-            conn.execute("DROP TABLE accounts")
-            conn.execute("ALTER TABLE accounts_v5 RENAME TO accounts")
-            conn.execute("CREATE TABLE flows_v5 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
-                         "from_key TEXT NOT NULL,to_key TEXT NOT NULL, "
-                         "amount TEXT NOT NULL CHECK(typeof(amount)='text' AND length(amount)>0), "
-                         "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
-                         "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Void')), "
-                         "name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',category_key TEXT NOT NULL REFERENCES categories(category_key), "
-                         "CHECK(from_key<>to_key), "
-                         "FOREIGN KEY(from_key,units) REFERENCES account_balances(account_key,units), "
-                         "FOREIGN KEY(to_key,units) REFERENCES account_balances(account_key,units))")
-            for row in conn.execute("SELECT flow_id,date,from_key,to_key,amount_cents,status,name,notes,category_key FROM flows").fetchall():
-                conn.execute("INSERT INTO flows_v5 VALUES(?,?,?,?,?,'USD',?,?,?,?)",
-                             (*row[:4], _legacy_quantity(row[4]), *row[5:]))
-            conn.execute("DROP TABLE flows")
-            conn.execute("ALTER TABLE flows_v5 RENAME TO flows")
-            conn.execute("CREATE INDEX flows_date ON flows(datetime(date),flow_id)")
-            conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
-            conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
-            conn.execute("PRAGMA user_version = 5")
+                conn.execute("ALTER TABLE accounts_v5 RENAME TO accounts")
+                conn.execute("CREATE TABLE flows_v5 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
+                             "from_key TEXT NOT NULL,to_key TEXT NOT NULL, "
+                             "amount TEXT NOT NULL CHECK(typeof(amount)='text' AND length(amount)>0), "
+                             "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
+                             "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Void')), "
+                             "name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',category_key TEXT NOT NULL REFERENCES categories(category_key), "
+                             "CHECK(from_key<>to_key), "
+                             "FOREIGN KEY(from_key,units) REFERENCES account_balances(account_key,units), "
+                             "FOREIGN KEY(to_key,units) REFERENCES account_balances(account_key,units))")
+                for row in conn.execute("SELECT flow_id,date,from_key,to_key,amount_cents,status,name,notes,category_key FROM flows").fetchall():
+                    conn.execute("INSERT INTO flows_v5 VALUES(?,?,?,?,?,'USD',?,?,?,?)",
+                                 (*row[:4], _legacy_quantity(row[4]), *row[5:]))
+                conn.execute("DROP TABLE flows")
+                conn.execute("ALTER TABLE flows_v5 RENAME TO flows")
+                conn.execute("CREATE INDEX flows_date ON flows(datetime(date),flow_id)")
+                conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
+                conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
+                conn.execute("PRAGMA user_version = 5")
+            Repository._rename_canceled(conn)
+            conn.execute("PRAGMA user_version = 6")
             Repository._validate_database(conn)
             conn.execute("COMMIT")
         except BaseException:
@@ -390,6 +400,26 @@ class Repository:
             raise
         finally:
             conn.execute(f"PRAGMA foreign_keys = {foreign_keys}")
+
+    @staticmethod
+    def _rename_canceled(conn: sqlite3.Connection) -> None:
+        """Replace only the status constraint/value; the caller owns the transaction."""
+        conn.execute("CREATE TABLE flows_v6 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
+                     "from_key TEXT NOT NULL,to_key TEXT NOT NULL, "
+                     "amount TEXT NOT NULL CHECK(typeof(amount)='text' AND length(amount)>0), "
+                     "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
+                     "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Canceled')), "
+                     "name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',category_key TEXT NOT NULL REFERENCES categories(category_key), "
+                     "CHECK(from_key<>to_key), "
+                     "FOREIGN KEY(from_key,units) REFERENCES account_balances(account_key,units), "
+                     "FOREIGN KEY(to_key,units) REFERENCES account_balances(account_key,units))")
+        conn.execute("INSERT INTO flows_v6 SELECT flow_id,date,from_key,to_key,amount,units,"
+                     "CASE status WHEN 'Void' THEN 'Canceled' ELSE status END,name,notes,category_key FROM flows")
+        conn.execute("DROP TABLE flows")
+        conn.execute("ALTER TABLE flows_v6 RENAME TO flows")
+        conn.execute("CREATE INDEX flows_date ON flows(datetime(date),flow_id)")
+        conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
+        conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
 
     @staticmethod
     def _migrate_baseline(conn: sqlite3.Connection, version: int) -> None:
@@ -523,7 +553,7 @@ class Repository:
         units = _name(data.get("units"), "Units")
         status = data.get("status", "Complete")
         if status not in STATUSES:
-            raise ValueError("Status must be Complete, Pending, Planned, or Void.")
+            raise ValueError("Status must be Complete, Pending, Planned, or Canceled.")
         name = data.get("name", "")
         notes = data.get("notes", "")
         category = data.get("category", "")
@@ -625,7 +655,7 @@ class Repository:
         record = self.get_flow(flow_id)
         if record is None:
             raise ValueError("Unknown flow.")
-        record["status"] = "Void"
+        record["status"] = "Canceled"
         return self.save_flow(record)
 
     def history(self, flow_id: str | None = None) -> list[dict]:
@@ -697,7 +727,7 @@ def _statuses(statuses: Iterable[str]) -> set[str]:
     result = set(statuses)
     if not result.issubset(STATUSES):
         raise ValueError("Unknown balance status.")
-    return result - {"Void"}
+    return result - {"Canceled"}
 
 
 def _effect(account_name: str, flow: dict) -> Decimal:
@@ -803,7 +833,7 @@ def ledger_balance_at(account: dict, flows: list[dict], at: str,
     A confirmed snapshot excludes unsettled Pending and hypothetical Planned
     flows, including those dated before that snapshot. Include their eligible
     effects once when the caller requests the corresponding estimate. Overdue
-    Planned flows therefore remain in forecasts until completed, voided, or
+    Planned flows therefore remain in forecasts until completed, canceled, or
     excluded. Use balance_at directly for an arbitrary assumed simulation seed.
 
     Backdating a completed flow across a real snapshot boundary may require

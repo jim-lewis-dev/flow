@@ -33,7 +33,7 @@ A flow transfers an exact quantity from one named account to another, in one uni
 }
 ```
 
-Repository-generated USD and kg objects are in `examples/record_objects.json`. `examples/review.sql` is their actual SQLite dump. Record JSON shows the saved flow or account/unit starting balance; Data > View Schema shows the tables.
+Repository-generated USD and kg objects are in `examples/record_objects.json`. `examples/review.sql` is their actual SQLite dump. JSON record shows the saved flow or account/unit starting balance; Data > View Schema shows the tables.
 
 | Value | Meaning |
 | --- | --- |
@@ -42,14 +42,14 @@ Repository-generated USD and kg objects are in `examples/record_objects.json`. `
 | Amount | Positive exact decimal string, not cents or a binary float. `.125` stores as `"0.125"`; `12.00` stores as `"12"`. Removing trailing zeros does not change quantity. |
 | Starting balance | Exact signed decimal string, or null when unknown. Each account/unit pair has its own starting time. |
 | Date | One local Date/Time field. Date-only means midnight; optional 24-hour time is stored to seconds. Missing components use the existing defaults. |
-| Flow ID | UUID preserves editing/import identity. Repeat gets a new ID only when added. |
+| Flow ID | UUID preserves editing/import identity. Ctrl+V inserts a new ID while preserving every other field. |
 | Category / tags | One category and a list of tag names. Shared tags can connect related flows. |
 
 ## GUI and repository
 
 Default form and ledger order is Date, Name, From, To, Amount, Units, Status, Category, Tags, Notes. New drafts default to today, USD, Complete and Uncategorized. Units uses the existing type/filter/Enter dropdown and removable suggestions. New units become choices after a flow or starting balance saves them.
 
-The upper form and inline cell editor use the same variables; Notes editors share a text buffer. Existing flows save a completed valid field on Enter, Tab or leaving it. Notes uses Ctrl+Enter or leaving/closing. Ctrl+S finishes existing edits and does not add new drafts. New Flow clears; Add Flow inserts; Repeat copies every value including units and date. Row/page changes and blank ledger clicks discard unadded drafts without a prompt. Validation is silent and leaves saved records unchanged.
+The upper form and inline cell editor use the same variables; Notes editors share a text buffer. Existing flows save a completed valid field on Enter, Tab or leaving it. Notes uses Ctrl+Enter or leaving/closing. Ctrl+S finishes existing edits and does not add new drafts. New Flow clears; Add Flow inserts a draft. Ledger Ctrl+C copies the full saved row as JSON; Ctrl+V discards the copied ID and immediately saves/selects a new record. Text editors retain normal text copy/paste. Row/page changes and blank ledger clicks discard unadded drafts without a prompt. Validation is silent and leaves saved records unchanged.
 
 Accounts has Name, Units, Starting Balance and Starting Date/Time. Its rows identify account/unit pairs; Name and Units are fixed while editing that pair. Add Account prepares another pair. Starting Balance and Date remain editable from either the form or the row. Each pair gets independent Confirmed and Including Pending balances. New endpoint/unit pairs start unknown until a starting balance is supplied.
 
@@ -57,7 +57,7 @@ Accounts has Name, Units, Starting Balance and Starting Date/Time. Its rows iden
 
 Names shown in From/To come from saved endpoints. Accounts and graph selections show saved endpoint/unit pairs, regardless of status or ledger filters. Removing the last reference hides an unused pair; its stored starting balance remains available for reuse and undo. Preparing an anchor alone does not make it appear in those views.
 
-## SQLite schema 5: seven tables
+## SQLite schema 6: seven tables
 
 | Table | Every stored column | Purpose |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Named keys use name.strip().casefold(); units keep exact spelling. The account_b
 
 ## Calculations and graphs
 
-An eligible flow adds its amount to To and subtracts it from From, in that flow's unit only. Confirmed includes Complete; Including Pending adds Pending; Including Planned also adds Planned. Void contributes nothing. Refunds reverse endpoints. There are no exchange rates or implicit unit conversions.
+An eligible flow adds its amount to To and subtracts it from From, in that flow's unit only. Confirmed includes Complete; Including Pending adds Pending; Including Planned also adds Planned. Canceled contributes nothing. Refunds reverse endpoints. There are no exchange rates or implicit unit conversions.
 
 Each anchor describes the confirmed balance immediately before flows at its own timestamp. Earlier Complete flows are reflected in that snapshot; earlier eligible Pending/Planned effects enter estimates once. Unknown anchors remain unknown. Corrections to completed history may require adjusting the anchor. Exact arithmetic uses sufficient Decimal precision for all operands, independently of the caller's default precision.
 
@@ -83,13 +83,13 @@ A flow at the graph start has before/after values at that same timestamp. Hover 
 
 ## Session history and view state
 
-SessionHistory groups successful writes, including account_balances, into atomic undo actions using temporary SQLite triggers. Undo/redo restores changed rows and foreign keys, retains IDs and appends audit events. It does not rewrite old audit or add persistent undo tables. Import is one action.
+SessionHistory groups successful writes, including account_balances, into atomic undo actions using temporary SQLite triggers. Undo/redo restores changed rows and foreign keys, retains IDs and appends audit events. It does not rewrite old audit or add persistent undo tables. Import is one action. Paste is one action; later edits to the copy are separate actions.
 
-Repository.delete_flow() atomically removes a flow and its tag links, appending audit before/after history. SessionHistory restores the exact ID and all fields on undo; redo removes them again. Starting balances remain stored, while referenced account/unit lists refresh. Void remains a separate status. The Delete key targets the ledger; text editors use Delete for text.
+Repository.delete_flow() atomically removes a flow and its tag links, appending audit before/after history. SessionHistory restores the exact ID and all fields on undo; redo removes them again. Starting balances remain stored, while referenced account/unit lists refresh. Canceled is chosen in Status and contributes nothing to balances/graphs; there is no action button. The Delete key targets the ledger; text editors use Delete for text.
 
 Six ledger filters cover From, To, Status, Categories, Tags and Units. Empty captions use <label>: All; hover lists every selection. Units match exact case, all selected values within one list are ORed, and different lists combine. Selection/search changes use the same session history.
 
-ViewHistory keeps draft fields, clearing, Repeat, discarded drafts, filters/search, sorting/dates, graph pair selections/controls/plot/line visibility/axis limits and column changes in the same session order. Restoring a view preserves unfinished record text. Consecutive typing in one focused field is one step; new actions clear redo. Popup and Notes shortcuts use the same history. Closing/restoring ends the session; saved records stay saved.
+ViewHistory keeps draft fields, clearing, discarded drafts, filters/search, sorting/dates, graph pair selections/controls/plot/line visibility/axis limits and column changes in the same session order. Restoring a view preserves unfinished record text. Consecutive typing in one focused field is one step; new actions clear redo. Popup and Notes shortcuts use the same history. Closing/restoring ends the session; saved records stay saved.
 
 ColumnDrag changes displaycolumns, keeping stored field order stable. Hit testing and Tab follow visible field order. Header clicks still sort and edges resize. Order and widths are session state. Read-only navigation, scrolling and file exports do not create undo actions.
 
@@ -97,10 +97,18 @@ Dropdown removal is a UI preference in `<database>.suggestions.json`, including 
 
 ## Migration and import/export
 
-Opening schema 1-4 saves `<database>.pre-v5-<timestamp>.bak` and migrates atomically to schema 5. Existing cents become exactly equivalent decimal quantities in USD; all existing anchors become USD anchors. IDs, dates, statuses, notes, categories, tags and historical audit remain. Reopening schema 5 makes no further migration copy. Restore migrates a private copy and leaves its source unchanged.
+Opening schema 5 changes the active status Void to Canceled and updates its SQLite constraint in one transaction. It creates **no backup file**, whether Void records exist or not. Failure rolls back data, schema and version together. IDs, dates, quantities, anchors, notes, categories, tags and historical audit remain unchanged. No object fields or tables are added. Reopening schema 6 needs no migration.
 
-Older named forecasts remain in the original backup and neighboring `.bak.forecasts.json`, outside the active ledger; recovered flow quantities have amount and units. Old time flags become date precision and disappear. Git rollback restores code, not a migrated database; older apps need the pre-v5 backup, which contains no post-upgrade additions.
+Older schema 1–4 migrations still save `<database>.pre-v6-<timestamp>.bak` before converting cents/anchors to USD and removing obsolete fields. Old named forecasts remain in that backup and recovery JSON, outside active flows. Those migrations do not run on schema 5. Standard database/backup filenames are Git-ignored and excluded from packages/snapshots. Existing backups are left alone. Manual Backup and pre-restore safety copies keep their existing behavior.
 
-CSV/JSON export includes ten fields plus flow ID in the default order. Imports require units and exact quantities; add USD to older files without units or re-export the migrated database. amount_cents, scenario and time_specified imports are rejected. Duplicate detection includes exact units and canonical quantities. Import preview/conflicts and atomic commit rules remain.
+Git rollback restores code, not a migrated database; schema 5 code cannot open schema 6.
+
+Legacy Void status imports as Canceled. CSV/JSON export includes ten fields plus flow ID in the default order. Imports require units and exact quantities; add USD to older files without units or re-export the migrated database. amount_cents, scenario and time_specified imports are rejected. Duplicate detection includes exact units and canonical quantities. Import preview/conflicts and atomic commit rules remain.
 
 This release supports any unit labels, multiple per-unit anchors, local timestamps and one computer. Forecast collection controls and automatic unit conversion are outside the current implementation. Update/export commands retain their established single-command workflow.
+
+## Display precision
+
+`flowledger/units.py` contains `UNIT_DECIMAL_PLACES = {"USD": 2}` and `DEFAULT_DECIMAL_PLACES = 4`. This is a code-only display setting, with exact-case unit keys. Readonly ledger/account values, totals, import previews and graph ticks use it. Editors, JSON/export and graph hover retain full precision. Formatting rounds only the visible string; saved quantities and calculations stay exact.
+
+Closing finishes valid edits to existing records. New drafts still require Add Flow/Add Account; invalid edits are not saved.

@@ -69,11 +69,11 @@ class SessionHistoryTests(unittest.TestCase):
     def test_void_flow_restored_with_same_id(self):
         saved = self.add()
         self.history.perform("Void Flow", lambda: self.repo.void_flow(saved["flow_id"]))
-        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Void")
+        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
         self.history.undo()
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
         self.history.redo()
-        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Void")
+        self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
 
     def test_actual_delete_restores_flow_and_cascaded_tags(self):
         saved = self.add()

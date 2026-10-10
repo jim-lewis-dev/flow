@@ -29,7 +29,7 @@ class IndependentReviewTests(unittest.TestCase):
         self.flow("Employer", "Checking", "500", "2026-10-03 08:00")
         self.flow("Wallet", "Shop", "7.25", "2026-10-03 09:00", status="Pending")
         rent = self.flow("Checking", "Landlord", "300", "2026-10-10", status="Planned")
-        self.flow("Checking", "Shop", "998", "2026-10-03", status="Void")
+        self.flow("Checking", "Shop", "998", "2026-10-03", status="Canceled")
         return rent
 
     def balances(self, at, statuses=("Complete",)):
@@ -48,7 +48,7 @@ class IndependentReviewTests(unittest.TestCase):
         estimate = self.balances("2026-10-31", ("Complete", "Pending"))
         self.assertEqual(estimate, {"AmEx": -Decimal("76.45"), "Checking": Decimal("1340"), "Wallet": Decimal("142.75")})
         self.assertEqual(sum(estimate.values()), Decimal("1406.3"))
-        forecast = self.balances("2026-10-31", ("Complete", "Pending", "Planned", "Void"))
+        forecast = self.balances("2026-10-31", ("Complete", "Pending", "Planned", "Canceled"))
         self.assertEqual(sum(forecast.values()), Decimal("1106.3"))
 
 

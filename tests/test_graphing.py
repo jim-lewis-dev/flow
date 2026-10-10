@@ -60,7 +60,7 @@ class GraphTimelineTests(unittest.TestCase):
 
     def test_no_eligible_start_flow_has_no_extra_point(self):
         later = "2026-10-02 12:00:00"
-        flows = [flow(START, status="Void"), flow(later), flow(START, source="Other", target="Shop")]
+        flows = [flow(START, status="Canceled"), flow(later), flow(START, source="Other", target="Shop")]
         result = graph_timeline([account()], flows, START, END)
         self.assertEqual(result[("Checking", "USD")], [(START, 10000), (later, 7500), (END, 7500)])
 

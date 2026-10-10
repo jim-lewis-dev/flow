@@ -111,7 +111,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(history), 2)
         self.assertEqual(json.loads(history[-1]["before_json"])["amount"], "20")
         self.repo.void_flow(pending["flow_id"])
-        self.assertEqual(self.balance("AmEx", ("Complete", "Pending", "Planned", "Void")), 0)
+        self.assertEqual(self.balance("AmEx", ("Complete", "Pending", "Planned", "Canceled")), 0)
 
     def test_names_are_identities_and_suggestions_learn_on_save(self):
         saved = self.flow(source=" amex ", destination=" Joe's Diner ", category=" Boat ", tags=["Trip", " trip ", "SUMMER", ""])
@@ -263,7 +263,7 @@ class CalculationTests(unittest.TestCase):
         for _ in range(100):
             source, dest = rng.sample(["A", "B", "C"], 2)
             flows.append(self.record(f"2026-10-0{rng.randrange(1,8)} 12:00:00", rng.randrange(1,1000),
-                                     source, dest, rng.choice(("Complete","Pending","Planned","Void"))))
+                                     source, dest, rng.choice(("Complete","Pending","Planned","Canceled"))))
         statuses = ("Complete", "Pending", "Planned")
         result = timeline(accounts, flows, "2026-10-01", "2026-10-08", statuses)
         for account in accounts:

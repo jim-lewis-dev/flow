@@ -182,15 +182,14 @@ assert repo.get_flow(b['flow_id'])['amount'] == '41.01'
 ok('Row switching saves the completed field without a prompt; undo and redo target the changed record')
 
 row(app.ledger, a['flow_id'])
-click_text('Void')
-assert repo.get_flow(a['flow_id'])['status'] == 'Void'
-cleared()
+click(app.form_widgets['status']); key('Down'); key('Down'); key('Down'); key('Return')
+assert repo.get_flow(a['flow_id'])['status'] == 'Canceled'
 assert not app.tk.splitlist(app.tk.call('grab', 'current'))
 chord('Control_L', 'z')
 assert repo.get_flow(a['flow_id'])['status'] == 'Complete'
 chord('Control_L', 'y')
-assert repo.get_flow(a['flow_id'])['status'] == 'Void'
-ok('Void clears the form without confirmation and supports session undo/redo')
+assert repo.get_flow(a['flow_id'])['status'] == 'Canceled'
+ok('Status Canceled saves without confirmation and supports session undo/redo')
 
 # New invalid records remain drafts; no vocabulary is persisted early.
 click(app.new_flow_button)

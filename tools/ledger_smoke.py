@@ -23,7 +23,7 @@ def seed_ledger_data(repo):
                             amount="5", units="USD", name=f"Earlier flow {number:02d}",
                             category="Earlier", status="Complete"))
     repo.save_flow(dict(date="2026-09-01", from_account="Checking",
-                        to_account="Savings", amount="1", units="USD", status="Void"))
+                        to_account="Savings", amount="1", units="USD", status="Canceled"))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text()
@@ -231,32 +231,26 @@ try:
     original = saved(second)
     count_before = len(repo.list_flows())
     row(app.ledger, second)
-    click_text("Repeat")
-    assert app.editing_id is None and app.ledger.selection() == ()
-    check_copy(original)
-    replace_all(top_entry("name"), "Discarded repeat")
-    row(app.ledger, second)
-    assert app.editing_id == second and len(repo.list_flows()) == count_before
-    assert saved(second) == original
-    no_prompt()
-    ok("Repeat copies date, seconds, status, notes, tags and all other fields; selecting a row silently discards its draft")
-
-    click_text("Repeat")
+    chord("Control_L", "c"); chord("Control_L", "v")
+    pasted_id = app.editing_id
+    assert pasted_id != second and app.ledger.selection() == (pasted_id,)
     check_copy(original)
     replace_all(top_entry("name"), "Repeated boat purchase")
-    assert str(app.save_button.cget("text")).startswith("Add Flow")
-    click(app.save_button)
-    repeated = flow_named("Repeated boat purchase")
+    key("Return")
+    repeated = saved(pasted_id)
     assert {k: v for k, v in repeated.items() if k not in ("flow_id", "name")} == {
         k: v for k, v in original.items() if k not in ("flow_id", "name")}
-    assert repeated["flow_id"] != second and len(repo.list_flows()) == count_before + 1
-    fresh_form()
+    assert len(repo.list_flows()) == count_before + 1
+    assert saved(second) == original
+    no_prompt()
     chord("Control_L", "z")
-    assert len(repo.list_flows()) == count_before
-    assert not any(f["flow_id"] == repeated["flow_id"] for f in repo.list_flows())
+    assert saved(pasted_id)["name"] == original["name"]
+    chord("Control_L", "z")
+    assert len(repo.list_flows()) == count_before and repo.get_flow(pasted_id) is None
     chord("Control_L", "y")
-    assert saved(repeated["flow_id"]) == repeated
-    ok("Add Flow inserts a repeated draft once and resets the form; undo and redo preserve the new record's identity")
+    chord("Control_L", "y")
+    assert saved(pasted_id) == repeated
+    ok("Ledger Ctrl+C/V saves a full copy with a new ID; editing leaves the original intact and both actions support Undo/Redo")
 
     click(app.new_flow_button)
     replace_all(top_entry("from_account"), "Unsaved account")
@@ -305,7 +299,7 @@ try:
 
     status = edit_cell(first, "status")
     assert str(status.cget("state")) == "readonly"
-    assert tuple(status.cget("values")) == ("Complete", "Pending", "Planned", "Void")
+    assert tuple(status.cget("values")) == ("Complete", "Pending", "Planned", "Canceled")
     click(status)
     key("Escape")
     assert saved(first)["status"] == "Complete"
@@ -410,14 +404,13 @@ try:
     pump(.25)
     row(app.ledger, first)
     previous_status = saved(first)["status"]
-    click_text("Void")
-    assert saved(first)["status"] == "Void"
-    fresh_form()
+    click(top_entry("status")); key("Down"); key("Down"); key("Down"); key("Return")
+    assert saved(first)["status"] == "Canceled"
     no_prompt()
     chord("Control_L", "z")
     assert saved(first)["status"] == previous_status
     chord("Control_L", "y")
-    assert saved(first)["status"] == "Void"
+    assert saved(first)["status"] == "Canceled"
     chord("Control_L", "z")
     ok("Void needs no confirmation and can be undone and redone for the current session")
 

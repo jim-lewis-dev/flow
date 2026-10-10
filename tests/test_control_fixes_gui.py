@@ -24,7 +24,7 @@ class ControlFixGuiTests(unittest.TestCase):
             (2, "USD", "Pending", "Supplies", ["Trip"]),
             (3, "mW", "Complete", "Energy", ["Measured"]),
             (4, "MW", "Complete", "Energy", ["Measured"]),
-            (5, "void-only", "Void", "Correction", ["Corrected"]),
+            (5, "void-only", "Canceled", "Correction", ["Corrected"]),
         ):
             self.flows.append(self.repo.save_flow(dict(
                 date=f"2026-10-0{index} 12:34:56", name=f"Flow {index}",
@@ -168,7 +168,7 @@ class ControlFixGuiTests(unittest.TestCase):
         self.select_filter("Category", "Inventory")
         self.select_filter("Tag", "Measured")
         self.assertEqual(set(self.app.ledger_rows), {self.flows[0]["flow_id"]})
-        self.assertEqual(self.app.report_summary.get(), "Complete · 0.125 kg")
+        self.assertEqual(self.app.report_summary.get(), "Complete · 0.1250 kg")
 
     def test_units_choices_follow_saved_flows_including_void_and_not_other_filters(self):
         expected = {flow["units"] for flow in self.flows}
@@ -258,11 +258,11 @@ class ControlFixGuiTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_flow(flow["flow_id"]))
         self.assertEqual(len(self.repo.list_flows()), len(self.flows) - 1)
 
-    def test_delete_button_discards_invalid_existing_draft_but_undo_restores_saved_record(self):
+    def test_delete_key_discards_invalid_existing_draft_but_undo_restores_saved_record(self):
         flow = self.flows[0]
         self.select(flow)
         self.app.form_vars["amount"].set("invalid amount")
-        self.button("Delete").invoke()
+        self.shortcut("<Delete>", self.app.ledger)
         self.pump()
         self.assertIsNone(self.repo.get_flow(flow["flow_id"]))
         self.assertEqual(self.app._flow_snapshot(), self.app._clean_flow)
@@ -275,7 +275,7 @@ class ControlFixGuiTests(unittest.TestCase):
         before = "\n".join(self.repo.conn.iterdump())
         self.assertFalse(self.app.history.can_undo)
         self.shortcut("<Delete>", self.app.ledger)
-        self.button("Delete").invoke()
+        self.shortcut("<Delete>", self.app.ledger)
         self.pump()
         self.assertEqual("\n".join(self.repo.conn.iterdump()), before)
         self.assertFalse(self.app.history.can_undo)
@@ -313,9 +313,10 @@ class ControlFixGuiTests(unittest.TestCase):
     def test_void_keeps_saved_row_while_delete_removes_it_and_both_undo(self):
         flow = self.flows[0]
         self.select(flow)
-        self.button("Void").invoke()
+        self.app.form_vars["status"].set("Canceled")
+        self.app._finish_existing("flow")
         self.pump()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["status"], "Void")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["status"], "Canceled")
         self.assertIn(flow["flow_id"], self.app.ledger_rows)
         self.shortcut("<Control-z>")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)

@@ -10,7 +10,7 @@ def seed_accounts(repo):
         (1, "Checking", "Diner", "Complete", "Lunch", "Dining", "Trip", "12"),
         (2, "AmEx", "Shop", "Pending", "Groceries", "Groceries", "Work", "25"),
         (3, "Shop", "Checking", "Complete", "Refund", "Refund", "Trip", "5"),
-        (4, "Checking Reserve", "Diner", "Void", "Correction", "Other", "Work", "4"),
+        (4, "Checking Reserve", "Diner", "Canceled", "Correction", "Other", "Work", "4"),
         (5, "Cash", "Shop", "Planned", "Supplies", "Groceries", "Trip", "8"),
     ):
         fixtures[name] = repo.save_flow(dict(date=f"2026-10-0{day} 12:34:56", from_account=source,

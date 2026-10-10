@@ -27,7 +27,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.repo.save_account("Checking", '1000', "2026-10-01 13:45:12")
         self.repo.save_account("AmEx", '-300', "2026-10-01")
         self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking",
-                                 to_account="AmEx", amount="1", status="Void"))
+                                 to_account="AmEx", amount="1", status="Canceled"))
         self.errors = []
         errors = self.errors
 
@@ -191,7 +191,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         original = self.repo.get_account("Checking")
         entry = self.replace_cell("Checking", "balance", "38.20")
         self.assertEqual(self.app.account_vars["opening"].get(), "38.20")
-        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '38.2')
+        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '38.20')
         self.app.account_vars["opening"].set("41.23")
         self.pump()
         self.assertEqual(entry.get(), "41.23")
@@ -213,7 +213,7 @@ class AccountInlineEditingTests(unittest.TestCase):
 
     def test_negative_zero_and_blank_balances_are_saved_without_extra_accounts(self):
         for raw, amount, preview in (('-1,234.56', '-1234.56', '-1,234.56'),
-                                    ("0", "0", '0'),
+                                    ("0", "0", '0.00'),
                                     ("", None, "Unknown")):
             with self.subTest(balance=raw):
                 before = self.repo.get_account("Checking")
@@ -350,7 +350,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertFalse(entry.winfo_exists())
         self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '200')
         self.assertEqual(self.repo.get_account("Checking")["opening_at"], "2026-10-07 00:00:00")
-        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '200')
+        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '200.00')
         self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "anchor"), "2026-10-07")
         self.assert_new_form()
         self.click_cell("AmEx")
@@ -438,14 +438,14 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertTrue(self.app.show_view("accounts"))
         self.settle()
         self.assert_new_form()
-        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '250')
+        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '250.00')
 
     def test_resize_repositions_editor_and_scrolling_finishes_it(self):
         original = self.repo.get_account("Checking")
         for index in range(45):
             self.repo.save_account(f"Extra {index:02}", '0', "2026-10-01")
             self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking",
-                                     to_account=f"Extra {index:02}", amount="1", status="Void"))
+                                     to_account=f"Extra {index:02}", amount="1", status="Canceled"))
         self.app.refresh_all()
         self.pump()
         self.replace_cell("Checking", "balance", "33.00")

@@ -21,7 +21,7 @@ def seed_controls(repo):
         ("Beta", "Warehouse", "Workshop", ".125", "kg", "Pending", "Materials", ["Trip"]),
         ("Gamma", "Source", "Meter", "1.25", "mW", "Complete", "Power", ["Work"]),
         ("Delta", "Source", "Meter", "2.5", "MW", "Planned", "Power", ["Boat"]),
-        ("Epsilon", "Checking", "Shop", "3", "USD", "Void", "Other", ["Boat"]),
+        ("Epsilon", "Checking", "Shop", "3", "USD", "Canceled", "Other", ["Boat"]),
     ):
         repo.save_flow(dict(date="2026-10-02 12:34:56", name=name,
             from_account=source, to_account=destination, amount=amount, units=units,
@@ -167,11 +167,11 @@ try:
 
     row(app.ledger, alpha["flow_id"], "name")
     before_maps = len(maps)
-    click_text("Delete")
+    key("Delete")
     assert repo.get_flow(alpha["flow_id"]) is None and len(maps) == before_maps
     chord("Control_L", "z")
     assert repo.get_flow(alpha["flow_id"]) == alpha
-    ok("The visible Delete action uses the same immediate undoable deletion as the keyboard")
+    ok("Repeated keyboard deletion remains immediate and undoable")
 
     click(app.new_flow_button)
     click_xy(app.ledger.winfo_rootx() + 12,
@@ -245,7 +245,7 @@ try:
     click(tag.checkbuttons["Trip"])
     key("Escape")
     assert names() == {"Alpha", "Beta"}
-    assert app.report_summary.get() == "Complete · 12.3456789 USD", app.report_summary.get()
+    assert app.report_summary.get() == "Complete · 12.35 USD", app.report_summary.get()
     assert {flow["units"] for flow in app.ledger_rows.values()} == {"USD", "kg"}
     ok("Units combines correctly with statuses and tags; both selected units remain visible and Complete totals carry their unit")
 

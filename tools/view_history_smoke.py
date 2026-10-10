@@ -234,14 +234,16 @@ try:
 
     row(app.ledger, lunch, "name")
     fields = app._flow_snapshot()
-    click_text("Repeat")
+    chord("Control_L", "c"); chord("Control_L", "v")
+    copied = repo.get_flow(app.editing_id)
+    assert app._flow_snapshot() == fields
     undo()
-    assert app.editing_id == lunch and app.ledger.selection() == (lunch,)
+    assert repo.get_flow(copied["flow_id"]) is None
     redo()
-    assert app.editing_id is None and app._flow_snapshot() == fields
-    assert app.form_vars["date"].get() == "2026-10-02 12:34:56"
+    assert repo.get_flow(copied["flow_id"]) == copied
+    assert copied["date"] == "2026-10-02 12:34:56"
     click(app.new_flow_button)
-    ok("Repeat can be undone and redone, copying every field including the full date/time")
+    ok("Row paste is immediately saved and undoable with its exact ID and every field")
 
     order = displayed_columns(app.ledger)
     sort = app.sort_column, app.sort_reverse
