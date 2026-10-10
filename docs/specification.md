@@ -72,7 +72,7 @@ Within its unit, a flow contributes +amount to To and -amount to From. Confirmed
 
 Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Readonly display: USD 2 decimals, others 4 (flowledger/units.py). Editors, JSON and hover keep exact values.
 
-Experimental maps filtered ledger flows for one unit, period and status basis. Step or play grouped timestamps; Canceled is excluded. Drag nodes for this session. Pulses show relative size with exact amount/unit labels. This view adds no records, fields, tables or backups.
+Experimental animates ledger-filtered flows. First/last jump; previous/next step by timestamp; play/pause speed runs 0 to 5 (0 pauses). Hover pulses for flow details, accounts for saved anchors, balances from all flows and shown-flow In/Out totals. Canceled is excluded; node placement lasts this session. No data or schema changes.
 
 ### Migration and scope
 

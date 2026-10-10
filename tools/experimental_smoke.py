@@ -83,6 +83,37 @@ def click_pulse(name):
     click_xy(px, py)
 
 
+def pointer_on_item(item):
+    view = app.experimental
+    x0, y0, x1, y1 = view.canvas.bbox(item)
+    px = view.canvas.winfo_rootx() + (x0 + x1) / 2 - view.canvas.canvasx(0)
+    py = view.canvas.winfo_rooty() + (y0 + y1) / 2 - view.canvas.canvasy(0)
+    move(px, py)
+    pump(.34)
+    assert view._hover_popup is not None and view._hover_popup.winfo_viewable()
+    return view._hover_label.cget("text")
+
+
+def slider_to(value):
+    scale = app.experimental.speed_scale
+    from_x, from_y = scale.coords(scale.get())
+    sx, sy = scale.coords(value)
+    begin_x, begin_y = scale.winfo_rootx() + from_x, scale.winfo_rooty() + from_y
+    move(begin_x, begin_y)
+    xt.XTestFakeButtonEvent(display, 1, True, 0)
+    x.XSync(display, False)
+    for step in range(1, 9):
+        xt.XTestFakeMotionEvent(display, 0,
+                                int(begin_x + (sx - from_x) * step / 8),
+                                int(begin_y + (sy - from_y) * step / 8), 0)
+        x.XSync(display, False)
+        pump(.012)
+    xt.XTestFakeButtonEvent(display, 1, False, 0)
+    x.XSync(display, False)
+    pump(.12)
+    assert app.experimental.speed_var.get() == value, (value, app.experimental.speed_var.get())
+
+
 def persistent_state():
     """Include the audit table so even a no-op record write is observable."""
     return tuple(repo.list_flows()), tuple(repo.conn.iterdump())
@@ -115,6 +146,18 @@ try:
     assert view._index == -1 and not view.flow_list.get_children()
     ok("Previous and Next step by timestamp, showing simultaneous flows with exact amount labels")
 
+    click(view.end_button)
+    assert view._index == len(view._groups) - 1 and view._progress == 1
+    assert view.flow_list.get_children() == (original["Reverse"]["flow_id"],)
+    click(view.start_button)
+    assert view._index == 0 and view._progress == 0
+    assert set(view.flow_list.get_children()) == {original["Alpha"]["flow_id"], original["Beta"]["flow_id"]}
+    click(view.next_button)
+    assert view._index == 1
+    click(view.previous_button)
+    assert view._index == 0
+    ok("Start and End jump to the first source and last destination; Step controls move one timestamp")
+
     click(view.play_button)
     pump(.2)
     assert view._playing and view._after_id is not None
@@ -122,6 +165,20 @@ try:
     click(view.play_button)
     assert not view._playing and view._after_id is None
     ok("Play animates moving pulses; Pause cancels its scheduled callback")
+
+    slider_to(5)
+    assert view._duration() == 200
+    slider_to(0)
+    assert "disabled" in view.play_button.state()
+    assert view._playing is False and view._after_id is None
+    slider_to(1)
+    assert "disabled" not in view.play_button.state()
+    click(view.play_button)
+    assert view._playing
+    slider_to(0)
+    assert not view._playing and view._after_id is None
+    slider_to(1)
+    ok("Mouse-operated speed slider reaches 0 and 5; zero pauses and disables Play until speed increases")
 
     click(view.next_button)
     old_position = view._positions["Checking"]
@@ -136,6 +193,20 @@ try:
 
     click(view.previous_button)
     assert view._index == 0 and len(view._pulse_items) == 4
+    checking_node = next(item for item, value in view._node_items.items()
+                         if value == "Checking" and view.canvas.type(item) == "oval")
+    details = pointer_on_item(checking_node)
+    assert "Checking · USD" in details and "Starting balance: 120.25 USD" in details, details
+    assert "Balance after 2026-10-02 00:00:00 (Confirmed): 107.7793211 USD" in details, details
+    assert "Shown through this step: In 0 USD · Out 12.4706789 USD" in details, details
+    assert view.hover_var.get().startswith("Checking · USD")
+    beta_dot = next(item for item, flow in view._pulse_items.items()
+                    if flow["name"] == "Beta" and view.canvas.type(item) == "oval")
+    details = pointer_on_item(beta_dot)
+    assert all(part in details for part in ("Beta", "2026-10-02 00:00:00 · Complete",
+                                            "Checking → Shop · 0.125 USD", "Category: Experiment",
+                                            "Tags: Map", "Notes: Native map fixture")), details
+    ok("Physical hover shows the account anchor, exact full-ledger balance, filtered totals, and full flow details")
     from PIL import ImageGrab
     docs = Path(__file__).resolve().parents[1] / "docs"
     for width, height in ((1920, 1200), (1280, 800)):
@@ -144,13 +215,24 @@ try:
         assert view._positions["Checking"] == moved_position
         assert view.canvas.winfo_width() >= 700 and view.canvas.winfo_height() >= 300
         assert view.canvas.find_withtag("node") and view.canvas.find_withtag("moving_flow")
+        if width == 1920:
+            target = next(item for item, value in view._node_items.items()
+                          if value == "Checking" and view.canvas.type(item) == "oval")
+            details = pointer_on_item(target)
+            assert "Balance after 2026-10-02 00:00:00" in details
+        else:
+            target = next(item for item, flow in view._pulse_items.items()
+                          if flow["name"] == "Beta" and view.canvas.type(item) == "oval")
+            details = pointer_on_item(target)
+            assert "Category: Experiment" in details
         ImageGrab.grab(bbox=(0, 0, width, height)).save(docs / f"Flow_Experimental_{width}.png")
-    ok("Dragged node stays placed across 1920 and 1280 window sizes; both layouts render with pulses")
+    ok("Dragged node stays placed across 1920 and 1280 windows; hover cards and pulses render in both")
 
     click_pulse("Beta")
     assert app.current_view == "flows" and app.editing_id == original["Beta"]["flow_id"]
+    assert view._hover_popup is None or not view._hover_popup.winfo_viewable()
     click(app.nav_buttons["experimental"])
-    ok("Clicking a moving flow opens its saved ledger row")
+    ok("Clicking a moving flow opens its saved ledger row and dismisses the hover card")
 
     choose_next(view.basis_combo)
     assert view.basis_var.get() == "Including Pending", view.basis_var.get()
@@ -183,6 +265,12 @@ try:
     click(app.nav_buttons["experimental"])
     assert event_names() == ["Pending"], event_names()
     click(view.next_button)
+    pending_node = next(item for item, value in view._node_items.items()
+                        if value == "Checking" and view.canvas.type(item) == "oval")
+    details = pointer_on_item(pending_node)
+    assert "Balance after 2026-10-02 12:34:56 (Including Planned): 105.2793211 USD" in details, details
+    assert "Shown through this step: In 0 USD · Out 2.5 USD" in details, details
+    ok("Filtered scene totals remain separate from the saved ledger's full account balance")
     row(view.flow_list, original["Pending"]["flow_id"], "name", count=2)
     assert app.current_view == "flows" and app.editing_id == original["Pending"]["flow_id"]
     assert choice.get() == ("Pending",)
