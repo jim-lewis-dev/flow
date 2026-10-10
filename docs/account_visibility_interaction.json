@@ -19,48 +19,48 @@
   "failure": "",
   "maps": [
     {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
-      "geometry": "300x53+263+175",
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x53+482+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame3.!treeview.!filtercombo.!toplevel",
-      "geometry": "300x67+407+385",
+      "geometry": "300x67+633+385",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
-      "geometry": "300x53+974+175",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
-      "geometry": "300x53+263+175",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel3",
-      "geometry": "300x53+263+175",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
-      "geometry": "300x53+474+175",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel4",
-      "geometry": "300x67+263+175",
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x53+248+175",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel2",
-      "geometry": "300x67+474+175",
+      "geometry": "300x53+482+175",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel5",
-      "geometry": "300x67+263+175",
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel3",
+      "geometry": "300x53+482+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame4.!filtercombo.!toplevel",
+      "geometry": "300x53+679+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel4",
+      "geometry": "300x67+482+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame4.!filtercombo.!toplevel2",
+      "geometry": "300x67+679+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel5",
+      "geometry": "300x67+482+175",
       "override": true
     }
   ]

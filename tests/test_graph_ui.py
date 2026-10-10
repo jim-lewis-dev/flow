@@ -1,5 +1,6 @@
-"""Graph presentation checks using a real Tk canvas and exact saved cents."""
+"""Graph presentation checks using a real Tk canvas and exact saved quantities."""
 from datetime import datetime
+from decimal import Decimal
 import os
 from pathlib import Path
 import tempfile
@@ -16,12 +17,12 @@ class GraphUiTests(unittest.TestCase):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "graph.sqlite3")
-        self.repo.save_account("Checking", 100000, "2026-10-01")
-        self.repo.save_account("Savings", 50000, "2026-10-01")
+        self.repo.save_account("Checking", '1000', "2026-10-01")
+        self.repo.save_account("Savings", '500', "2026-10-01")
         self.repo.save_account("Unknown", None, "2026-10-01")
-        self.repo.save_flow(dict(date="2026-10-01", from_account="Savings",
+        self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Savings",
                                  to_account="Unknown", amount="1", status="Void"))
-        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking", to_account="Shop",
+        self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking", to_account="Shop",
                                  amount="12.00", status="Complete", name="Lunch"))
         self.errors = []
         errors = self.errors
@@ -51,7 +52,7 @@ class GraphUiTests(unittest.TestCase):
     def select(self, *names):
         self.app.chart_accounts.selection_clear(0, "end")
         for index in range(self.app.chart_accounts.size()):
-            if self.app.chart_accounts.get(index) in names:
+            if self.app.chart_account_pairs[index][0] in names:
                 self.app.chart_accounts.selection_set(index)
         self.app.draw_chart()
         self.pump()
@@ -73,26 +74,26 @@ class GraphUiTests(unittest.TestCase):
         from matplotlib.dates import date2num
         line = self.line()
         self.assertEqual(self.app.chart_series[line][:2],
-                         [("2026-10-01 00:00:00", 100000), ("2026-10-01 00:00:00", 98800)])
+                         [("2026-10-01 00:00:00", 1000), ("2026-10-01 00:00:00", 988)])
         self.assertEqual(list(line.get_ydata()[:2]), [1000, 988])
         self.assertEqual(line.get_markevery(), [0])
         self.assertLess(self.app.axes.get_xlim()[0], date2num(datetime(2026, 10, 1)))
-        self.assertIn("$1,000.00", self.hover("2026-10-01", 1000))
+        self.assertIn('1,000', self.hover("2026-10-01", 1000))
 
-    def test_hover_horizontal_vertical_and_leave_reports_exact_cents(self):
-        self.assertIn("Checking: $988.00", self.hover("2026-10-01 12:00:00", 988))
+    def test_hover_horizontal_vertical_and_leave_reports_exact_quantities(self):
+        self.assertIn('Checking: 988 USD', self.hover("2026-10-01 12:00:00", 988))
         self.assertTrue(self.app.chart_tooltip.get_visible())
         text = self.hover("2026-10-01", 994)
-        self.assertIn("$1,000.00 → $988.00", text)
-        self.assertNotIn("$994.00", text)
+        self.assertIn('1,000 USD → 988 USD', text)
+        self.assertNotIn('994', text)
         self.app._hide_chart_tooltip()
         self.assertFalse(self.app.chart_tooltip.get_visible())
 
     def test_combined_keeps_start_transition_and_hover(self):
         self.app.chart_combined.set(True)
         self.select("Checking", "Savings")
-        self.assertEqual(self.app.chart_series[self.line("Combined")][0][1], 150000)
-        self.assertIn("Combined: $1,488.00", self.hover("2026-10-02", 1488))
+        self.assertEqual(self.app.chart_series[self.line("Combined")][0][1], 1500)
+        self.assertIn('Combined: 1,488 USD', self.hover("2026-10-02", 1488))
 
     def test_missing_balance_is_visible_for_single_partial_and_combined(self):
         self.select("Unknown")
@@ -109,14 +110,14 @@ class GraphUiTests(unittest.TestCase):
         self.assertTrue(any("Combined balance is unknown" in text.get_text() for text in self.app.axes.texts))
 
     def test_unpadded_dates_normalize_and_through_keeps_whole_day(self):
-        self.repo.save_flow(dict(date="2026-10-03 23:59:59", from_account="Checking", to_account="Shop",
+        self.repo.save_flow(dict(units="USD", date="2026-10-03 23:59:59", from_account="Checking", to_account="Shop",
                                  amount="0.01", status="Complete", name="Late"))
         self.app.chart_start.set("2026-10-1")
         self.app.chart_end.set("2026-10-3")
         self.select("Checking")
         self.assertEqual(self.app.chart_start.get(), "2026-10-01")
         self.assertEqual(self.app.chart_end.get(), "2026-10-03")
-        self.assertEqual(self.app.chart_series[self.line()][-1], ("2026-10-03 23:59:59", 98799))
+        self.assertEqual(self.app.chart_series[self.line()][-1], ("2026-10-03 23:59:59", Decimal("987.99")))
 
     def test_invalid_input_clears_old_plot_tooltip_and_inspection(self):
         self.hover("2026-10-02", 988)
@@ -149,32 +150,32 @@ class GraphUiTests(unittest.TestCase):
         from matplotlib.dates import date2num
         self.app.axes.set_xlim(date2num(datetime(2026, 10, 1, 12)), date2num(datetime(2026, 10, 2, 12)))
         self.app.canvas.draw()
-        self.assertIn("$988.00", self.hover("2026-10-02", 988))
+        self.assertIn('988', self.hover("2026-10-02", 988))
         self.app.chart_toolbar.pan()
         self.hover("2026-10-02", 988)
         self.assertFalse(self.app.chart_tooltip.get_visible())
         self.app.chart_toolbar.pan()
 
     def test_single_instant_and_negative_balance_hover(self):
-        self.repo.save_account("Debt", -12345, "2026-10-01")
-        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+        self.repo.save_account("Debt", '-123.45', "2026-10-01")
+        self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking",
                                  to_account="Debt", amount="1", status="Void"))
         self.app.refresh_chart_accounts()
         self.app.chart_start.set("2026-10-01 12:00:00")
         self.app.chart_end.set("2026-10-01 12:00:00")
         self.select("Debt")
         self.assertEqual(len(self.app.chart_series[self.line("Debt")]), 1)
-        self.assertIn("Debt: $-123.45", self.hover("2026-10-01 12:00:00", -123.45))
+        self.assertIn('Debt: -123.45 USD', self.hover("2026-10-01 12:00:00", -123.45))
 
     def test_overlapping_accounts_both_report_exact_value(self):
-        self.repo.save_account("Twin", 98800, "2026-10-01")
-        self.repo.save_flow(dict(date="2026-10-01", from_account="Checking",
+        self.repo.save_account("Twin", '988', "2026-10-01")
+        self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking",
                                  to_account="Twin", amount="1", status="Void"))
         self.app.refresh_chart_accounts()
         self.select("Checking", "Twin")
         text = self.hover("2026-10-02", 988)
-        self.assertIn("Checking: $988.00", text)
-        self.assertIn("Twin: $988.00", text)
+        self.assertIn('Checking: 988 USD', text)
+        self.assertIn('Twin: 988 USD', text)
 
     def test_export_excludes_hover_annotation(self):
         self.hover("2026-10-02", 988)

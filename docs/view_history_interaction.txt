@@ -1,4 +1,4 @@
-Flow 0.5.13: native X11 XTest mouse and keyboard audit
+Native X11 XTest interaction audit
 PASS: 23 workflows; 0 callback exceptions.
 
 PASS Ctrl+Z/Ctrl+Y inside a checkbox dropdown restores selections and checkmarks without closing it

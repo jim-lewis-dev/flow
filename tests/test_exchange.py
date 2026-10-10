@@ -21,7 +21,7 @@ class ExchangeTests(unittest.TestCase):
 
     def row(self, **changes):
         result = {"date": "2026-10-02", "from_account": "AmEx", "to_account": "Joe's Diner",
-                  "amount": "12.34", "status": "Complete", "name": "Lunch", "notes": "Burger, fries, tip",
+                  "amount": "12.34", "units": "USD", "status": "Complete", "name": "Lunch", "notes": "Burger, fries, tip",
                   "category": "Dining", "tags": ["Trip", "Family"]}
         result.update(changes)
         return result
@@ -41,7 +41,8 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(result[0]["state"], "New")
         self.assertEqual(result[0]["data"]["date"], "2026-10-02 13:14:15")
         self.assertEqual(result[0]["data"]["tags"], ["Trip", "Family"])
-        self.assertEqual(result[0]["data"]["amount_cents"], 1234)
+        self.assertEqual(result[0]["data"]["amount"], "12.34")
+        self.assertEqual(result[0]["data"]["units"], "USD")
         self.assertEqual(self.snapshot(), before)
 
     def test_required_fields_and_invalid_rows_report_each_error(self):
@@ -52,9 +53,9 @@ class ExchangeTests(unittest.TestCase):
 
     def test_malformed_amounts_dates_tags_and_status(self):
         changes = [
-            {"amount": "12.345"}, {"amount": "NaN"}, {"amount": "Infinity"},
+            {"amount": "NaN"}, {"amount": "Infinity"},
             {"amount": "0"}, {"amount": "-3.00"}, {"amount": True}, {"amount": 12.34},
-            {"amount": "1e4"}, {"amount": "92233720368547758.08"},
+            {"amount": "1e4"},
             {"date": "2026-02-30"}, {"date": "2026-10-02 25:00"},
             {"date": "2026-10-02T12:00:00Z"}, {"date": "2026-10-02 12:00:00.5"},
             {"tags": [1]}, {"tags": [None]}, {"tags": {}}, {"tags": [["nested"]]},
@@ -68,10 +69,12 @@ class ExchangeTests(unittest.TestCase):
 
     def test_aliases_defaults_and_date_only(self):
         result = preview_import(self.repo, [{"Date": "2026-10-02", "From": " Cash ",
-                                           "To": " Shop ", "Amount": "5.10"}])[0]
+                                           "To": " Shop ", "Amount": "5.10", "Units": " USD "}])[0]
         self.assertEqual(result["state"], "New")
         data = result["data"]
         self.assertEqual(data["date"], "2026-10-02")
+        self.assertEqual(data["units"], "USD")
+        self.assertEqual(data["amount"], "5.1")
         self.assertEqual(data["name"], "Cash -> Shop")
         self.assertEqual(data["status"], "Complete")
         self.assertEqual(data["category"], "Uncategorized")
@@ -94,7 +97,7 @@ class ExchangeTests(unittest.TestCase):
         saved = self.save()
         before = self.snapshot()
         result = preview_import(self.repo, [self.row(name="Another flow"),
-                                           {**saved, "amount_cents": 2000}])
+                                           {**saved, "amount": "20"}])
         self.assertEqual([item["state"] for item in result], ["New", "Conflict"])
         with self.assertRaises(ValueError):
             commit_import(self.repo, result)
@@ -182,18 +185,123 @@ class ExchangeTests(unittest.TestCase):
 
     def test_csv_tags_pipe_and_json(self):
         path = self.path("input.csv")
-        path.write_text('date,from,to,amount,tags\n2026-10-02,Cash,Shop,4.20,Boat|Trip\n', encoding="utf-8")
+        path.write_text('date,from,to,amount,units,tags\n2026-10-02,Cash,Shop,4.20,USD,Boat|Trip\n', encoding="utf-8")
         result = preview_import(self.repo, read_import(path))
         self.assertEqual(result[0]["data"]["tags"], ["Boat", "Trip"])
-        path.write_text('date,from,to,amount,tags\n2026-10-02,Cash,Shop,4.20,"[""Boat"", ""Trip""]"\n', encoding="utf-8")
+        path.write_text('date,from,to,amount,units,tags\n2026-10-02,Cash,Shop,4.20,USD,"[""Boat"", ""Trip""]"\n', encoding="utf-8")
         self.assertEqual(preview_import(self.repo, read_import(path))[0]["data"]["tags"], ["Boat", "Trip"])
 
     def test_json_object_wrapper_and_exact_number_literals(self):
         path = self.path("input.json")
-        path.write_text('{"flows":[{"date":"2026-10-02","from":"Cash","to":"Shop","amount":12.34}]}',
+        path.write_text('{"flows":[{"date":"2026-10-02","from":"Cash","to":"Shop","amount":12.34,"units":"USD"}]}',
                         encoding="utf-8")
         result = preview_import(self.repo, read_import(path))
-        self.assertEqual(result[0]["data"]["amount_cents"], 1234)
+        self.assertEqual(result[0]["data"]["amount"], "12.34")
+
+    def test_units_are_required_for_csv_json_and_preview(self):
+        missing = self.row()
+        del missing["units"]
+        before = self.snapshot()
+        csv_path = self.path("missing_units.csv")
+        csv_path.write_text("date,from,to,amount\n2026-10-02,Cash,Shop,1\n", encoding="utf-8")
+        json_path = self.path("missing_units.json")
+        json_path.write_text(json.dumps([missing]), encoding="utf-8")
+        for rows in ([missing], read_import(csv_path), read_import(json_path)):
+            with self.subTest(rows=rows):
+                result = preview_import(self.repo, rows)
+                self.assertEqual(result[0]["state"], "Error")
+                self.assertEqual(result[0]["message"], "units is required.")
+                with self.assertRaisesRegex(ValueError, "units is required"):
+                    commit_import(self.repo, result)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_empty_nontext_and_null_character_units_are_rejected(self):
+        for units in ("", "  ", None, 1, True, [], "kg\x00"):
+            with self.subTest(units=units):
+                result = preview_import(self.repo, [self.row(units=units)])
+                self.assertEqual(result[0]["state"], "Error")
+                self.assertIn("units", result[0]["message"])
+
+    def test_units_are_case_sensitive_in_duplicate_detection(self):
+        saved = self.save(units="MW", amount="0.123456789")
+        result = preview_import(self.repo, [self.row(units="mW", amount="0.123456789")])
+        self.assertEqual(result[0]["state"], "New")
+        self.assertEqual(commit_import(self.repo, result), {"imported": 1, "skipped": 0})
+        self.assertEqual({flow["units"] for flow in self.repo.list_flows()}, {"MW", "mW"})
+        conflict = preview_import(self.repo, [{**saved, "units": "mW"}])
+        self.assertEqual(conflict[0]["state"], "Conflict")
+        duplicate = preview_import(self.repo, [{**saved, "units": " MW "}])
+        self.assertEqual(duplicate[0]["state"], "Duplicate")
+
+    def test_equivalent_decimal_spellings_are_duplicate_content(self):
+        saved = self.save(amount="0.123456789", units="liters")
+        duplicate = preview_import(self.repo, [{**saved, "amount": ".123456789000"}])
+        self.assertEqual(duplicate[0]["state"], "Duplicate")
+        self.assertEqual(duplicate[0]["data"]["amount"], "0.123456789")
+        similar = preview_import(self.repo, [self.row(amount=".123456789000", units="liters")])
+        self.assertEqual(similar[0]["state"], "Similar")
+
+    def test_fractional_nonmonetary_quantities_roundtrip_without_rounding(self):
+        quantities = ("0.000000000000000000000000000001", "0.125", "12.34567890123456789",
+                      "92233720368547758.08", "123456789012345678901234567890.123456789")
+        for index, amount in enumerate(quantities):
+            self.save(amount=amount, units="kg", name=f"Resource {index}")
+        for suffix in (".json", ".csv"):
+            with self.subTest(suffix=suffix):
+                path = self.path("resource_quantities" + suffix)
+                self.assertEqual(export_flows(self.repo, path), len(quantities))
+                rows = read_import(path)
+                self.assertEqual({row["amount"] for row in rows}, set(quantities))
+                self.assertEqual({row["units"] for row in rows}, {"kg"})
+                self.assertTrue(all(row["state"] == "Duplicate"
+                                    for row in preview_import(self.repo, rows)))
+                fresh = Repository(self.path("resource" + suffix + ".sqlite3"))
+                self.addCleanup(fresh.close)
+                self.assertEqual(commit_import(fresh, preview_import(fresh, rows)),
+                                 {"imported": len(quantities), "skipped": 0})
+                self.assertEqual(fresh.list_flows(), self.repo.list_flows())
+
+    def test_json_fractional_number_literal_remains_exact(self):
+        path = self.path("fraction.json")
+        path.write_text('[{"date":"2026-10-02","from":"Tank","to":"Pump",'
+                        '"amount":0.12345678901234567890123456789,"units":"liters"}]',
+                        encoding="utf-8")
+        rows = read_import(path)
+        self.assertEqual(rows[0]["amount"], "0.12345678901234567890123456789")
+        result = preview_import(self.repo, rows)
+        self.assertEqual(result[0]["state"], "New")
+        commit_import(self.repo, result)
+        self.assertEqual(self.repo.list_flows()[0]["amount"], "0.12345678901234567890123456789")
+
+    def test_json_integer_quantity_remains_exact_beyond_machine_integer_range(self):
+        path = self.path("integer.json")
+        path.write_text('[{"date":"2026-10-02","from":"Warehouse","to":"Delivery",'
+                        '"amount":123456789012345678901234567890,"units":"items"}]',
+                        encoding="utf-8")
+        result = preview_import(self.repo, read_import(path))
+        self.assertEqual(result[0]["state"], "New")
+        self.assertEqual(result[0]["data"]["amount"], "123456789012345678901234567890")
+
+    def test_unsupported_cents_input_and_missing_units_never_infer_currency(self):
+        cents_row = self.row(amount_cents=1234)
+        del cents_row["amount"]
+        result = preview_import(self.repo, [cents_row])
+        self.assertEqual(result[0]["state"], "Error")
+        self.assertIn("Unsupported fields: amount_cents", result[0]["message"])
+        del cents_row["units"]
+        result = preview_import(self.repo, [cents_row])
+        self.assertEqual(result[0]["state"], "Error")
+        self.assertEqual(result[0]["message"], "units is required.")
+
+    def test_missing_units_abort_batch_before_other_rows_are_saved(self):
+        before = self.snapshot()
+        missing = self.row(name="Missing unit")
+        del missing["units"]
+        result = preview_import(self.repo, [self.row(units="kWh", amount="0.00012"), missing])
+        self.assertEqual([row["state"] for row in result], ["New", "Error"])
+        with self.assertRaisesRegex(ValueError, "units is required"):
+            commit_import(self.repo, result)
+        self.assertEqual(self.snapshot(), before)
 
     def test_file_structure_errors(self):
         cases = {"bad.json": '{broken', "object.json": '{"other":[]}',
@@ -223,8 +331,8 @@ class ExchangeTests(unittest.TestCase):
 
     def test_legacy_csv_and_json_fields_are_rejected(self):
         csv_path = self.path("legacy.csv")
-        csv_path.write_text("date,from,to,amount,scenario,time_specified\n"
-                            "2026-10-02,Cash,Shop,4.20,Baseline,false\n", encoding="utf-8")
+        csv_path.write_text("date,from,to,amount,units,scenario,time_specified\n"
+                            "2026-10-02,Cash,Shop,4.20,USD,Baseline,false\n", encoding="utf-8")
         json_path = self.path("legacy.json")
         json_path.write_text(json.dumps([self.row(scenario="Buy a boat")]), encoding="utf-8")
         for path in (csv_path, json_path):
@@ -234,10 +342,12 @@ class ExchangeTests(unittest.TestCase):
                 self.assertIn("scenario", result[0]["message"])
         self.assertEqual(self.repo.list_flows(), [])
 
-    def test_export_contains_exactly_nine_fields_plus_id_and_all_statuses(self):
-        expected_fields = {"flow_id", "date", "from_account", "to_account", "amount",
+    def test_export_contains_exactly_ten_fields_plus_id_and_all_statuses(self):
+        expected_fields = {"flow_id", "date", "from_account", "to_account", "amount", "units",
                            "status", "name", "notes", "category", "tags"}
         self.assertEqual(set(EXPORT_FIELDS), expected_fields)
+        self.assertEqual(EXPORT_FIELDS, ("flow_id", "date", "name", "from_account", "to_account",
+                                         "amount", "units", "status", "category", "tags", "notes"))
         for status in ("Complete", "Pending", "Planned", "Void"):
             self.save(status=status, name=status)
         for suffix in (".json", ".csv"):
@@ -247,6 +357,7 @@ class ExchangeTests(unittest.TestCase):
             self.assertEqual({row["status"] for row in rows},
                              {"Complete", "Pending", "Planned", "Void"})
             self.assertTrue(all(set(row) == expected_fields for row in rows))
+            self.assertTrue(all(tuple(row) == EXPORT_FIELDS for row in rows))
 
     def test_optional_time_roundtrip_preserves_date_only_and_explicit_midnight(self):
         dates = ["2026-10-02", "2026-10-02 00:00:00", "2026-10-02 12:34:56"]

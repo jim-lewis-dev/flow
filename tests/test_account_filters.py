@@ -13,7 +13,7 @@ class AccountFilterTests(unittest.TestCase):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "filters.sqlite3")
-        self.repo.save_account("Unused", 100000)
+        self.repo.save_account("Unused", '1000')
         self.flows = {}
         for day, source, destination, status, name, category, tag, amount in (
             (1, "Checking", "Diner", "Complete", "Lunch", "Dining", "Trip", "12"),
@@ -22,7 +22,7 @@ class AccountFilterTests(unittest.TestCase):
             (4, "Checking Reserve", "Diner", "Void", "Correction", "Other", "Work", "4"),
             (5, "Cash", "Shop", "Planned", "Supplies", "Groceries", "Trip", "8"),
         ):
-            self.flows[name] = self.repo.save_flow(dict(date=f"2026-10-0{day} 12:34:56",
+            self.flows[name] = self.repo.save_flow(dict(units="USD", date=f"2026-10-0{day} 12:34:56",
                 from_account=source, to_account=destination, amount=amount, status=status,
                 name=name, category=category, tags=[tag], notes="Checking mentioned in notes"))
         self.errors = []
@@ -104,7 +104,7 @@ class AccountFilterTests(unittest.TestCase):
         self.app.refresh_ledger()
         self.assertEqual(self.names(), {"Lunch"})
         self.assertEqual([value.get() for value in self.app.metric_vars], ["1", "0", "1"])
-        self.assertEqual(self.app.report_summary.get(), "Complete · $12.00 flow volume")
+        self.assertEqual(self.app.report_summary.get(), 'Complete · 12 USD')
 
     def test_choices_use_saved_endpoints_independent_of_other_filters(self):
         expected_from = {"Checking", "AmEx", "Shop", "Checking Reserve", "Cash"}
@@ -183,7 +183,7 @@ class AccountFilterTests(unittest.TestCase):
 
     def test_add_updates_choices_resets_form_and_retains_endpoint_filters(self):
         self.choose("From", "AmEx")
-        for key, value in dict(from_account="Checking", to_account="New Shop", amount=".50",
+        for key, value in dict(units="USD", from_account="Checking", to_account="New Shop", amount=".50",
                                name="New purchase").items():
             self.app.form_vars[key].set(value)
         self.app.save_button.invoke()

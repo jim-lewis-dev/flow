@@ -11,8 +11,8 @@ def seed_demo(repo) -> bool:
         return False
     anchor = "2026-10-01 00:00:00"
     with repo.atomic():
-        for name, cents in [("Checking", 320000), ("Savings", 500000), ("Cash", 18000), ("AmEx", -42000)]:
-            repo.save_account(name, opening_cents=cents, opening_at=anchor)
+        for name, amount in [("Checking", "3200"), ("Savings", "5000"), ("Cash", "180"), ("AmEx", "-420")]:
+            repo.save_account(name, opening_amount=amount, opening_at=anchor, units="USD")
         rows = [
             ("2026-10-01 08:15", "AmEx", "Joe's Diner", "12.00", "Complete", "Breakfast at Joe's", "Dining", ["Everyday"]),
             ("2026-10-01 17:40", "AmEx", "H-E-B", "84.32", "Complete", "Groceries for the week", "Groceries", []),
@@ -34,6 +34,6 @@ def seed_demo(repo) -> bool:
         ]
         for date, source, destination, amount, status, name, category, tags in rows:
             repo.save_flow(dict(date=date, from_account=source, to_account=destination,
-                                amount=amount, status=status, name=name, category=category,
+                                amount=amount, units="USD", status=status, name=name, category=category,
                                 tags=tags, notes="Illustrative demo record."))
     return True

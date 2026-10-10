@@ -1,8 +1,9 @@
 """Exact flow arithmetic and transactional SQLite storage.
 
-The database is authoritative. Each positive flow subtracts from its source and
-adds to its destination. Every account participates equally in the arithmetic;
-callers choose which accounts to inspect or combine.
+The database is authoritative. Each positive flow subtracts its exact quantity
+from its source and adds it to its destination, in the same case-sensitive units.
+An account can have an independent starting balance for each unit. Quantities
+are decimal text in SQLite and Decimal values in arithmetic, without rounding.
 
 Dates retain optional local wall-clock times to whole seconds, without offsets.
 A date-only record is interpreted as midnight for calculations. An account
@@ -23,7 +24,7 @@ import uuid
 
 STATUSES = ("Complete", "Pending", "Planned", "Void")
 DEFAULT_ANCHOR = "2026-10-01 00:00:00"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 APPLICATION_ID = 1179406167
 MAX_CENTS = 2**63 - 1
 
@@ -55,7 +56,7 @@ def parse_money(text: Any, allow_negative: bool = False) -> int:
     """Parse a dollar value exactly; refuse fractional cents and binary floats.
 
     Dollar signs, omitted leading zeros and correctly grouped commas are accepted. Zero is
-    valid for opening balances; save_flow separately requires a positive amount.
+    valid for legacy opening balances. New resource quantities use parse_quantity.
     Exponent notation, NaN, infinity and ambiguous commas are rejected.
     """
     if isinstance(text, bool) or isinstance(text, float):
@@ -88,6 +89,70 @@ def format_money(cents: int) -> str:
         raise ValueError("Money must be integer cents.")
     sign = "-" if cents < 0 else ""
     return f"{sign}{abs(cents) // 100:,}.{abs(cents) % 100:02d}"
+
+
+def parse_quantity(text: Any, allow_negative: bool = False) -> Decimal:
+    """Read an exact quantity without assuming currency or decimal precision.
+
+    Plain decimal text, correctly grouped commas and omitted leading zeros are
+    accepted. Binary floats, currency symbols and exponent notation are refused.
+    Decimal objects are accepted for internal arithmetic without conversion loss.
+    """
+    if isinstance(text, bool) or isinstance(text, float) or not isinstance(text, (str, int, Decimal)):
+        raise ValueError("Use an exact decimal quantity, such as 12.345.")
+    if isinstance(text, Decimal):
+        amount = text
+    else:
+        value = str(text).strip()
+        if not re.fullmatch(r"[+-]?(?:(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?|\.\d+)", value):
+            raise ValueError("Enter a decimal quantity, such as 12.345.")
+        try:
+            amount = Decimal(value.replace(",", ""))
+        except InvalidOperation as error:
+            raise ValueError("Invalid quantity.") from error
+    if not amount.is_finite():
+        raise ValueError("Quantity must be finite.")
+    if amount < 0 and not allow_negative:
+        raise ValueError("Amount cannot be negative; reverse From and To instead.")
+    return amount
+
+
+def quantity_text(value: Any) -> str:
+    """Canonical exact decimal storage text; no rounding or exponent notation."""
+    amount = parse_quantity(value, allow_negative=True)
+    if amount.is_zero():
+        return "0"
+    text = format(amount, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def format_quantity(value: Any) -> str:
+    """Readable exact quantity with comma grouping and no currency symbol."""
+    amount = parse_quantity(value, allow_negative=True)
+    if amount.is_zero():
+        return "0"
+    text = format(amount, ",f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def decimal_sum(values: Iterable[Any]) -> Decimal:
+    """Sum decimal quantities exactly, independently of the ambient context."""
+    amounts = [parse_quantity(value, allow_negative=True) for value in values]
+    if not amounts:
+        return Decimal(0)
+    least = min(amount.as_tuple().exponent for amount in amounts)
+    most = max(len(amount.as_tuple().digits) + amount.as_tuple().exponent for amount in amounts)
+    with localcontext() as context:
+        context.prec = max(1, most - least) + len(str(len(amounts))) + 1
+        context.Emax = max(context.Emax, most + 2)
+        context.Emin = min(context.Emin, least - 2)
+        return sum(amounts, Decimal(0))
+
+
+def _legacy_quantity(cents: int) -> str:
+    """Convert existing integer cents to decimal storage text without a float."""
+    sign = "-" if cents < 0 else ""
+    return quantity_text(f"{sign}{abs(cents) // 100}.{abs(cents) % 100:02d}")
 
 
 def normalize_date(value: Any) -> str:
@@ -163,7 +228,7 @@ class Repository:
             if self.conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
                 # Preserve a consistent legacy snapshot before changing schema.
                 stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-                self.migration_backup_path = self.path + f".pre-v4-{stamp}.bak"
+                self.migration_backup_path = self.path + f".pre-v5-{stamp}.bak"
                 self.backup(self.migration_backup_path)
                 self.migration_forecasts_path = self._save_legacy_forecasts(
                     self.conn, self.migration_backup_path + ".forecasts.json")
@@ -178,15 +243,21 @@ class Repository:
         if conn.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
             raise ValueError("This is not a Flowledger database.")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3)):
+        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4)):
             raise ValueError(f"Unsupported database version {version}; expected {SCHEMA_VERSION}.")
         required = {
-            "accounts": {"account_key", "name", "opening_cents", "opening_at"},
+            "accounts": {"account_key", "name"},
             "categories": {"category_key", "name"}, "tags": {"tag_key", "name"},
-            "flows": {"flow_id", "date", "from_key", "to_key", "amount_cents", "status", "name", "notes", "category_key"},
+            "flows": {"flow_id", "date", "from_key", "to_key", "status", "name", "notes", "category_key"},
             "flow_tags": {"flow_id", "tag_key", "position"},
             "audit": {"audit_id", "changed_at", "entity", "entity_key", "action", "before_json", "after_json"},
         }
+        if version >= 5:
+            required["account_balances"] = {"account_key", "units", "opening_amount", "opening_at"}
+            required["flows"].update(("amount", "units"))
+        else:
+            required["accounts"].update(("opening_cents", "opening_at"))
+            required["flows"].add("amount_cents")
         if version < 4:
             required["scenarios"] = {"scenario_key", "name"}
             required["scenario_exclusions"] = {"scenario_key", "flow_id"}
@@ -205,6 +276,14 @@ class Repository:
             raise ValueError("Database contains broken account or flow references.")
         if version < 4 and conn.execute("SELECT 1 FROM scenarios WHERE scenario_key='baseline'").fetchone() is None:
             raise ValueError("Database is missing its baseline scenario.")
+        if version >= 5:
+            for units, amount in conn.execute("SELECT units,amount FROM flows"):
+                if _name(units, "Units") != units or quantity_text(amount) != amount or parse_quantity(amount) <= 0:
+                    raise ValueError("Database contains an invalid flow quantity or units.")
+            for units, amount, when in conn.execute("SELECT units,opening_amount,opening_at FROM account_balances"):
+                if _name(units, "Units") != units or (amount is not None and quantity_text(amount) != amount):
+                    raise ValueError("Database contains an invalid starting balance or units.")
+                normalize_date(when)
 
     @staticmethod
     def _save_legacy_forecasts(conn: sqlite3.Connection, path: str | Path) -> str | None:
@@ -235,6 +314,8 @@ class Repository:
                 flow["tags"] = [tag[0] for tag in conn.execute(
                     "SELECT t.name FROM flow_tags ft JOIN tags t ON t.tag_key=ft.tag_key "
                     "WHERE ft.flow_id=? ORDER BY ft.position", (flow["flow_id"],))]
+                flow["amount"] = _legacy_quantity(flow.pop("amount_cents"))
+                flow["units"] = "USD"
                 flows.append(flow)
             result.append({"name": name, "flows": flows,
                            "excluded_flow_ids": [r[0] for r in conn.execute(
@@ -245,7 +326,7 @@ class Repository:
 
     @staticmethod
     def _migrate_legacy(conn: sqlite3.Connection) -> None:
-        """Upgrade v1-v3 atomically; activate only the old Baseline records.
+        """Upgrade v1-v4 atomically; convert existing resource values to USD.
 
         The caller preserves the complete original database before migration.
         Legacy optional-time flags become date precision. Version 1 did not
@@ -254,7 +335,7 @@ class Repository:
         never mixed into ordinary flows. Accounts and audit history are retained.
         """
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, 2, 3):
+        if version not in (1, 2, 3, 4):
             raise ValueError(f"Cannot migrate database version {version}.")
         if conn.in_transaction:
             raise ValueError("Finish the current write before migrating.")
@@ -270,26 +351,37 @@ class Repository:
                 conn.execute("INSERT INTO accounts_v4 SELECT account_key,name,opening_cents,opening_at FROM accounts")
                 conn.execute("DROP TABLE accounts")
                 conn.execute("ALTER TABLE accounts_v4 RENAME TO accounts")
-            conn.execute("CREATE TABLE flows_v4 (flow_id TEXT PRIMARY KEY, date TEXT NOT NULL, "
-                         "from_key TEXT NOT NULL REFERENCES accounts(account_key), "
-                         "to_key TEXT NOT NULL REFERENCES accounts(account_key), "
-                         "amount_cents INTEGER NOT NULL CHECK(typeof(amount_cents)='integer' AND amount_cents>0), "
+            if version < 4:
+                Repository._migrate_baseline(conn, version)
+            conn.execute("CREATE TABLE accounts_v5 (account_key TEXT PRIMARY KEY,name TEXT NOT NULL)")
+            conn.execute("INSERT INTO accounts_v5 SELECT account_key,name FROM accounts")
+            conn.execute("CREATE TABLE account_balances (account_key TEXT NOT NULL REFERENCES accounts_v5(account_key), "
+                         "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
+                         "opening_amount TEXT CHECK(opening_amount IS NULL OR typeof(opening_amount)='text'), "
+                         "opening_at TEXT NOT NULL, PRIMARY KEY(account_key,units))")
+            for key, cents, when in conn.execute("SELECT account_key,opening_cents,opening_at FROM accounts").fetchall():
+                conn.execute("INSERT INTO account_balances VALUES(?,'USD',?,?)",
+                             (key, None if cents is None else _legacy_quantity(cents), when))
+            conn.execute("DROP TABLE accounts")
+            conn.execute("ALTER TABLE accounts_v5 RENAME TO accounts")
+            conn.execute("CREATE TABLE flows_v5 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
+                         "from_key TEXT NOT NULL,to_key TEXT NOT NULL, "
+                         "amount TEXT NOT NULL CHECK(typeof(amount)='text' AND length(amount)>0), "
+                         "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
                          "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Void')), "
-                         "name TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', "
-                         "category_key TEXT NOT NULL REFERENCES categories(category_key), CHECK(from_key<>to_key))")
-            explicit = "time_specified=1" if version >= 2 else "substr(date,12)<>'00:00:00'"
-            conn.execute("INSERT INTO flows_v4 SELECT flow_id,CASE WHEN " + explicit +
-                         " THEN date ELSE substr(date,1,10) END,from_key,to_key,amount_cents,status,name,notes,category_key "
-                         "FROM flows WHERE scenario_key='baseline'")
-            conn.execute("DELETE FROM flow_tags WHERE flow_id NOT IN (SELECT flow_id FROM flows_v4)")
-            conn.execute("DROP TABLE scenario_exclusions")
+                         "name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',category_key TEXT NOT NULL REFERENCES categories(category_key), "
+                         "CHECK(from_key<>to_key), "
+                         "FOREIGN KEY(from_key,units) REFERENCES account_balances(account_key,units), "
+                         "FOREIGN KEY(to_key,units) REFERENCES account_balances(account_key,units))")
+            for row in conn.execute("SELECT flow_id,date,from_key,to_key,amount_cents,status,name,notes,category_key FROM flows").fetchall():
+                conn.execute("INSERT INTO flows_v5 VALUES(?,?,?,?,?,'USD',?,?,?,?)",
+                             (*row[:4], _legacy_quantity(row[4]), *row[5:]))
             conn.execute("DROP TABLE flows")
-            conn.execute("DROP TABLE scenarios")
-            conn.execute("ALTER TABLE flows_v4 RENAME TO flows")
+            conn.execute("ALTER TABLE flows_v5 RENAME TO flows")
             conn.execute("CREATE INDEX flows_date ON flows(datetime(date),flow_id)")
             conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
             conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
-            conn.execute("PRAGMA user_version = 4")
+            conn.execute("PRAGMA user_version = 5")
             Repository._validate_database(conn)
             conn.execute("COMMIT")
         except BaseException:
@@ -298,6 +390,26 @@ class Repository:
             raise
         finally:
             conn.execute(f"PRAGMA foreign_keys = {foreign_keys}")
+
+    @staticmethod
+    def _migrate_baseline(conn: sqlite3.Connection, version: int) -> None:
+        """Private v1-v3 step within the caller's single upgrade transaction."""
+        conn.execute("CREATE TABLE flows_v4 (flow_id TEXT PRIMARY KEY, date TEXT NOT NULL, "
+                         "from_key TEXT NOT NULL REFERENCES accounts(account_key), "
+                         "to_key TEXT NOT NULL REFERENCES accounts(account_key), "
+                         "amount_cents INTEGER NOT NULL CHECK(typeof(amount_cents)='integer' AND amount_cents>0), "
+                         "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Void')), "
+                         "name TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', "
+                         "category_key TEXT NOT NULL REFERENCES categories(category_key), CHECK(from_key<>to_key))")
+        explicit = "time_specified=1" if version >= 2 else "substr(date,12)<>'00:00:00'"
+        conn.execute("INSERT INTO flows_v4 SELECT flow_id,CASE WHEN " + explicit +
+                         " THEN date ELSE substr(date,1,10) END,from_key,to_key,amount_cents,status,name,notes,category_key "
+                         "FROM flows WHERE scenario_key='baseline'")
+        conn.execute("DELETE FROM flow_tags WHERE flow_id NOT IN (SELECT flow_id FROM flows_v4)")
+        conn.execute("DROP TABLE scenario_exclusions")
+        conn.execute("DROP TABLE flows")
+        conn.execute("DROP TABLE scenarios")
+        conn.execute("ALTER TABLE flows_v4 RENAME TO flows")
 
     def close(self) -> None:
         self.conn.close()
@@ -326,43 +438,53 @@ class Repository:
     def _account(row: sqlite3.Row | None) -> dict | None:
         if row is None:
             return None
-        return {"name": row["name"], "opening_cents": row["opening_cents"],
-                "opening_at": row["opening_at"]}
+        return {"name": row["name"], "units": row["units"],
+                "opening_amount": row["opening_amount"], "opening_at": row["opening_at"]}
 
     def list_accounts(self, *, referenced_only: bool = False) -> list[dict]:
-        """List stored anchors, optionally limited to endpoints in saved flows.
+        """List account/unit anchors, optionally limited to saved endpoint pairs.
 
         Displayed account lists use referenced_only. Unreferenced starting
         balances remain stored for reuse and undo; ledger filters and flow
-        statuses do not change whether an endpoint is referenced.
+        statuses do not change whether an endpoint/unit pair is referenced.
         """
-        query = "SELECT * FROM accounts"
+        query = "SELECT a.name,b.units,b.opening_amount,b.opening_at FROM accounts a JOIN account_balances b USING(account_key)"
         if referenced_only:
-            query += " WHERE account_key IN (SELECT from_key FROM flows UNION SELECT to_key FROM flows)"
-        return [self._account(row) for row in self.conn.execute(query + " ORDER BY account_key")]
+            query += " WHERE (a.account_key,b.units) IN (SELECT from_key,units FROM flows UNION SELECT to_key,units FROM flows)"
+        return [self._account(row) for row in self.conn.execute(query + " ORDER BY a.account_key,b.units")]
 
-    def get_account(self, name: str) -> dict | None:
-        return self._account(self.conn.execute("SELECT * FROM accounts WHERE account_key=?", (_key(name),)).fetchone())
+    def get_account(self, name: str, units: str = "USD") -> dict | None:
+        units = _name(units, "Units")
+        return self._account(self.conn.execute(
+            "SELECT a.name,b.units,b.opening_amount,b.opening_at FROM accounts a JOIN account_balances b USING(account_key) "
+            "WHERE a.account_key=? AND b.units=?", (_key(name), units)).fetchone())
 
-    def save_account(self, name: str, opening_cents: int | None = None,
-                     opening_at: str = DEFAULT_ANCHOR) -> dict:
+    def save_account(self, name: str, opening_amount: Any | None = None,
+                     opening_at: str = DEFAULT_ANCHOR, units: str = "USD") -> dict:
         name = _name(name, "Account")
+        units = _name(units, "Units")
         when = normalize_date(opening_at)
-        if opening_cents is not None:
-            _cents(opening_cents, "Opening balance")
+        amount = None if opening_amount is None else quantity_text(opening_amount)
         with self.atomic():
-            before = self.get_account(name)
-            canonical = before["name"] if before else name
+            before = self.get_account(name, units)
+            named = self.conn.execute("SELECT name FROM accounts WHERE account_key=?", (_key(name),)).fetchone()
+            canonical = named[0] if named else name
+            self.conn.execute("INSERT OR IGNORE INTO accounts(account_key,name) VALUES(?,?)", (_key(canonical), canonical))
             self.conn.execute(
-                "INSERT INTO accounts(account_key,name,opening_cents,opening_at) VALUES(?,?,?,?) "
-                "ON CONFLICT(account_key) DO UPDATE SET "
-                "opening_cents=excluded.opening_cents,opening_at=excluded.opening_at",
-                (_key(canonical), canonical, opening_cents, when),
+                "INSERT INTO account_balances(account_key,units,opening_amount,opening_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(account_key,units) DO UPDATE SET "
+                "opening_amount=excluded.opening_amount,opening_at=excluded.opening_at",
+                (_key(canonical), units, amount, when),
             )
-            after = self.get_account(canonical)
+            after = self.get_account(canonical, units)
             if before != after:
-                self._audit("account", canonical, "update" if before else "create", before, after)
+                self._audit("account", f"{canonical} [{units}]", "update" if before else "create", before, after)
             return after
+
+    def list_units(self) -> list[str]:
+        """Saved case-sensitive units, including starting balances without flows."""
+        return [row[0] for row in self.conn.execute(
+            "SELECT units FROM flows UNION SELECT units FROM account_balances ORDER BY units")]
 
     def list_categories(self) -> list[str]:
         return [row[0] for row in self.conn.execute("SELECT name FROM categories ORDER BY category_key")]
@@ -384,7 +506,7 @@ class Repository:
         """
         if not isinstance(data, dict):
             raise ValueError("A flow must be a mapping of fields.")
-        allowed = {"flow_id", "date", "from_account", "to_account", "amount_cents", "amount",
+        allowed = {"flow_id", "date", "from_account", "to_account", "amount", "units",
                    "status", "name", "notes", "category", "tags"}
         unknown = set(data) - allowed
         if unknown:
@@ -394,11 +516,11 @@ class Repository:
         destination = _name(data.get("to_account"), "To account")
         if _key(source) == _key(destination):
             raise ValueError("From and To must be different accounts.")
-        amount = (_cents(data["amount_cents"], positive=True) if "amount_cents" in data
-                  else _cents(parse_money(data.get("amount", "")), positive=True))
-        if "amount_cents" in data and "amount" in data:
-            if amount != parse_money(data["amount"]):
-                raise ValueError("amount and amount_cents disagree.")
+        amount = parse_quantity(data.get("amount", ""))
+        if amount <= 0:
+            raise ValueError("Amount must be greater than zero.")
+        amount = quantity_text(amount)
+        units = _name(data.get("units"), "Units")
         status = data.get("status", "Complete")
         if status not in STATUSES:
             raise ValueError("Status must be Complete, Pending, Planned, or Void.")
@@ -429,19 +551,19 @@ class Repository:
         with self.atomic():
             before = self.get_flow(flow_id)
             for endpoint in (source, destination):
-                if self.get_account(endpoint) is None:
-                    self.save_account(endpoint)
-            source = self.get_account(source)["name"]
-            destination = self.get_account(destination)["name"]
+                if self.get_account(endpoint, units) is None:
+                    self.save_account(endpoint, units=units)
+            source = self.get_account(source, units)["name"]
+            destination = self.get_account(destination, units)["name"]
             name = name.strip() or f"{source} -> {destination}"
             self.conn.execute("INSERT OR IGNORE INTO categories VALUES(?,?)", (_key(category), category))
             self.conn.execute(
-                "INSERT INTO flows(flow_id,date,from_key,to_key,amount_cents,status,name,notes,"
-                "category_key) VALUES(?,?,?,?,?,?,?,?,?) "
+                "INSERT INTO flows(flow_id,date,from_key,to_key,amount,units,status,name,notes,"
+                "category_key) VALUES(?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(flow_id) DO UPDATE SET "
-                "date=excluded.date,from_key=excluded.from_key,to_key=excluded.to_key,amount_cents=excluded.amount_cents,"
+                "date=excluded.date,from_key=excluded.from_key,to_key=excluded.to_key,amount=excluded.amount,units=excluded.units,"
                 "status=excluded.status,name=excluded.name,notes=excluded.notes,category_key=excluded.category_key",
-                (flow_id, when, _key(source), _key(destination), amount, status, name, notes,
+                (flow_id, when, _key(source), _key(destination), amount, units, status, name, notes,
                  _key(category)),
             )
             self.conn.execute("DELETE FROM flow_tags WHERE flow_id=?", (flow_id,))
@@ -454,7 +576,7 @@ class Repository:
             return after
 
     _FLOW_QUERY = """SELECT f.flow_id,f.date,a.name AS from_account,b.name AS to_account,
-        f.amount_cents,f.status,f.name,f.notes,c.name AS category
+        f.amount,f.units,f.status,f.name,f.notes,c.name AS category
         FROM flows f JOIN accounts a ON a.account_key=f.from_key
         JOIN accounts b ON b.account_key=f.to_key
         JOIN categories c ON c.category_key=f.category_key"""
@@ -563,13 +685,18 @@ def _statuses(statuses: Iterable[str]) -> set[str]:
     return result - {"Void"}
 
 
-def _effect(account_name: str, flow: dict) -> int:
-    return flow["amount_cents"] * (int(_key(flow["to_account"]) == account_name)
-                                  - int(_key(flow["from_account"]) == account_name))
+def _effect(account_name: str, flow: dict) -> Decimal:
+    amount = parse_quantity(flow["amount"])
+    source, destination = _key(flow["from_account"]), _key(flow["to_account"])
+    if destination == account_name and source != account_name:
+        return amount
+    if source == account_name and destination != account_name:
+        return amount.copy_negate()
+    return Decimal(0)
 
 
 def balance_at(account: dict, flows: list[dict], at: str,
-               statuses: Iterable[str] = ("Complete",)) -> int | None:
+               statuses: Iterable[str] = ("Complete",)) -> Decimal | None:
     """Apply eligible flows forward or backward from an account's anchor.
 
     The anchor is BEFORE events at its timestamp; returned balances are AFTER
@@ -578,24 +705,25 @@ def balance_at(account: dict, flows: list[dict], at: str,
     when = normalize_date(at)
     anchor = normalize_date(account["opening_at"])
     allowed = _statuses(statuses)
-    balance = account["opening_cents"]
+    balance = account["opening_amount"]
     if balance is None:
         return None
-    _cents(balance, "Opening balance")
+    effects = [parse_quantity(balance, allow_negative=True)]
     name = _key(account["name"])
+    units = _name(account["units"], "Units")
     for flow in flows:
-        if flow["status"] not in allowed:
+        if flow["status"] not in allowed or _name(flow["units"], "Units") != units:
             continue
         moment = normalize_date(flow["date"])
         if when >= anchor and anchor <= moment <= when:
-            balance += _effect(name, flow)
+            effects.append(_effect(name, flow))
         elif when < anchor and when < moment < anchor:
-            balance -= _effect(name, flow)
-    return balance
+            effects.append(_effect(name, flow).copy_negate())
+    return decimal_sum(effects)
 
 
 def timeline(accounts: list[dict], flows: list[dict], start: str, end: str,
-             statuses: Iterable[str] = ("Complete",)) -> dict[str, list[tuple[str, int | None]]]:
+             statuses: Iterable[str] = ("Complete",)) -> dict[tuple[str, str], list[tuple[str, Decimal | None]]]:
     """Build carried-forward step values, combining simultaneous flow effects.
 
     Start/end points and every relevant eligible event timestamp are included.
@@ -605,50 +733,56 @@ def timeline(accounts: list[dict], flows: list[dict], start: str, end: str,
     if start > end:
         raise ValueError("Graph start must not be after its end.")
     allowed = _statuses(statuses)
-    names = {_key(account["name"]) for account in accounts}
+    pairs = {(_key(account["name"]), _name(account["units"], "Units")) for account in accounts}
     moments = {start, end}
-    changes: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    changes = defaultdict(lambda: defaultdict(list))
     for flow in flows:
         moment = normalize_date(flow["date"])
         if flow["status"] not in allowed or not start < moment <= end:
             continue
         source, destination = _key(flow["from_account"]), _key(flow["to_account"])
-        if source not in names and destination not in names:
+        units = _name(flow["units"], "Units")
+        if (source, units) not in pairs and (destination, units) not in pairs:
             continue
         moments.add(moment)
-        changes[moment][source] -= flow["amount_cents"]
-        changes[moment][destination] += flow["amount_cents"]
+        amount = parse_quantity(flow["amount"])
+        changes[moment][source, units].append(amount.copy_negate())
+        changes[moment][destination, units].append(amount)
     ordered = sorted(moments)
     result = {}
     for account in accounts:
         name = _key(account["name"])
+        units = _name(account["units"], "Units")
         balance = balance_at(account, flows, start, allowed)
         series = [(start, balance)]
         for moment in ordered[1:]:
             if balance is not None:
-                balance += changes[moment].get(name, 0)
+                balance = decimal_sum([balance, *changes[moment].get((name, units), ())])
             series.append((moment, balance))
-        result[account["name"]] = series
+        result[account["name"], units] = series
     return result
 
 
 def _ledger_anchor(account: dict, flows: list[dict], statuses: Iterable[str]) -> dict:
     """Expand a confirmed opening into the selected pending/forecast basis."""
     adjusted = dict(account)
-    if adjusted["opening_cents"] is None:
+    if adjusted["opening_amount"] is None:
         return adjusted
     anchor = normalize_date(account["opening_at"])
     selected_unconfirmed = _statuses(statuses) - {"Complete"}
     name = _key(account["name"])
-    adjusted["opening_cents"] += sum(
-        _effect(name, flow) for flow in flows
-        if flow["status"] in selected_unconfirmed and normalize_date(flow["date"]) < anchor
-    )
+    units = _name(account["units"], "Units")
+    adjusted["opening_amount"] = quantity_text(decimal_sum([
+        parse_quantity(adjusted["opening_amount"], allow_negative=True),
+        *(_effect(name, flow) for flow in flows
+          if flow["status"] in selected_unconfirmed and normalize_date(flow["date"]) < anchor
+          and _name(flow["units"], "Units") == units)
+    ]))
     return adjusted
 
 
 def ledger_balance_at(account: dict, flows: list[dict], at: str,
-                      statuses: Iterable[str] = ("Complete",)) -> int | None:
+                      statuses: Iterable[str] = ("Complete",)) -> Decimal | None:
     """Calculate a ledger balance from an explicitly CONFIRMED account anchor.
 
     A confirmed snapshot excludes unsettled Pending and hypothetical Planned
@@ -666,7 +800,7 @@ def ledger_balance_at(account: dict, flows: list[dict], at: str,
 
 
 def ledger_timeline(accounts: list[dict], flows: list[dict], start: str, end: str,
-                    statuses: Iterable[str] = ("Complete",)) -> dict[str, list[tuple[str, int | None]]]:
+                    statuses: Iterable[str] = ("Complete",)) -> dict[tuple[str, str], list[tuple[str, Decimal | None]]]:
     """Graph confirmed anchors plus selected unsettled/hypothetical effects.
 
     This is the normal ledger-view counterpart of ledger_balance_at. The generic

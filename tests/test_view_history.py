@@ -6,6 +6,11 @@ from types import SimpleNamespace
 import unittest
 
 from flowledger.core import Repository
+
+
+def account_key(name, units="USD"):
+    import json
+    return json.dumps([name, units], ensure_ascii=False)
 from flowledger.table_columns import displayed_columns, field_at
 
 
@@ -15,11 +20,11 @@ class ViewHistoryTests(unittest.TestCase):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "views.sqlite3")
-        self.repo.save_account("Checking", 100000)
-        self.repo.save_account("Shop", 0)
-        self.first = self.repo.save_flow(dict(date="2026-10-02 12:34:56", from_account="Checking",
+        self.repo.save_account("Checking", '1000')
+        self.repo.save_account("Shop", '0')
+        self.first = self.repo.save_flow(dict(units="USD", date="2026-10-02 12:34:56", from_account="Checking",
             to_account="Shop", amount="20", name="Lunch", category="Dining", tags=["Trip"]))
-        self.second = self.repo.save_flow(dict(date="2026-10-03", from_account="Checking",
+        self.second = self.repo.save_flow(dict(units="USD", date="2026-10-03", from_account="Checking",
             to_account="Shop", amount="30", name="Repair", category="Boat", status="Pending", tags=["Boat"]))
         self.errors = []
         errors = self.errors
@@ -161,7 +166,7 @@ class ViewHistoryTests(unittest.TestCase):
         self.app.ledger_filters["Status"].set_selected(["Pending"], notify=True)
         self.assertEqual(self.app.history.undo_label, "Status filter")
         self.shortcut("<Control-z>")
-        self.assertEqual(self.repo.get_flow(self.first["flow_id"])["amount_cents"], 3300)
+        self.assertEqual(self.repo.get_flow(self.first["flow_id"])['amount'], '33')
         self.shortcut("<Control-z>")
         self.assertEqual(self.repo.get_flow(self.first["flow_id"]), self.first)
 
@@ -178,7 +183,7 @@ class ViewHistoryTests(unittest.TestCase):
         self.assertEqual(self.app.ledger_filters["Status"].get(), ("Complete",))
         self.shortcut("<Control-z>")
         self.shortcut("<Control-z>", entry)
-        self.assertEqual(entry.get(), "20.00")
+        self.assertEqual(entry.get(), "20")
         self.assertEqual(self.repo.get_flow(self.first["flow_id"]), self.first)
 
     def test_noop_and_filter_vocab_refresh_do_not_clear_redo(self):
@@ -388,24 +393,24 @@ class ViewHistoryTests(unittest.TestCase):
     def test_header_drag_is_one_action_does_not_sort_and_cells_edit_correct_fields(self):
         before = displayed_columns(self.app.ledger)
         sort = self.app.sort_column, self.app.sort_reverse
-        self.drag(self.app.ledger, "amount_cents", "date")
+        self.drag(self.app.ledger, 'amount', "date")
         moved = displayed_columns(self.app.ledger)
-        self.assertEqual(moved[0], "amount_cents")
+        self.assertEqual(moved[0], 'amount')
         self.assertEqual((self.app.sort_column, self.app.sort_reverse), sort)
         row = self.first["flow_id"]
-        bounds = self.app.ledger.bbox(row, "amount_cents")
+        bounds = self.app.ledger.bbox(row, 'amount')
         x0, y0, width, height = bounds
-        self.assertEqual(field_at(self.app.ledger, x0 + width // 2), "amount_cents")
+        self.assertEqual(field_at(self.app.ledger, x0 + width // 2), 'amount')
         # Exercise the editor's display-position mapping, rather than open by key.
         self.app.ledger_editor._double_click(SimpleNamespace(x=x0+width//2, y=y0+height//2))
         self.pump()
-        self.assertEqual(self.app.ledger_editor.field, "amount_cents")
+        self.assertEqual(self.app.ledger_editor.field, 'amount')
         editor = self.app.ledger_editor.input
         editor.delete(0, "end")
         editor.insert(0, ".75")
         editor.event_generate("<Return>")
         self.pump()
-        self.assertEqual(self.repo.get_flow(row)["amount_cents"], 75)
+        self.assertEqual(self.repo.get_flow(row)['amount'], '0.75')
         self.shortcut("<Control-z>")
         self.assertEqual(self.repo.get_flow(row), self.first)
         self.assertEqual(displayed_columns(self.app.ledger), moved)
@@ -415,8 +420,8 @@ class ViewHistoryTests(unittest.TestCase):
         self.assertEqual(displayed_columns(self.app.ledger), moved)
 
     def test_reordered_tab_order_and_account_read_only_columns(self):
-        self.drag(self.app.ledger, "amount_cents", "date")
-        self.app.ledger_editor.open(self.first["flow_id"], "amount_cents")
+        self.drag(self.app.ledger, 'amount', "date")
+        self.app.ledger_editor.open(self.first["flow_id"], 'amount')
         self.pump()
         self.app.ledger_editor.input.event_generate("<Tab>")
         self.pump()
@@ -426,9 +431,9 @@ class ViewHistoryTests(unittest.TestCase):
         before = displayed_columns(self.app.accounts_tree)
         self.drag(self.app.accounts_tree, "anchor", "balance")
         moved = displayed_columns(self.app.accounts_tree)
-        self.assertEqual(moved[:3], ("name", "anchor", "balance"))
+        self.assertEqual(moved[:4], ("name", "units", "anchor", "balance"))
         self.assertEqual(self.app.account_cell_editor.editable_columns, ("anchor", "balance"))
-        self.assertFalse(self.app.account_cell_editor.open("Checking", "confirmed"))
+        self.assertFalse(self.app.account_cell_editor.open(account_key("Checking"), "confirmed"))
         self.shortcut("<Control-z>")
         self.assertEqual(displayed_columns(self.app.accounts_tree), before)
         self.shortcut("<Control-y>")
@@ -437,7 +442,7 @@ class ViewHistoryTests(unittest.TestCase):
     def test_session_reopen_resets_filters_columns_and_history_but_keeps_records(self):
         from flowledger.gui import FlowApp
         self.app.ledger_filters["Category"].set_selected(["Boat"], notify=True)
-        self.drag(self.app.ledger, "amount_cents", "date")
+        self.drag(self.app.ledger, 'amount', "date")
         self.app.request_close()
         self.app = FlowApp(self.repo)
         self.pump()

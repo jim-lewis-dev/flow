@@ -14,6 +14,11 @@ from unittest.mock import patch
 from flowledger.core import Repository
 
 
+def account_key(name, units="USD"):
+    import json
+    return json.dumps([name, units], ensure_ascii=False)
+
+
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
 class GuiEditingStateTests(unittest.TestCase):
     def setUp(self):
@@ -21,8 +26,8 @@ class GuiEditingStateTests(unittest.TestCase):
 
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "editing.sqlite3")
-        self.repo.save_account("Checking", 100000)
-        self.repo.save_account("AmEx", 0)
+        self.repo.save_account("Checking", '1000')
+        self.repo.save_account("AmEx", '0')
         self.callback_errors = []
         errors = self.callback_errors
 
@@ -70,7 +75,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.pump()
 
     def seed_flow(self, **changes):
-        data = dict(date="2026-10-02", from_account="Checking", to_account="Shop",
+        data = dict(units="USD", date="2026-10-02", from_account="Checking", to_account="Shop",
                     amount="20.00", status="Complete", name="Purchase",
                     category="Dining", tags=[], notes="")
         data.update(changes)
@@ -119,8 +124,8 @@ class GuiEditingStateTests(unittest.TestCase):
                                notes="Keep the original receipt.", status="Pending")
         second = self.seed_flow(name="Coffee", to_account="Cafe", amount="4.50")
         self.click_flow(first)
-        expected = {"date": "2026-10-02 13:45:12", "from_account": "AmEx",
-                    "to_account": "Marina", "amount": "38.20", "name": "Boat parts",
+        expected = {"units": "USD", "date": "2026-10-02 13:45:12", "from_account": "AmEx",
+                    "to_account": "Marina", "amount": "38.2", "name": "Boat parts",
                     "category": "Boat", "status": "Pending"}
         self.assertEqual(self.app.editing_id, first["flow_id"])
         for key, value in expected.items():
@@ -162,7 +167,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.click_flow(old)
         self.app.new_flow_button.invoke()
         self.pump()
-        values = {
+        values = {"units": "USD", 
             "date": "2026-10-03 12:34:56", "from_account": "AmEx",
             "to_account": "Marina", "amount": "42.01", "status": "Pending",
             "name": "Boat parts", "category": "Boat", "tags": "Trailer, Fall",
@@ -179,7 +184,7 @@ class GuiEditingStateTests(unittest.TestCase):
         saved = [row for row in self.repo.list_flows() if row["flow_id"] != old["flow_id"]]
         self.assertEqual(len(saved), 1)
         self.assertEqual(saved[0]["date"], "2026-10-03 12:34:56")
-        self.assertEqual(saved[0]["amount_cents"], 4201)
+        self.assertEqual(saved[0]['amount'], '42.01')
         self.assertEqual(saved[0]["notes"], "Line one\nLine two")
         self.assertEqual(saved[0]["tags"], ["Trailer", "Fall"])
         self.assert_empty_flow()
@@ -231,14 +236,14 @@ class GuiEditingStateTests(unittest.TestCase):
         first = self.seed_flow(name="First")
         second = self.seed_flow(name="Second")
         self.click_flow(first)
-        self.app.form_vars["amount"].set("12.345")
+        self.app.form_vars["amount"].set("invalid")
         self.app.form_vars["to_account"].set("Not yet an account")
         before = self.app._flow_snapshot()
         self.click_flow(second)
         self.assertEqual(self.app.editing_id, first["flow_id"])
         self.assertEqual(self.app.ledger.selection(), (first["flow_id"],))
         self.assertEqual(self.app._flow_snapshot(), before)
-        self.assertEqual(self.repo.get_flow(first["flow_id"])["amount_cents"], 2000)
+        self.assertEqual(self.repo.get_flow(first["flow_id"])['amount'], '20')
         self.assertIsNone(self.repo.get_account("Not yet an account"))
 
     def test_new_finishes_existing_edit_then_clears_every_optional_value(self):
@@ -292,20 +297,20 @@ class GuiEditingStateTests(unittest.TestCase):
         self.seed_flow(to_account="AmEx", status="Void")
         self.app.show_view("accounts")
         self.pump()
-        self.click_row(self.app.accounts_tree, "Checking")
+        self.click_row(self.app.accounts_tree, account_key("Checking"))
         self.app.account_vars["opening"].set("1234.56")
         self.app.account_vars["date"].set("2026-10-01 08:09:10")
         before = self.app._account_snapshot()
         self.app.refresh_all()
         self.pump()
         self.assertEqual(self.app._account_snapshot(), before)
-        self.click_row(self.app.accounts_tree, "AmEx")
+        self.click_row(self.app.accounts_tree, account_key("AmEx"))
         saved = self.repo.get_account("Checking")
-        self.assertEqual(saved["opening_cents"], 123456)
+        self.assertEqual(saved['opening_amount'], '1234.56')
         self.assertEqual(saved["opening_at"], "2026-10-01 08:09:10")
-        self.assertEqual(set(saved), {"name", "opening_cents", "opening_at"})
-        self.assertEqual(self.app.account_editing, "AmEx")
-        self.assertEqual(self.app.account_vars["opening"].get(), "0.00")
+        self.assertEqual(set(saved), {"name", "units", 'opening_amount', "opening_at"})
+        self.assertEqual(self.app.account_editing, account_key("AmEx"))
+        self.assertEqual(self.app.account_vars["opening"].get(), "0")
 
     def test_restore_discards_editors_bound_to_replaced_database(self):
         backup = Path(self.directory.name) / "before.sqlite3"
@@ -315,7 +320,7 @@ class GuiEditingStateTests(unittest.TestCase):
         self.app.form_vars["name"].set("Stale draft")
         # Both editors may have a populated record before a database-level
         # operation. Queue a real selection event without changing the page.
-        self.app.accounts_tree.selection_set("Checking")
+        self.app.accounts_tree.selection_set(account_key("Checking"))
         self.pump()
         self.app.account_vars["opening"].set("9999.00")
         with patch("flowledger.gui.filedialog.askopenfilename", return_value=str(backup)), \

@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import json
 import io
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 import sqlite3
@@ -15,8 +16,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from . import __version__
-from .core import (STATUSES, ledger_balance_at, normalize_flow_date, parse_money,
-                   format_money, normalize_date)
+from .core import (STATUSES, ledger_balance_at, normalize_flow_date, parse_quantity,
+                   format_quantity, quantity_text, decimal_sum, normalize_date)
 from .exchange import read_import, preview_import, commit_import, export_flows
 from .suggestions import SuggestionPreferences
 from .filters import CheckFilter
@@ -38,7 +39,7 @@ LINE = "#dce5df"
 FONT = "DejaVu Sans"
 PALETTE = ["#16836c", "#e7a13b", "#447cbb", "#b95d75", "#7865b8", "#59a6a1", "#aa783e", "#a970ba", "#508640", "#697897"]
 SUGGESTION_KINDS = {"from_account": "account", "to_account": "account",
-                    "name": "name", "category": "category", "tags": "tag"}
+                    "name": "name", "category": "category", "tags": "tag", "units": "unit"}
 
 
 class _NotesPeer(tk.Text):
@@ -86,7 +87,7 @@ class FlowApp(tk.Tk):
         self._flow_selection = None
         self._account_selection = None
         self._confirming = False
-        self.form_vars = {k: tk.StringVar(self) for k in ("date", "from_account", "to_account", "amount", "status", "name", "category", "tags")}
+        self.form_vars = {k: tk.StringVar(self) for k in ("date", "name", "from_account", "to_account", "amount", "units", "status", "category", "tags")}
         self.form_widgets = {}
         self.ledger_rows = {}
         self.sort_column = "date"
@@ -191,7 +192,7 @@ class FlowApp(tk.Tk):
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         ttk.Label(footer, textvariable=self.status_message, style="Muted.TLabel", font=(FONT, 8), width=1).grid(row=0, column=0, sticky="ew")
-        ttk.Label(footer, text="USD  ·  Local", style="Muted.TLabel", font=(FONT, 8)).grid(row=0, column=1, sticky="e")
+        ttk.Label(footer, text="Local", style="Muted.TLabel", font=(FONT, 8)).grid(row=0, column=1, sticky="e")
 
     def _close_popups(self):
         """Dismiss every transient suggestion, including those outside Flows."""
@@ -204,7 +205,7 @@ class FlowApp(tk.Tk):
         calendar = getattr(self, "_flow_calendar", None)
         if calendar is not None:
             calendar.close_popup()
-        for widget in self.form_widgets.values():
+        for widget in (*self.form_widgets.values(), *getattr(self, "account_widgets", {}).values()):
             if isinstance(widget, FilterCombo):
                 widget.close_popup()
         for attr in ("ledger_tooltip", "account_tooltip"):
@@ -225,7 +226,7 @@ class FlowApp(tk.Tk):
         try:
             # Compare instants, so pasting the existing timestamp or adding
             # optional zero seconds does not invent an unsaved change.
-            values[2] = normalize_date(self._account_when())
+            values[list(self.account_vars).index("date")] = normalize_date(self._account_when())
         except ValueError:
             pass  # Invalid input still differs and remains available to fix.
         return tuple(values)
@@ -293,7 +294,7 @@ class FlowApp(tk.Tk):
                 self.notes_text.edit_modified(False)
                 self.form_title.configure(text=title)
                 self.save_button.configure(state="disabled" if identity else "normal")
-                self.form_feedback.set("Edits save automatically" if identity else "From, To, and Amount required")
+                self.form_feedback.set("Edits save automatically" if identity else "From, To, Amount, and Units required")
                 self._set_flow_selection(identity)
             else:
                 self.account_cell_editor.close(commit=False)
@@ -303,8 +304,10 @@ class FlowApp(tk.Tk):
                     variable.set(value)
                 self.account_title.configure(text=title)
                 self.account_name_entry.configure(state="disabled" if identity else "normal")
+                self.account_widgets["units"].entry.configure(state="disabled" if identity else "normal")
+                self.account_widgets["units"].arrow.configure(state="disabled" if identity else "normal")
                 self.account_save_button.configure(state="disabled" if identity else "normal")
-                self.account_feedback.set("Negative = debt · Blank = unknown")
+                self.account_feedback.set("Blank = unknown")
                 self._set_account_selection(identity)
             setattr(self, "_clean_" + kind, clean)
             self._active_edit = None
@@ -457,10 +460,10 @@ class FlowApp(tk.Tk):
                 before = (self._clean_flow[-1] if key == "notes" else
                           values[key])
             elif identity and kind == "account":
-                saved = self.repo.get_account(identity)
+                saved = self._account_record(identity)
                 if saved:
                     if key == "opening":
-                        before = "" if saved["opening_cents"] is None else format_money(saved["opening_cents"]).replace(",", "")
+                        before = "" if saved["opening_amount"] is None else format_quantity(saved["opening_amount"]).replace(",", "")
                     elif key == "date":
                         before = saved["opening_at"]
             self._active_edit = token + (before,)
@@ -514,9 +517,9 @@ class FlowApp(tk.Tk):
             self._reload_current(kind)
         self._draft_redo = None
         if kind == "flow":
-            self.form_feedback.set("Edits save automatically" if self.editing_id else "From, To, and Amount required")
+            self.form_feedback.set("Edits save automatically" if self.editing_id else "From, To, Amount, and Units required")
         else:
-            self.account_feedback.set("Negative = debt · Blank = unknown")
+            self.account_feedback.set("Blank = unknown")
 
     def _draft_is_dirty(self):
         token = self._active_edit
@@ -545,9 +548,9 @@ class FlowApp(tk.Tk):
             else:
                 self.new_flow(focus=False, confirm=False)
         else:
-            name = self.account_editing
-            if name and self.repo.get_account(name):
-                self._load_account(self.repo.get_account(name))
+            account = self._account_record(self.account_editing)
+            if account:
+                self._load_account(account)
             else:
                 self.new_account(focus=False, confirm=False)
 
@@ -888,7 +891,7 @@ class FlowApp(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.form_title = ttk.Label(header, text="New Flow", style="Section.TLabel")
         self.form_title.pack(side="left")
-        self.form_feedback = tk.StringVar(self, "From, To, and Amount required")
+        self.form_feedback = tk.StringVar(self, "From, To, Amount, and Units required")
         ttk.Label(header, textvariable=self.form_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
         self.save_button = ttk.Button(header, text="Add Flow", style="Primary.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
@@ -897,8 +900,8 @@ class FlowApp(tk.Tk):
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
         cells = []
-        for key, label, kind in (("date", "Date/Time", "entry"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
-                                 ("amount", "Amount · USD", "entry"), ("status", "Status", "choice"), ("name", "Name", "suggest"),
+        for key, label, kind in (("date", "Date/Time", "entry"), ("name", "Name", "suggest"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
+                                 ("amount", "Amount", "entry"), ("units", "Units", "suggest"), ("status", "Status", "choice"),
                                  ("category", "Category", "suggest"), ("tags", "Tags", "suggest"), ("notes", "Notes", "notes")):
             cell, heading, widget = self._entry_cell(form, label, self.form_vars.get(key), kind, STATUSES if key == "status" else ())
             cells.append(cell)
@@ -915,7 +918,7 @@ class FlowApp(tk.Tk):
                 widget.on_accept = lambda field=key: self._accept_suggestion(field)
         self.form_widgets["tags"].multi_value = True
         self.flow_cells = cells
-        self._reflow_cells(form, cells, [17, 16, 16, 11, 11, 19, 14, 16, 21])
+        self._reflow_cells(form, cells, [17, 19, 16, 16, 11, 10, 11, 14, 16, 21])
         metrics = ttk.Frame(page, padding=(2, 12))
         metrics.grid(row=1, column=0, sticky="ew")
         self.metric_vars = []
@@ -966,12 +969,12 @@ class FlowApp(tk.Tk):
         tree_box.grid(row=2, column=0, sticky="nsew")
         tree_box.rowconfigure(0, weight=1)
         tree_box.columnconfigure(0, weight=1)
-        specs = [("date", "Date", 13), ("from_account", "From", 15), ("to_account", "To", 15), ("amount_cents", "Amount", 11),
-                 ("status", "Status", 10), ("name", "Name", 20), ("category", "Category", 13), ("tags", "Tags", 17), ("notes", "Notes", 24)]
+        specs = [("date", "Date", 13), ("name", "Name", 20), ("from_account", "From", 15), ("to_account", "To", 15), ("amount", "Amount", 11), ("units", "Units", 9),
+                 ("status", "Status", 10), ("category", "Category", 13), ("tags", "Tags", 17), ("notes", "Notes", 24)]
         self.ledger = ttk.Treeview(tree_box, columns=[spec[0] for spec in specs], show="headings", selectmode="browse")
         for key, label, weight in specs:
-            self.ledger.heading(key, text=label, anchor="e" if key == "amount_cents" else "w", command=lambda k=key: self.sort_ledger(k))
-            self.ledger.column(key, width=80, minwidth=20, anchor="e" if key == "amount_cents" else "w", stretch=False)
+            self.ledger.heading(key, text=label, anchor="e" if key == "amount" else "w", command=lambda k=key: self.sort_ledger(k))
+            self.ledger.column(key, width=80, minwidth=20, anchor="e" if key == "amount" else "w", stretch=False)
         self._fit_columns(self.ledger, {k: w for k, label, w in specs})
         self.ledger.grid(row=0, column=0, sticky="nsew")
         def scroll_ledger(*args):
@@ -1025,7 +1028,7 @@ class FlowApp(tk.Tk):
         if not flow:
             return None
         when = flow["date"]
-        return (f"{flow['name']}\n{when}\n{flow['from_account']} → {flow['to_account']} · ${format_money(flow['amount_cents'])}"
+        return (f"{flow['name']}\n{when}\n{flow['from_account']} → {flow['to_account']} · {format_quantity(flow['amount'])} {flow['units']}"
                 f"\n{flow['status']} · {flow['category']}"
                 + ("\nTags: " + ", ".join(flow['tags']) if flow['tags'] else "")
                 + ("\n" + flow['notes'] if flow['notes'] else ""))
@@ -1070,7 +1073,7 @@ class FlowApp(tk.Tk):
 
     def _feedback(self, text, error=False):
         self.status_message.set(text)
-        self.form_feedback.set(text if error else "From, To, and Amount required")
+        self.form_feedback.set(text if error else "From, To, Amount, and Units required")
 
     def new_flow(self, focus=True, confirm=True, clear_selection=True):
         before = self._draft_state("flow") if hasattr(self, "view_history") and not self.editing_id else None
@@ -1087,14 +1090,14 @@ class FlowApp(tk.Tk):
             self.editing_id = None
             self._active_edit = None
             self._draft_redo = None
-            defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "from_account": "", "to_account": "", "amount": "", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
+            defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "from_account": "", "to_account": "", "amount": "", "units": "USD", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
             for key, value in defaults.items():
                 self.form_vars[key].set(value)
             self.notes_text.delete("1.0", "end")
             self.form_title.configure(text="New Flow")
             self.save_button.configure(text="Add Flow", state="normal")
             self.form_widgets["status"].configure(values=STATUSES)
-            self.form_feedback.set("From, To, and Amount required")
+            self.form_feedback.set("From, To, Amount, and Units required")
             self._clean_flow = self._flow_snapshot()
             if clear_selection:
                 self._set_flow_selection(None)
@@ -1110,7 +1113,7 @@ class FlowApp(tk.Tk):
 
     def _flow_data(self):
         data = {key: var.get().strip() for key, var in self.form_vars.items()}
-        data["amount_cents"] = parse_money(data.pop("amount"))
+        data["amount"] = quantity_text(parse_quantity(data["amount"]))
         try:
             data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
         except csv.Error as exc:
@@ -1134,9 +1137,9 @@ class FlowApp(tk.Tk):
                 result = self.history.perform("Edit flow", lambda: self.repo.save_flow(data))
                 self._loading = True
                 try:
-                    for key in ("date", "from_account", "to_account", "name", "category", "status"):
+                    for key in ("date", "from_account", "to_account", "name", "units", "category", "status"):
                         self.form_vars[key].set(result[key])
-                    self.form_vars["amount"].set(format_money(result["amount_cents"]).replace(",", ""))
+                    self.form_vars["amount"].set(format_quantity(result["amount"]).replace(",", ""))
                 finally:
                     self._loading = False
                 self._clean_flow = self._flow_snapshot()
@@ -1144,10 +1147,10 @@ class FlowApp(tk.Tk):
                 message = "Updated: " + result["name"]
             else:
                 raw = self.account_vars["opening"].get().strip()
-                cents = parse_money(raw, allow_negative=True) if raw else None
+                amount = quantity_text(parse_quantity(raw, allow_negative=True)) if raw else None
                 when = normalize_date(self._account_when())
-                name = self.account_editing
-                result = self.history.perform("Edit account", lambda: self.repo.save_account(name, opening_cents=cents, opening_at=when))
+                account = self._account_record(self.account_editing)
+                result = self.history.perform("Edit account", lambda: self.repo.save_account(account["name"], opening_amount=amount, opening_at=when, units=account["units"]))
                 self._clean_account = self._account_snapshot()
                 self.account_feedback.set("Edits save automatically · Blank = unknown")
                 message = "Updated: " + result["name"]
@@ -1184,7 +1187,7 @@ class FlowApp(tk.Tk):
                 self.ledger.see(result["flow_id"])
             self.form_widgets["date"].focus_set()
             self._begin_field("flow", "date")
-            self._feedback(f"Added: {result['name']} · ${format_money(result['amount_cents'])}")
+            self._feedback(f"Added: {result['name']} · {format_quantity(result['amount'])} {result['units']}")
             self._update_history_buttons()
             return True
         except (ValueError, sqlite3.Error) as exc:
@@ -1205,9 +1208,9 @@ class FlowApp(tk.Tk):
         self._loading = True
         try:
             self.editing_id = None if repeat else flow["flow_id"]
-            for key in ("date", "from_account", "to_account", "name", "category", "status"):
+            for key in ("date", "from_account", "to_account", "name", "units", "category", "status"):
                 self.form_vars[key].set(flow[key])
-            self.form_vars["amount"].set(format_money(flow["amount_cents"]).replace(",", ""))
+            self.form_vars["amount"].set(format_quantity(flow["amount"]).replace(",", ""))
             tag_stream = io.StringIO()
             csv.writer(tag_stream, lineterminator="").writerow(flow.get("tags", []))
             self.form_vars["tags"].set(tag_stream.getvalue())
@@ -1292,9 +1295,9 @@ class FlowApp(tk.Tk):
 
     @staticmethod
     def _flow_row_values(flow):
-        return (flow["date"][:10], flow["from_account"], flow["to_account"],
-                "$" + format_money(flow["amount_cents"]), flow["status"],
-                flow["name"], flow["category"], ", ".join(flow["tags"]),
+        return (flow["date"][:10], flow["name"], flow["from_account"], flow["to_account"],
+                format_quantity(flow["amount"]), flow["units"], flow["status"],
+                flow["category"], ", ".join(flow["tags"]),
                 flow["notes"].replace("\n", " · "))
 
     def _restore_draft_row(self):
@@ -1317,13 +1320,13 @@ class FlowApp(tk.Tk):
         values = self.form_vars
         amount = values["amount"].get()
         try:
-            amount = "$" + format_money(parse_money(amount))
+            amount = format_quantity(parse_quantity(amount))
         except ValueError:
             pass  # Show incomplete input exactly; Save supplies validation.
         notes = self.notes_text.get("1.0", "end-1c")
-        displayed = (values["date"].get()[:10], values["from_account"].get(),
-            values["to_account"].get(), amount, values["status"].get(),
-            values["name"].get(), values["category"].get(),
+        displayed = (values["date"].get()[:10], values["name"].get(), values["from_account"].get(),
+            values["to_account"].get(), amount, values["units"].get(), values["status"].get(),
+            values["category"].get(),
             values["tags"].get(), notes.replace("\n", " · "))
         stripe = self.ledger.item(row, "tags")[0]
         self.ledger.item(row, values=displayed, tags=(stripe, values["status"].get()))
@@ -1341,6 +1344,10 @@ class FlowApp(tk.Tk):
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
         query = self.search_var.get().strip().casefold()
+        try:
+            query_quantity = parse_quantity(query)
+        except ValueError:
+            query_quantity = None
         from_accounts = {value.casefold() for value in self.ledger_filters["From"].get()}
         to_accounts = {value.casefold() for value in self.ledger_filters["To"].get()}
         categories = {value.casefold() for value in self.ledger_filters["Category"].get()}
@@ -1360,9 +1367,9 @@ class FlowApp(tk.Tk):
             return
         flows = self.repo.list_flows()
         def matches(flow):
-            haystack = " ".join(str(flow.get(key, "")) for key in ("date", "name", "from_account", "to_account", "category", "tags", "notes", "amount_cents")).casefold()
-            haystack += " " + format_money(flow["amount_cents"]) + " " + format_money(flow["amount_cents"]).replace(",", "")
-            return (query in haystack
+            haystack = " ".join(str(flow.get(key, "")) for key in ("date", "name", "from_account", "to_account", "category", "tags", "notes", "amount", "units")).casefold()
+            haystack += " " + format_quantity(flow["amount"]) + " " + format_quantity(flow["amount"]).replace(",", "")
+            return ((query in haystack or (query_quantity is not None and query_quantity == parse_quantity(flow["amount"])))
                     and (not from_accounts or flow["from_account"].casefold() in from_accounts)
                     and (not to_accounts or flow["to_account"].casefold() in to_accounts)
                     and (not categories or flow["category"].casefold() in categories)
@@ -1371,7 +1378,9 @@ class FlowApp(tk.Tk):
                     and (not date_end or normalize_date(flow["date"]) <= date_end)
                     and (not statuses or flow["status"] in statuses))
         flows = [flow for flow in flows if matches(flow)]
-        flows.sort(key=lambda flow: normalize_date(flow["date"]) if self.sort_column == "date" else flow.get(self.sort_column, ""), reverse=self.sort_reverse)
+        flows.sort(key=lambda flow: (normalize_date(flow["date"]) if self.sort_column == "date"
+                                    else parse_quantity(flow["amount"]) if self.sort_column == "amount"
+                                    else flow.get(self.sort_column, "")), reverse=self.sort_reverse)
         self.ledger.delete(*self.ledger.get_children())
         self.ledger_rows = {}
         for index, flow in enumerate(flows):
@@ -1388,8 +1397,10 @@ class FlowApp(tk.Tk):
         self.report_rows = [flow for flow in flows if flow["status"] != "Void"]
         for index, status in enumerate(("Complete", "Pending")):
             self.metric_vars[index].set(str(sum(f["status"] == status for f in self.report_rows)))
-        volume = sum(f["amount_cents"] for f in self.report_rows if f["status"] == "Complete")
-        self.report_summary.set(f"Complete · ${format_money(volume)} flow volume")
+        units = sorted({f["units"] for f in self.report_rows if f["status"] == "Complete"})
+        totals = [f"{format_quantity(decimal_sum(parse_quantity(f['amount']) for f in self.report_rows if f['status'] == 'Complete' and f['units'] == unit))} {unit}"
+                  for unit in units]
+        self.report_summary.set("Complete · " + (" · ".join(totals) if totals else "0 flows"))
 
     def _remove_suggestion(self, field, value):
         """Forget an entry suggestion without touching the draft or records."""
@@ -1407,12 +1418,12 @@ class FlowApp(tk.Tk):
         self.status_message.set(f"Removed suggestion: {value}")
         return True
 
-    def _accept_suggestion(self, field, widget=None):
+    def _accept_suggestion(self, field, widget=None, record_kind="flow"):
         """Explicit Enter can restore a forgotten value; refresh/save cannot."""
         widget = widget or self.form_widgets[field]
         value = widget._query()
         if not value:
-            self._finish_existing("flow")
+            self._finish_existing(record_kind)
             return
         try:
             kind = SUGGESTION_KINDS[field]
@@ -1427,12 +1438,12 @@ class FlowApp(tk.Tk):
         if restored:
             self.refresh_suggestions()
             self.status_message.set(f"Restored suggestion: {value}")
-        self._finish_existing("flow")
+        self._finish_existing(record_kind)
 
     def refresh_suggestions(self):
         """Apply entry preferences while retaining all data in other views."""
         accounts = self.repo.list_accounts(referenced_only=True)
-        names = [account["name"] for account in accounts]
+        names = list(dict.fromkeys(account["name"] for account in accounts))
         # Most-used values remain first; both directions still accept every name.
         flows = self.repo.list_flows()
         counts = {name: 0 for name in names}
@@ -1443,8 +1454,9 @@ class FlowApp(tk.Tk):
         names.sort(key=lambda name: (-counts[name], name.casefold()))
         for key in ("from_account", "to_account"):
             self.form_widgets[key].set_values(self.suggestion_preferences.visible("account", names))
-        for key, values in [("category", self.repo.list_categories()), ("tags", self.repo.list_tags()), ("name", self.repo.list_names())]:
+        for key, values in [("category", self.repo.list_categories()), ("tags", self.repo.list_tags()), ("name", self.repo.list_names()), ("units", self.repo.list_units())]:
             self.form_widgets[key].set_values(self.suggestion_preferences.visible(SUGGESTION_KINDS[key], values))
+        self.account_widgets["units"].set_values(self.suggestion_preferences.visible("unit", self.repo.list_units()))
         self.ledger_editor.refresh_suggestions()
 
     def refresh_all(self):
@@ -1474,7 +1486,7 @@ class FlowApp(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.account_title = ttk.Label(header, text="New Account", style="Section.TLabel")
         self.account_title.pack(side="left")
-        self.account_feedback = tk.StringVar(self, "Negative = debt · Blank = unknown")
+        self.account_feedback = tk.StringVar(self, "Blank = unknown")
         ttk.Label(header, textvariable=self.account_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
         self.account_save_button = ttk.Button(header, text="Add Account", style="Primary.TButton", command=self.save_account)
         self.account_save_button.pack(side="right")
@@ -1483,18 +1495,22 @@ class FlowApp(tk.Tk):
         ttk.Button(header, text="Record JSON", style="Small.TButton", command=self.show_account_json).pack(side="right", padx=8)
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
-        self.account_vars = {key: tk.StringVar(self) for key in ("name", "opening", "date")}
+        self.account_vars = {key: tk.StringVar(self) for key in ("name", "units", "opening", "date")}
+        self.account_vars["units"].set("USD")
         self.account_vars["date"].set("2026-10-01")
         self.account_widgets = {}
         cells = []
-        for key, label in (("name", "Account Name"), ("opening", "Starting Balance · USD"), ("date", "Starting Date/Time")):
-            cell, heading, widget = self._entry_cell(form, label, self.account_vars[key])
+        for key, label in (("name", "Account Name"), ("units", "Units"), ("opening", "Starting Balance"), ("date", "Starting Date/Time")):
+            cell, heading, widget = self._entry_cell(form, label, self.account_vars[key], "suggest" if key == "units" else "entry")
             self.account_widgets[key] = widget
             cells.append(cell)
             if key == "name":
                 self.account_name_entry = widget
+            elif key == "units":
+                widget.on_remove = lambda value: self._remove_suggestion("units", value)
+                widget.on_accept = lambda w=widget: self._accept_suggestion("units", w, "account")
         self.account_cells = cells
-        self._reflow_cells(form, cells, [40, 30, 30], threshold=700)
+        self._reflow_cells(form, cells, [35, 15, 25, 25], threshold=700)
         card = self._card(page)
         card.grid(row=1, column=0, sticky="nsew")
         card.columnconfigure(0, weight=1)
@@ -1505,7 +1521,7 @@ class FlowApp(tk.Tk):
         self.account_summary = tk.StringVar(self)
         ttk.Label(top, textvariable=self.account_summary, style="CardMuted.TLabel").pack(side="left", padx=14)
         ttk.Label(top, text="Current balances", style="CardMuted.TLabel").pack(side="right")
-        specs = [("name", "Account", 28), ("balance", "Starting Balance", 18), ("anchor", "Starting Date", 18),
+        specs = [("name", "Account", 24), ("units", "Units", 10), ("balance", "Starting Balance", 18), ("anchor", "Starting Date", 18),
                  ("confirmed", "Confirmed", 18), ("pending", "Including Pending", 18)]
         self.accounts_tree = ttk.Treeview(card, columns=[s[0] for s in specs], show="headings", selectmode="browse")
         for key, label, weight in specs:
@@ -1527,21 +1543,36 @@ class FlowApp(tk.Tk):
             prepare=lambda: self._prepare_column_move("account"),
             changed=lambda before: self._columns_moved("accounts", before),
             resized=lambda before: self._columns_resized("accounts", before))
-        self.account_tooltip = TreeTooltip(self.accounts_tree, lambda name: "Starting balance immediately before " + self.repo.get_account(name)["opening_at"] if self.repo.get_account(name) else None)
+        self.account_rows = {}
+        self.account_tooltip = TreeTooltip(self.accounts_tree, lambda row: "Starting balance immediately before " + self._account_record(row)["opening_at"] if self._account_record(row) else None)
         ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date · Changes save automatically", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
     def _accounts_yview(self, *args):
         if self.account_cell_editor.close():
             self.accounts_tree.yview(*args)
 
+    @staticmethod
+    def _account_key(account):
+        """A widget key for one named account/resource pair, never stored data."""
+        return json.dumps([account["name"], account["units"]], ensure_ascii=False)
+
+    def _account_record(self, key):
+        if not key:
+            return None
+        try:
+            name, units = json.loads(key)
+        except (ValueError, TypeError):
+            return None
+        return self.repo.get_account(name, units)
+
     def _restore_account_draft_row(self):
         name = self.account_editing
         if not name or not self.accounts_tree.exists(name):
             return
-        account = self.repo.get_account(name)
+        account = self._account_record(name)
         if account:
-            opening = account["opening_cents"]
-            self.accounts_tree.set(name, "balance", "Unknown" if opening is None else "$" + format_money(opening))
+            opening = account["opening_amount"]
+            self.accounts_tree.set(name, "balance", "Unknown" if opening is None else format_quantity(opening))
             self.accounts_tree.set(name, "anchor", account["opening_at"][:10])
 
     def _sync_account_draft(self, *args):
@@ -1555,7 +1586,7 @@ class FlowApp(tk.Tk):
             return
         raw = self.account_vars["opening"].get().strip()
         try:
-            opening = "$" + format_money(parse_money(raw, allow_negative=True)) if raw else "Unknown"
+            opening = format_quantity(parse_quantity(raw, allow_negative=True)) if raw else "Unknown"
         except ValueError:
             opening = raw  # Keep mistakes visible without writing a record.
         self.accounts_tree.set(name, "balance", opening)
@@ -1569,21 +1600,24 @@ class FlowApp(tk.Tk):
         self.account_tooltip.hide()
         selected = self._account_selection
         self.accounts_tree.delete(*self.accounts_tree.get_children())
+        self.account_rows = {}
         accounts = self.repo.list_accounts(referenced_only=True)
         flows = self.repo.list_flows()
         now = self._now()
-        def money(cents):
-            return "Unknown" if cents is None else "$" + format_money(cents)
+        def quantity(value):
+            return "Unknown" if value is None else format_quantity(value)
         for index, account in enumerate(accounts):
             confirmed = ledger_balance_at(account, flows, now, ("Complete",))
             pending = ledger_balance_at(account, flows, now, ("Complete", "Pending"))
-            self.accounts_tree.insert("", "end", iid=account["name"], values=(account["name"], money(account["opening_cents"]), account["opening_at"][:10], money(confirmed), money(pending)), tags=("odd" if index % 2 else "even",))
+            key = self._account_key(account)
+            self.account_rows[key] = account
+            self.accounts_tree.insert("", "end", iid=key, values=(account["name"], account["units"], quantity(account["opening_amount"]), account["opening_at"][:10], quantity(confirmed), quantity(pending)), tags=("odd" if index % 2 else "even",))
         if self.account_editing and not self.accounts_tree.exists(self.account_editing):
             self.new_account(focus=False, confirm=False)
         else:
             self._set_account_selection(selected)
             self._sync_account_draft()
-        self.account_summary.set(f"{len(accounts)} accounts")
+        self.account_summary.set(f"{len({a['name'] for a in accounts})} accounts · {len(accounts)} balances")
 
     def _select_account(self, event=None):
         if self._loading or self._committing:
@@ -1599,7 +1633,7 @@ class FlowApp(tk.Tk):
         self.account_cell_editor.close(commit=False)
         self._restore_account_draft_row()
         self._close_popups()
-        account = self.repo.get_account(name) if name else None
+        account = self._account_record(name)
         if account:
             self._load_account(account)
         else:
@@ -1610,11 +1644,15 @@ class FlowApp(tk.Tk):
         self._loading = True
         try:
             name = account["name"]
-            self._set_account_selection(name)
-            self.account_editing = name
+            key = self._account_key(account)
+            self._set_account_selection(key)
+            self.account_editing = key
             self.account_vars["name"].set(name)
+            self.account_vars["units"].set(account["units"])
             self.account_name_entry.configure(state="disabled")
-            self.account_vars["opening"].set("" if account["opening_cents"] is None else format_money(account["opening_cents"]).replace(",", ""))
+            self.account_widgets["units"].entry.configure(state="disabled")
+            self.account_widgets["units"].arrow.configure(state="disabled")
+            self.account_vars["opening"].set("" if account["opening_amount"] is None else format_quantity(account["opening_amount"]).replace(",", ""))
             self.account_vars["date"].set(account["opening_at"])
             self.account_title.configure(text="Edit Account")
             self.account_save_button.configure(state="disabled")
@@ -1640,11 +1678,13 @@ class FlowApp(tk.Tk):
             self._active_edit = None
             self._draft_redo = None
             self.account_name_entry.configure(state="normal")
-            for key, value in {"name": "", "opening": "", "date": "2026-10-01"}.items():
+            self.account_widgets["units"].entry.configure(state="normal")
+            self.account_widgets["units"].arrow.configure(state="normal")
+            for key, value in {"name": "", "units": "USD", "opening": "", "date": "2026-10-01"}.items():
                 self.account_vars[key].set(value)
             self.account_title.configure(text="New Account")
             self.account_save_button.configure(state="normal")
-            self.account_feedback.set("Negative = debt · Blank = unknown")
+            self.account_feedback.set("Blank = unknown")
             self._clean_account = self._account_snapshot()
             self._set_account_selection(None)
         finally:
@@ -1663,18 +1703,19 @@ class FlowApp(tk.Tk):
         self._close_popups()
         try:
             raw = self.account_vars["opening"].get().strip()
-            cents = parse_money(raw, allow_negative=True) if raw else None
+            amount = quantity_text(parse_quantity(raw, allow_negative=True)) if raw else None
             at = normalize_date(self._account_when())
             name = self.account_vars["name"].get().strip()
-            existing = self.repo.get_account(name)
+            units = self.account_vars["units"].get().strip()
+            existing = self.repo.get_account(name, units)
             if existing:
-                if self.accounts_tree.exists(existing["name"]):
-                    raise ValueError("That account already exists. Select it to edit.")
-                raise ValueError("That account already exists. Use it in a flow to show it here.")
-            account = self.history.perform("Add account", lambda: self.repo.save_account(name, opening_cents=cents, opening_at=at))
+                if self.accounts_tree.exists(self._account_key(existing)):
+                    raise ValueError("That account/unit balance already exists. Select it to edit.")
+                raise ValueError("That account/unit balance already exists. Use it in a flow to show it here.")
+            account = self.history.perform("Add account", lambda: self.repo.save_account(name, opening_amount=amount, opening_at=at, units=units))
             self.new_account(focus=False, confirm=False)
             self.refresh_all()
-            self.status_message.set(f"Saved: {account['name']} · Appears when used in a flow")
+            self.status_message.set(f"Saved: {account['name']} · {account['units']} · Appears when used in a flow")
             self.account_name_entry.focus_set()
             self._begin_field("account", "name")
             self._update_history_buttons()
@@ -1701,7 +1742,7 @@ class FlowApp(tk.Tk):
         controls.pack(fill="both", expand=True)
         controls.columnconfigure(0, weight=1)
         ttk.Label(controls, text="Graph Controls", style="Section.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 16))
-        ttk.Label(controls, text="ACCOUNTS · SELECT ONE OR MANY", style="Field.TLabel").grid(row=1, column=0, sticky="w")
+        ttk.Label(controls, text="ACCOUNTS / UNITS", style="Field.TLabel").grid(row=1, column=0, sticky="w")
         account_list = ttk.Frame(controls, style="Card.TFrame")
         account_list.grid(row=2, column=0, sticky="ew", pady=(7, 7))
         self.chart_accounts = tk.Listbox(account_list, selectmode="multiple", exportselection=False, height=7, width=1, bg="#f8faf7", fg=INK, selectbackground="#d6eade", selectforeground=INK, relief="flat", highlightthickness=1, highlightbackground=LINE, font=(FONT, 10), activestyle="none")
@@ -1727,7 +1768,7 @@ class FlowApp(tk.Tk):
             picker.pack(fill="x")
             setattr(self, attribute, picker)
         self.chart_combined = tk.BooleanVar(self, False)
-        ttk.Checkbutton(controls, text="Combine selected accounts", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
+        ttk.Checkbutton(controls, text="Combine accounts within each unit", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
         ttk.Button(controls, text="Update Graph", style="Primary.TButton", command=self.update_chart).grid(row=8, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(controls, text="Export Graph…", command=self.export_chart).grid(row=9, column=0, sticky="ew", pady=(8, 0))
         chart_card = self._card(page)
@@ -1744,6 +1785,8 @@ class FlowApp(tk.Tk):
         self.chart_message_label.grid_remove()
         self.figure = Figure(figsize=(9, 6), dpi=100, facecolor="white")
         self.axes = self.figure.add_subplot(111)
+        self.chart_axes = {"": self.axes}
+        self.chart_account_pairs = []
         self.canvas = FigureCanvasTkAgg(self.figure, master=chart_card)
         canvas_widget = self.canvas.get_tk_widget()
         canvas_widget.grid(row=2, column=0, sticky="nsew")
@@ -1764,7 +1807,9 @@ class FlowApp(tk.Tk):
         self.canvas.mpl_connect("axes_leave_event", self._hide_chart_tooltip)
         self.chart_line_map = {}
         self.chart_series = {}
+        self.chart_line_units = {}
         self.chart_tooltip = None
+        self.chart_tooltips = {}
         self.chart_inspection_context = None
         self._chart_rendered_controls = None
 
@@ -1780,15 +1825,15 @@ class FlowApp(tk.Tk):
             self.canvas.draw_idle()
 
     def _graph_controls(self):
-        return (tuple(self.chart_accounts.get(i) for i in self.chart_accounts.curselection()),
+        return (tuple(self.chart_account_pairs[i] for i in self.chart_accounts.curselection()),
                 self.chart_basis.get(), self.chart_start.get(), self.chart_end.get(),
                 self.chart_combined.get())
 
     def _put_graph_controls(self, values):
-        names, basis, start, end, combined = values
+        pairs, basis, start, end, combined = values
         self.chart_accounts.selection_clear(0, "end")
-        for index in range(self.chart_accounts.size()):
-            if self.chart_accounts.get(index) in names:
+        for index, pair in enumerate(self.chart_account_pairs):
+            if pair in pairs:
                 self.chart_accounts.selection_set(index)
         self.chart_basis.set(basis)
         self.chart_start.set(start)
@@ -1796,8 +1841,10 @@ class FlowApp(tk.Tk):
         self.chart_combined.set(combined)
 
     def _graph_state(self):
-        visible = tuple((line.get_label(), line.get_visible()) for line in self.chart_series)
-        limits = (tuple(self.axes.get_xlim()), tuple(self.axes.get_ylim()))
+        visible = tuple(((line.get_label(), self.chart_line_units[line]), line.get_visible())
+                        for line in self.chart_series)
+        limits = tuple((units, tuple(axes.get_xlim()), tuple(axes.get_ylim()))
+                       for units, axes in self.chart_axes.items())
         return self._graph_controls(), self._chart_rendered_controls, visible, limits
 
     def _put_graph_state(self, state):
@@ -1806,10 +1853,13 @@ class FlowApp(tk.Tk):
         self.draw_chart()
         visibility = dict(visible)
         for legend, line in self.chart_line_map.items():
-            line.set_visible(visibility.get(line.get_label(), True))
+            line.set_visible(visibility.get((line.get_label(), self.chart_line_units[line]), True))
             legend.set_alpha(1 if line.get_visible() else .25)
-        self.axes.set_xlim(limits[0])
-        self.axes.set_ylim(limits[1])
+        for units, xlim, ylim in limits:
+            axes = self.chart_axes.get(units)
+            if axes is not None:
+                axes.set_xlim(xlim)
+                axes.set_ylim(ylim)
         self._put_graph_controls(controls)
         self._chart_rendered_controls = rendered
         self.canvas.draw_idle()
@@ -1831,8 +1881,9 @@ class FlowApp(tk.Tk):
         self.view_history.record("graph", "Update graph", before=before)
 
     def _watch_chart_limits(self):
-        for signal in ("xlim_changed", "ylim_changed"):
-            self.axes.callbacks.connect(signal, self._chart_limits_changed)
+        for axes in self.chart_axes.values():
+            for signal in ("xlim_changed", "ylim_changed"):
+                axes.callbacks.connect(signal, self._chart_limits_changed)
 
     def _chart_limits_changed(self, axes):
         view = self.view_history
@@ -1848,13 +1899,14 @@ class FlowApp(tk.Tk):
     def refresh_chart_accounts(self):
         if not hasattr(self, "chart_accounts"):
             return
-        selected = {self.chart_accounts.get(i) for i in self.chart_accounts.curselection()}
+        selected = {self.chart_account_pairs[i] for i in self.chart_accounts.curselection()}
         initial = self.chart_accounts.size() == 0
         accounts = self.repo.list_accounts(referenced_only=True)
         self.chart_accounts.delete(0, "end")
-        for index, account in enumerate(accounts):
-            self.chart_accounts.insert("end", account["name"])
-            if account["name"] in selected or (initial and index == 0):
+        self.chart_account_pairs = [(account["name"], account["units"]) for account in accounts]
+        for index, pair in enumerate(self.chart_account_pairs):
+            self.chart_accounts.insert("end", pair[0] + " · " + pair[1])
+            if pair in selected or (initial and index == 0):
                 self.chart_accounts.selection_set(index)
         if hasattr(self, "view_history"):
             self.view_history.remember("graph")
@@ -1875,23 +1927,17 @@ class FlowApp(tk.Tk):
         from matplotlib import dates as mdates, ticker
         self._hide_chart_tooltip()
         self.chart_tooltip = None
+        self.chart_tooltips = {}
         self.chart_series = {}
+        self.chart_line_units = {}
         self.chart_line_map = {}
         self.chart_inspection_context = None
         self.chart_inspect.set("")
         self.chart_message.set("")
         self.chart_message_label.grid_remove()
-        self.axes.clear()
+        self.figure.clear()
+        self.chart_axes = {}
         self.chart_toolbar.update()
-        self.axes.set_facecolor("white")
-        self.axes.spines[["top", "right", "left"]].set_visible(False)
-        self.axes.spines["bottom"].set_color(LINE)
-        self.axes.grid(axis="y", color="#e8eee8", linewidth=0.8)
-        self.axes.tick_params(axis="both", labelsize=9, colors=MUTED, length=0, pad=10)
-        self.axes.yaxis.set_major_formatter(ticker.FuncFormatter(lambda value, pos: f"${value:,.0f}"))
-        locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
-        self.axes.xaxis.set_major_locator(locator)
-        self.axes.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
         try:
             normalized = []
             for label, variable in (("From", self.chart_start), ("Through", self.chart_end)):
@@ -1906,95 +1952,128 @@ class FlowApp(tk.Tk):
                 raise ValueError("Through must be on or after From.")
             self.chart_start.set(normalized[0])
             self.chart_end.set(normalized[1])
-            selected = [self.chart_accounts.get(i) for i in self.chart_accounts.curselection()]
-            accounts = [self.repo.get_account(name) for name in selected]
+            selected = [self.chart_account_pairs[i] for i in self.chart_accounts.curselection()]
+            accounts = [self.repo.get_account(name, units) for name, units in selected]
+            accounts = [account for account in accounts if account is not None]
             statuses = {"Confirmed": ("Complete",),
                         "Including Pending": ("Complete", "Pending"),
                         "Including Planned": ("Complete", "Pending", "Planned")}[self.chart_basis.get()]
             flows = self.repo.list_flows()
-            unknown = [account["name"] for account in accounts if account["opening_cents"] is None]
-            valid = [account for account in accounts if account["opening_cents"] is not None]
-            if not accounts:
-                self.axes.text(.5, .5, "Choose accounts to see their balances", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=14)
-            elif self.chart_combined.get() and unknown:
-                valid = []
-                self.axes.text(.5, .5, "Combined balance is unknown\nSet the missing starting balances in Accounts.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
-            elif unknown and not valid:
-                self.axes.text(.5, .5, "Starting balance required\nSet a starting balance in Accounts.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
+            groups = {}
+            for account in accounts:
+                groups.setdefault(account["units"], []).append(account)
+            units_order = sorted(groups) or [""]
+            unknown = [a["name"] + " · " + a["units"] for a in accounts if a["opening_amount"] is None]
             if unknown:
                 self.chart_message.set("Missing starting balance: " + ", ".join(unknown) + ".")
                 self.chart_message_label.grid()
-            series = graph_timeline(valid, flows, start, end, statuses,
-                                    combined=self.chart_combined.get())
-            all_lines = []
-            for index, (name, rows) in enumerate(series.items()):
-                xs = [datetime.fromisoformat(date) for date, value in rows]
-                ys = [value / 100 for date, value in rows]
-                line, = self.axes.step(xs, ys, where="post", label=name,
-                                       color=PALETTE[index % len(PALETTE)], linewidth=2.2,
-                                       marker="o", markevery=[0], markersize=5)
-                self.chart_series[line] = rows
-                all_lines.append(line)
-            if all_lines:
-                legend = self.axes.legend(loc="upper left", frameon=False, fontsize=9, ncol=1 if len(all_lines) < 6 else 2)
-                for legline, origline in zip(legend.get_lines(), all_lines):
-                    legline.set_picker(6)
-                    self.chart_line_map[legline] = origline
-            start_dt, end_dt = datetime.fromisoformat(start), datetime.fromisoformat(end)
-            # A small display margin keeps the first value and any same-time
-            # jump visible. The recorded event times are never shifted.
-            padding = max((end_dt - start_dt) * .02, timedelta(seconds=1))
-            self.axes.set_xlim(start_dt - padding, end_dt + padding)
-            self.axes.axhline(0, color="#b4c7bb", linewidth=.8)
-            now = datetime.now()
-            if start_dt <= now <= end_dt:
-                self.axes.axvline(now, color="#b4c7bb", linewidth=1, linestyle=":")
-                self.axes.text(mdates.date2num(now), 1.01, "NOW", transform=self.axes.get_xaxis_transform(), color=MUTED, fontsize=8, ha="center")
-            self.figure.subplots_adjust(left=.12, bottom=.11, right=.97, top=.92)
+            first_axes = None
+            for plot_index, units in enumerate(units_order):
+                axes = self.figure.add_subplot(len(units_order), 1, plot_index + 1, sharex=first_axes)
+                if first_axes is None:
+                    first_axes = axes
+                    self.axes = axes
+                self.chart_axes[units] = axes
+                axes.set_facecolor("white")
+                axes.spines[["top", "right", "left"]].set_visible(False)
+                axes.spines["bottom"].set_color(LINE)
+                axes.grid(axis="y", color="#e8eee8", linewidth=.8)
+                axes.tick_params(axis="both", labelsize=9, colors=MUTED, length=0, pad=8)
+                axes.yaxis.set_major_formatter(ticker.FuncFormatter(lambda value, pos: f"{value:,.8g}"))
+                axes.set_ylabel(units, color=INK, fontsize=10)
+                locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
+                axes.xaxis.set_major_locator(locator)
+                axes.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
+                axes.tick_params(axis="x", labelbottom=plot_index == len(units_order) - 1)
+                unit_accounts = groups.get(units, [])
+                valid = [a for a in unit_accounts if a["opening_amount"] is not None]
+                unit_unknown = [a for a in unit_accounts if a["opening_amount"] is None]
+                if not accounts:
+                    axes.text(.5, .5, "Choose accounts and units to see their balances", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=14)
+                elif self.chart_combined.get() and unit_unknown:
+                    valid = []
+                    axes.text(.5, .5, "Combined balance is unknown\nSet the missing starting balances in Accounts.", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=13)
+                elif unit_unknown and not valid:
+                    axes.text(.5, .5, "Starting balance required\nSet a starting balance in Accounts.", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=13)
+                series = graph_timeline(valid, flows, start, end, statuses, combined=self.chart_combined.get())
+                all_lines = []
+                for index, ((name, series_units), rows) in enumerate(series.items()):
+                    xs = [datetime.fromisoformat(date) for date, value in rows]
+                    ys = [float(value) for date, value in rows]
+                    if any(not math.isfinite(plotted) or (exact != 0 and plotted == 0)
+                           for (_, exact), plotted in zip(rows, ys)):
+                        raise ValueError(f"Outside graph display range: {name} · {series_units}.")
+                    line, = axes.step(xs, ys, where="post", label=name,
+                                      color=PALETTE[index % len(PALETTE)], linewidth=2.2,
+                                      marker="o", markevery=[0], markersize=5)
+                    self.chart_series[line] = rows
+                    self.chart_line_units[line] = series_units
+                    all_lines.append(line)
+                if all_lines:
+                    legend = axes.legend(loc="upper left", frameon=False, fontsize=9, ncol=1 if len(all_lines) < 6 else 2)
+                    for legline, origline in zip(legend.get_lines(), all_lines):
+                        legline.set_picker(6)
+                        self.chart_line_map[legline] = origline
+                start_dt, end_dt = datetime.fromisoformat(start), datetime.fromisoformat(end)
+                padding = max((end_dt - start_dt) * .02, timedelta(seconds=1))
+                axes.set_xlim(start_dt - padding, end_dt + padding)
+                axes.axhline(0, color="#b4c7bb", linewidth=.8)
+                now = datetime.now()
+                if start_dt <= now <= end_dt:
+                    axes.axvline(now, color="#b4c7bb", linewidth=1, linestyle=":")
+                    if plot_index == 0:
+                        axes.text(mdates.date2num(now), 1.01, "NOW", transform=axes.get_xaxis_transform(), color=MUTED, fontsize=8, ha="center")
+                tooltip = axes.annotate("", xy=(0, 0), xytext=(12, 12), textcoords="offset points",
+                                        fontsize=9, color=INK, zorder=20,
+                                        bbox=dict(boxstyle="round,pad=.55", fc="white", ec=LINE, alpha=.98))
+                tooltip.set_visible(False)
+                tooltip.set_in_layout(False)
+                self.chart_tooltips[axes] = tooltip
+                axes.callbacks.connect("xlim_changed", self._hide_chart_tooltip)
+                axes.callbacks.connect("ylim_changed", self._hide_chart_tooltip)
+            self.chart_tooltip = self.chart_tooltips[self.axes]
+            self.figure.subplots_adjust(left=.12, bottom=.11, right=.97, top=.94, hspace=.28)
             self.chart_title.configure(text="Account Balances · " + self.chart_basis.get())
             self.chart_note.set("Hover for exact balances; click legend lines to hide/show.")
             self.chart_inspection_context = (accounts, flows, statuses, ledger_balance_at)
-            self.chart_tooltip = self.axes.annotate(
-                "", xy=(0, 0), xytext=(12, 12), textcoords="offset points",
-                fontsize=9, color=INK, zorder=20,
-                bbox=dict(boxstyle="round,pad=.55", fc="white", ec=LINE, alpha=.98))
-            self.chart_tooltip.set_visible(False)
-            self.chart_tooltip.set_in_layout(False)
-            self.axes.callbacks.connect("xlim_changed", self._hide_chart_tooltip)
-            self.axes.callbacks.connect("ylim_changed", self._hide_chart_tooltip)
         except (ValueError, sqlite3.Error) as exc:
             self.chart_message.set(str(exc))
             self.chart_message_label.grid()
-            self.axes.text(.5, .5, "Unable to draw graph\nCheck the dates above.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
+            if not self.chart_axes:
+                self.axes = self.figure.add_subplot(111)
+                self.chart_axes = {"": self.axes}
+            self.axes.text(.5, .5, "Unable to draw graph\nCheck the controls above.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
             self.chart_note.set("")
         self.canvas.draw_idle()
 
     def _hide_chart_tooltip(self, event=None):
-        tooltip = getattr(self, "chart_tooltip", None)
-        if tooltip is not None and tooltip.get_visible():
-            tooltip.set_visible(False)
-            if getattr(event, "type", None) != tk.EventType.Unmap:
-                self.canvas.draw_idle()
+        changed = False
+        for tooltip in getattr(self, "chart_tooltips", {}).values():
+            if tooltip.get_visible():
+                tooltip.set_visible(False)
+                changed = True
+        if changed and getattr(event, "type", None) != tk.EventType.Unmap:
+            self.canvas.draw_idle()
 
     def hover_chart(self, event):
-        """Hit-test rendered steps in pixels; report stored cents, never interpolation."""
-        if (event.inaxes is not self.axes or event.xdata is None
-                or self.chart_tooltip is None or self.chart_toolbar.mode):
+        """Hit-test rendered steps; inspect exact stored quantities, never interpolation."""
+        if (event.inaxes not in self.chart_tooltips or event.xdata is None
+                or self.chart_toolbar.mode):
             self._hide_chart_tooltip()
             return
         import numpy as np
+        axes = event.inaxes
         hits = []
         cursor = np.array([event.x, event.y])
         for line, rows in self.chart_series.items():
-            if not line.get_visible() or not rows:
+            if line.axes is not axes or not line.get_visible() or not rows:
                 continue
-            points = self.axes.transData.transform(line.get_xydata())
+            units = self.chart_line_units[line]
+            points = axes.transData.transform(line.get_xydata())
             if len(points) == 1:
                 distance = float(np.linalg.norm(cursor - points[0]))
-                text = f"{line.get_label()}: ${format_money(rows[0][1])}"
+                text = f"{line.get_label()}: {format_quantity(rows[0][1])} {units}"
             else:
-                # Each post-step has an exact horizontal balance followed by
-                # a vertical change at the next event's real timestamp.
                 starts = np.empty((2 * (len(points) - 1), 2))
                 ends = np.empty_like(starts)
                 starts[::2] = points[:-1]
@@ -2004,8 +2083,8 @@ class FlowApp(tk.Tk):
                 ends[1::2] = points[1:]
                 vectors = ends - starts
                 lengths = (vectors * vectors).sum(axis=1)
-                fractions = np.divide(((cursor - starts) * vectors).sum(axis=1),
-                                      lengths, out=np.zeros_like(lengths), where=lengths != 0)
+                fractions = np.divide(((cursor - starts) * vectors).sum(axis=1), lengths,
+                                      out=np.zeros_like(lengths), where=lengths != 0)
                 fractions = np.clip(fractions, 0, 1)
                 nearest = starts + vectors * fractions[:, None]
                 distances = np.linalg.norm(nearest - cursor, axis=1)
@@ -2013,12 +2092,12 @@ class FlowApp(tk.Tk):
                 distance = float(distances[index])
                 row_index = index // 2
                 before, after = rows[row_index][1], rows[row_index + 1][1]
-                value = f"${format_money(before)}"
+                value = f"{format_quantity(before)} {units}"
                 if index % 2 and before != after:
                     if 0 < fractions[index] < 1:
-                        value += f" → ${format_money(after)}"
+                        value += f" → {format_quantity(after)} {units}"
                     elif fractions[index] == 1:
-                        value = f"${format_money(after)}"
+                        value = f"{format_quantity(after)} {units}"
                 text = f"{line.get_label()}: {value}"
                 if index % 2 and before != after and 0 < fractions[index] < 1:
                     text += "\n" + rows[row_index + 1][0]
@@ -2027,11 +2106,13 @@ class FlowApp(tk.Tk):
         if not hits:
             self._hide_chart_tooltip()
             return
-        tooltip = self.chart_tooltip
+        self._hide_chart_tooltip()
+        tooltip = self.chart_tooltips[axes]
+        self.chart_tooltip = tooltip
         tooltip.set_text("\n".join(text for distance, text in sorted(hits)))
         tooltip.xy = (event.xdata, event.ydata)
-        right_half = event.x > (self.axes.bbox.x0 + self.axes.bbox.x1) / 2
-        top_half = event.y > (self.axes.bbox.y0 + self.axes.bbox.y1) / 2
+        right_half = event.x > (axes.bbox.x0 + axes.bbox.x1) / 2
+        top_half = event.y > (axes.bbox.y0 + axes.bbox.y1) / 2
         tooltip.set_position((-12 if right_half else 12, -12 if top_half else 12))
         tooltip.set_ha("right" if right_half else "left")
         tooltip.set_va("top" if top_half else "bottom")
@@ -2039,15 +2120,18 @@ class FlowApp(tk.Tk):
         self.canvas.draw_idle()
 
     def inspect_chart(self, event):
-        if event.inaxes is not self.axes or event.xdata is None or not self.chart_inspection_context:
+        if event.inaxes not in self.chart_axes.values() or event.xdata is None or not self.chart_inspection_context:
             return
         from matplotlib.dates import num2date
         at = num2date(event.xdata).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         accounts, flows, statuses, calculate = self.chart_inspection_context
         parts = []
+        units = next(unit for unit, axes in self.chart_axes.items() if axes is event.inaxes)
         for account in accounts:
+            if account["units"] != units:
+                continue
             value = calculate(account, flows, at, statuses)
-            parts.append(f"{account['name']}: " + ("unknown" if value is None else "$" + format_money(value)))
+            parts.append(f"{account['name']}: " + ("unknown" if value is None else format_quantity(value) + " " + units))
         self.chart_inspect.set(at + "  |  " + " · ".join(parts))
 
     def toggle_chart_line(self, event):
@@ -2095,7 +2179,7 @@ class FlowApp(tk.Tk):
         self.db_path_label = ttk.Label(card, text=str(self.repo.path), style="CardMuted.TLabel", wraplength=950)
         self.db_path_label.pack(anchor="w", pady=(6, 16))
         ttk.Button(card, text="View Schema", command=self.show_schema).pack(anchor="w", pady=(0, 16))
-        ttk.Label(card, text=f"Version {__version__} · Local desktop · USD · SQLite", style="CardMuted.TLabel").pack(anchor="w")
+        ttk.Label(card, text=f"Version {__version__} · Local desktop · SQLite", style="CardMuted.TLabel").pack(anchor="w")
 
     def _show_text(self, title, content):
         """Inspect saved records or the live database schema without changing them."""
@@ -2127,7 +2211,7 @@ class FlowApp(tk.Tk):
         return self._show_text("Saved Flow JSON", json.dumps(flow, indent=2, ensure_ascii=False))
 
     def show_account_json(self):
-        account = self.repo.get_account(self.account_editing) if self.account_editing else None
+        account = self._account_record(self.account_editing)
         if account is None:
             self.status_message.set("Select a saved account.")
             return
@@ -2159,17 +2243,19 @@ class FlowApp(tk.Tk):
         ttk.Label(dialog, text="Review before saving", font=(FONT, 20, "bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(20, 10))
         counts = {state: sum(row["state"] == state for row in preview) for state in ("New", "Duplicate", "Similar", "Conflict", "Error")}
         ttk.Label(dialog, text="  ·  ".join(f"{count} {state.lower()}" for state, count in counts.items()), style="Muted.TLabel").grid(row=1, column=0, sticky="w", padx=22, pady=(0, 16))
-        columns = ("row", "state", "name", "from", "to", "amount", "message")
+        columns = ("row", "state", "name", "from", "to", "amount", "units", "message")
         tree = ttk.Treeview(dialog, columns=columns, show="headings")
-        for key, width in [("row", 45), ("state", 85), ("name", 145), ("from", 110), ("to", 110), ("amount", 90), ("message", 325)]:
+        for key, width in [("row", 45), ("state", 85), ("name", 145), ("from", 110), ("to", 110), ("amount", 90), ("units", 75), ("message", 250)]:
             tree.heading(key, text=key.upper())
             tree.column(key, width=width, stretch=key == "message")
         tree.grid(row=2, column=0, sticky="nsew", padx=22)
         for row in preview:
             data = row.get("data") if isinstance(row.get("data"), dict) else {}
-            cents = data.get("amount_cents")
-            amount = format_money(cents) if isinstance(cents, int) and not isinstance(cents, bool) else data.get("amount", "")
-            tree.insert("", "end", values=(row["row"], row["state"], data.get("name", ""), data.get("from_account", ""), data.get("to_account", ""), amount, row["message"]))
+            try:
+                amount = format_quantity(data.get("amount", ""))
+            except (ValueError, TypeError):
+                amount = data.get("amount", "")
+            tree.insert("", "end", values=(row["row"], row["state"], data.get("name", ""), data.get("from_account", ""), data.get("to_account", ""), amount, data.get("units", ""), row["message"]))
         include_similar = tk.BooleanVar(dialog, False)
         ttk.Checkbutton(dialog, text="Include similar rows as separate flows (possible legitimate repeats)", variable=include_similar).grid(row=3, column=0, sticky="w", padx=22, pady=14)
         bottom = ttk.Frame(dialog)
@@ -2270,13 +2356,12 @@ class FlowApp(tk.Tk):
             select()
 
     def show_report(self):
-        """Group each visible, effective flow once by category and status."""
+        """Group each visible flow by category, status, and exact unit."""
         self._prepare_dialog()
         groups = {}
         for flow in self.report_rows:
-            key = (flow["category"], flow["status"])
-            amount, count = groups.get(key, (0, 0))
-            groups[key] = (amount + flow["amount_cents"], count + 1)
+            key = (flow["category"], flow["status"], flow["units"])
+            groups.setdefault(key, []).append(parse_quantity(flow["amount"]))
         dialog = tk.Toplevel(self)
         dialog.title("Category totals · current ledger filter")
         dialog.geometry("850x560")
@@ -2286,10 +2371,10 @@ class FlowApp(tk.Tk):
         dialog.rowconfigure(2, weight=1)
         ttk.Label(dialog, text="Category totals", font=(FONT, 20, "bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(20, 8))
         ttk.Label(dialog, text="Flow volume · Each flow counted once, including transfers · Current ledger filter", style="Muted.TLabel", wraplength=800).grid(row=1, column=0, sticky="w", padx=22, pady=(0, 18))
-        tree = ttk.Treeview(dialog, columns=("category", "status", "amount", "count"), show="headings")
-        for key, title, width in [("category", "Category", 260), ("status", "Status", 150), ("amount", "Flow Volume", 200), ("count", "Flows", 100)]:
+        tree = ttk.Treeview(dialog, columns=("category", "status", "amount", "units", "count"), show="headings")
+        for key, title, width in [("category", "Category", 230), ("status", "Status", 140), ("amount", "Flow Volume", 190), ("units", "Units", 100), ("count", "Flows", 90)]:
             tree.heading(key, text=title)
             tree.column(key, width=width, anchor="e" if key in {"amount", "count"} else "w")
         tree.grid(row=2, column=0, sticky="nsew", padx=22, pady=(0, 22))
-        for (category, status), (amount, count) in sorted(groups.items()):
-            tree.insert("", "end", values=(category, status, "$" + format_money(amount), count))
+        for (category, status, units), amounts in sorted(groups.items()):
+            tree.insert("", "end", values=(category, status, format_quantity(decimal_sum(amounts)), units, len(amounts)))

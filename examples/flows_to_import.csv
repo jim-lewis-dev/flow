@@ -1,3 +1,4 @@
-date,from_account,to_account,amount,status,name,notes,category,tags
-2026-10-02 13:15:00,AmEx,Joe's Diner,12.00,Complete,Friday lunch,"Burger, fries, and tip.",Dining,Road trip
-2026-10-05,Checking,Boat shop,25.50,Planned,Boat supplies,Illustrative future flow; review before importing.,Boat,Weekend project
+date,name,from_account,to_account,amount,units,status,category,tags,notes
+2026-10-02 13:15:00,Friday lunch,AmEx,Joe's Diner,12.00,USD,Complete,Dining,"[""Road trip""]","Burger, fries, and tip."
+2026-10-05,Boat supplies,Checking,Boat shop,25.50,USD,Planned,Boat,"[""Weekend project""]",Illustrative future flow; review before importing.
+2026-10-03 09:15:06,Materials,Warehouse,Workshop,0.125,kg,Complete,Materials,"[""Project""]",Exact fractional quantity.

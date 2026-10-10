@@ -122,10 +122,10 @@ class LedgerEditor:
         return "flow"
 
     def variable_key(self, field):
-        return "amount" if field == "amount_cents" else field
+        return field
 
     def _make_widget(self, field):
-        variable_key = "amount" if field == "amount_cents" else field
+        variable_key = field
         if field == "notes":
             widget = self.notes_peer(self.tree, self.app.notes_text,
                 height=1, width=1, wrap="word", font=(self.font, 9),

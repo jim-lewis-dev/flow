@@ -1,0 +1,18 @@
+Resource units: native X11 XTest interaction audit
+PASS: 15 workflows; 0 callback exceptions.
+
+PASS Default ten columns and top fields use the requested order, with a reusable Units dropdown and no currency symbols
+PASS Repeat and Add preserve exact fractional quantities, units and date; Add resets the default unit and undo removes only the copy
+PASS Units are mandatory; a new nonmonetary unit and a sub-cent fractional quantity save without rounding
+PASS Top and inline Units share validation and auto-save; exact unit changes participate in session undo and redo
+PASS Units type-ahead filters choices; the X hides a suggestion and undo/redo restores it without changing any flow
+PASS One account has separate unit rows, anchors and confirmed/pending balances; editing one starting balance leaves other units intact
+PASS Inline starting dates also belong to the selected account/unit pair and remain undoable
+PASS Add Account sets another unit's starting balance on an existing account name without overwriting prior units
+PASS Selecting a referenced pair with an unknown balance lets its exact starting balance be set directly
+PASS Selecting account/unit pairs draws separate unit plots with one time range, exact values and unit-specific hover labels
+PASS Legend toggles and undo target one account/unit line even when the same account appears on another unit plot
+PASS Combine totals only compatible units; kg and USD stay separate, and graph controls/rendering undo without changing flows
+PASS Pending and planned flows forecast the selected unit with exact quantities and leave other units out
+PASS A missing starting balance identifies the exact account/unit pair while valid pairs remain graphed
+PASS The ten-field horizontal entry and full ledger stay visible at 1920 and 1280 pixels

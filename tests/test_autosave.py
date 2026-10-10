@@ -9,6 +9,11 @@ from unittest.mock import patch
 from flowledger.core import Repository
 
 
+def account_key(name, units="USD"):
+    import json
+    return json.dumps([name, units], ensure_ascii=False)
+
+
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
 class AutosaveTests(unittest.TestCase):
     def setUp(self):
@@ -16,8 +21,8 @@ class AutosaveTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / "autosave.sqlite3"
         self.repo = Repository(self.path)
-        self.repo.save_account("Checking", 100000)
-        self.repo.save_account("Shop", 0)
+        self.repo.save_account("Checking", '1000')
+        self.repo.save_account("Shop", '0')
         self.errors = []
         errors = self.errors
 
@@ -58,7 +63,7 @@ class AutosaveTests(unittest.TestCase):
         self.pump()
 
     def seed(self, **changes):
-        data = dict(date="2026-10-02 12:34:56", from_account="Checking", to_account="Shop",
+        data = dict(units="USD", date="2026-10-02 12:34:56", from_account="Checking", to_account="Shop",
                     amount="20.00", status="Pending", name="Purchase", notes="Original notes",
                     category="Boat", tags=["Autumn"])
         data.update(changes)
@@ -93,10 +98,10 @@ class AutosaveTests(unittest.TestCase):
         flow = self.seed()
         self.select(flow)
         entry = self.field("amount", "12.34")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 2000)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '20')
         entry.event_generate("<Return>")
         self.pump()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 1234)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '12.34')
         entry = self.field("name", "Renamed")
         entry.event_generate("<Tab>")
         self.settle()
@@ -119,16 +124,16 @@ class AutosaveTests(unittest.TestCase):
             self.pump()
         self.shortcut("<Control-z>", self.app.ledger)
         saved = self.repo.get_flow(flow["flow_id"])
-        self.assertEqual((saved["amount_cents"], saved["name"]), (1234, "Purchase"))
+        self.assertEqual((saved['amount'], saved["name"]), ('12.34', "Purchase"))
         self.shortcut("<Control-z>", self.app.ledger)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
         self.shortcut("<Control-y>", self.app.ledger)
         self.shortcut("<Control-y>", self.app.ledger)
         saved = self.repo.get_flow(flow["flow_id"])
-        self.assertEqual((saved["amount_cents"], saved["name"]), (1234, "Renamed"))
+        self.assertEqual((saved['amount'], saved["name"]), ('12.34', "Renamed"))
         self.assertEqual(self.app.form_vars["name"].get(), "Renamed")
         self.assertEqual(self.app.ledger.set(flow["flow_id"], "name"), "Renamed")
-        self.assertEqual(self.app.ledger.set(flow["flow_id"], "amount_cents"), "$12.34")
+        self.assertEqual(self.app.ledger.set(flow["flow_id"], 'amount'), '12.34')
         self.assertEqual(len(self.repo.list_flows()), 1)
 
     def test_unfinished_invalid_typing_undo_redo_precedes_record_history(self):
@@ -136,17 +141,17 @@ class AutosaveTests(unittest.TestCase):
         self.select(flow)
         self.field("name", "Saved name").event_generate("<Return>")
         self.pump()
-        entry = self.field("amount", "12.345")
+        entry = self.field("amount", "invalid")
         entry.event_generate("<Return>")
         self.pump()
         self.assertTrue(self.app.form_feedback.get())
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 2000)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '20')
         self.shortcut("<Control-z>", entry)
-        self.assertEqual(entry.get(), "20.00")
+        self.assertEqual(entry.get(), "20")
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "Saved name")
         self.shortcut("<Control-y>", entry)
-        self.assertEqual(entry.get(), "12.345")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 2000)
+        self.assertEqual(entry.get(), "invalid")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '20')
         self.shortcut("<Control-z>", entry)
         self.shortcut("<Control-z>", entry)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
@@ -167,7 +172,7 @@ class AutosaveTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_account("Never added"))
 
     def test_add_and_void_are_reversible_without_confirmations(self):
-        for key, value in dict(date="2026-10-03", from_account="Checking", to_account="New shop",
+        for key, value in dict(units="USD", date="2026-10-03", from_account="Checking", to_account="New shop",
                                amount="33.00", name="Added", category="New category", tags="New tag").items():
             self.app.form_vars[key].set(value)
         self.app.save_button.invoke()
@@ -210,7 +215,7 @@ class AutosaveTests(unittest.TestCase):
     def test_account_change_undo_redo_uses_same_keyboard_and_refreshes_values(self):
         self.seed()
         self.app.show_view("accounts")
-        self.app.accounts_tree.selection_set("Checking")
+        self.app.accounts_tree.selection_set(account_key("Checking"))
         self.pump()
         entry = self.app.account_widgets["opening"]
         entry.focus_force()
@@ -219,14 +224,14 @@ class AutosaveTests(unittest.TestCase):
         entry.insert(0, "-12.34")
         entry.event_generate("<Return>")
         self.pump()
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], -1234)
-        self.assertEqual(self.app.account_editing, "Checking")
+        self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '-12.34')
+        self.assertEqual(self.app.account_editing, account_key("Checking"))
         self.shortcut("<Control-z>", self.app.accounts_tree)
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], 100000)
-        self.assertEqual(self.app.account_vars["opening"].get(), "1000.00")
+        self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '1000')
+        self.assertEqual(self.app.account_vars["opening"].get(), "1000")
         self.shortcut("<Control-y>", self.app.accounts_tree)
-        self.assertEqual(self.repo.get_account("Checking")["opening_cents"], -1234)
-        self.assertEqual(self.app.accounts_tree.set("Checking", "balance"), "$-12.34")
+        self.assertEqual(self.repo.get_account("Checking")['opening_amount'], '-12.34')
+        self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '-12.34')
 
     def test_expanded_notes_global_undo_does_not_run_tk_local_undo_twice(self):
         flow = self.seed()
@@ -264,7 +269,7 @@ class AutosaveTests(unittest.TestCase):
         self.pump()
         self.assertFalse(self.app.history.can_redo)
         self.shortcut("<Control-y>", self.app.ledger)
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 4000)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '40')
 
     def test_new_session_has_empty_history_but_saved_records_remain(self):
         from flowledger.gui import FlowApp
@@ -281,7 +286,7 @@ class AutosaveTests(unittest.TestCase):
         self.assertFalse(self.app.history.can_undo)
         self.assertFalse(self.app.history.can_redo)
         self.shortcut("<Control-z>")
-        self.assertEqual(self.repo.get_flow(original["flow_id"])["amount_cents"], 3300)
+        self.assertEqual(self.repo.get_flow(original["flow_id"])['amount'], '33')
 
     def test_swapping_endpoints_can_move_between_fields_without_partial_write(self):
         flow = self.seed()
@@ -310,9 +315,9 @@ class AutosaveTests(unittest.TestCase):
         original = self.seed()
         source = Path(self.directory.name) / "records.json"
         source.write_text(json.dumps([
-            dict(date="2026-10-04", from_account="Checking", to_account="Imported shop",
+            dict(units="USD", date="2026-10-04", from_account="Checking", to_account="Imported shop",
                  amount="12.34", name="First imported", category="Imported category", tags=["Imported tag"]),
-            dict(date="2026-10-05 11:12:13", from_account="Checking", to_account="Imported shop",
+            dict(units="USD", date="2026-10-05 11:12:13", from_account="Checking", to_account="Imported shop",
                  amount="56.78", name="Second imported", status="Planned")]), encoding="utf-8")
         with patch("flowledger.gui.filedialog.askopenfilename", return_value=str(source)):
             self.app.import_records()
@@ -350,7 +355,7 @@ class AutosaveTests(unittest.TestCase):
         self.app.account_save_button.invoke()
         self.pump()
         saved = self.repo.get_account("Cash")
-        self.assertEqual(saved, dict(name="Cash", opening_cents=1500, opening_at="2026-10-03 12:34:56"))
+        self.assertEqual(saved, dict(name="Cash", units="USD", opening_amount='15', opening_at="2026-10-03 12:34:56"))
         self.assertIsNone(self.app.account_editing)
         self.shortcut("<Control-z>", self.app.accounts_tree)
         self.assertIsNone(self.repo.get_account("Cash"))
@@ -360,8 +365,8 @@ class AutosaveTests(unittest.TestCase):
     def test_ctrl_s_preserves_new_and_repeated_drafts_without_validating_or_adding(self):
         saved = self.seed()
         for fields in ({}, {"from_account": "Checking"},
-                       {"from_account": "Checking", "to_account": "Shop", "amount": ".50"},
-                       {"date": "invalid", "amount": "invalid"}):
+                       {"units": "USD", "from_account": "Checking", "to_account": "Shop", "amount": ".50"},
+                       {"units": "USD", "date": "invalid", "amount": "invalid"}):
             with self.subTest(fields=fields):
                 self.app.new_flow()
                 for key, value in fields.items():
@@ -406,7 +411,7 @@ class AutosaveTests(unittest.TestCase):
         self.shortcut("<Control-s>", entry)
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
         self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
-        self.assertIn("dollars and cents", self.app.form_feedback.get())
+        self.assertIn("decimal quantity", self.app.form_feedback.get())
         self.assertNotEqual(self.app.status_message.get(), "Saved")
 
     def test_new_and_add_reset_undo_baseline_when_date_keeps_focus(self):
@@ -421,7 +426,7 @@ class AutosaveTests(unittest.TestCase):
         date.insert(0, "2026-11-12")
         self.shortcut("<Control-z>", date)
         self.assertEqual(date.get(), default_date)
-        for key, value in dict(from_account="Checking", to_account="Shop", amount="33.00").items():
+        for key, value in dict(units="USD", from_account="Checking", to_account="Shop", amount="33.00").items():
             self.app.form_vars[key].set(value)
         self.app.save_button.invoke()
         self.pump()

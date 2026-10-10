@@ -20,8 +20,8 @@ class LedgerInlineEditingTests(unittest.TestCase):
 
         self.directory = tempfile.TemporaryDirectory()
         self.repo = Repository(Path(self.directory.name) / "inline.sqlite3")
-        self.repo.save_account("Checking", 100000)
-        self.repo.save_account("AmEx", 0)
+        self.repo.save_account("Checking", '1000')
+        self.repo.save_account("AmEx", '0')
         self.errors = []
         errors = self.errors
 
@@ -70,7 +70,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
 
     def seed(self, **changes):
-        data = dict(date="2026-10-02", from_account="Checking", to_account="Shop",
+        data = dict(units="USD", date="2026-10-02", from_account="Checking", to_account="Shop",
                     amount="20.00", status="Complete", name="Purchase",
                     category="Dining", tags=["Original"], notes="Original notes")
         data.update(changes)
@@ -170,7 +170,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         changes = [("date", "2026-10-07", "date", "date", "2026-10-07"),
                    ("from_account", "AmEx", "from_account", "from_account", "AmEx"),
                    ("to_account", "Marina", "to_account", "to_account", "Marina"),
-                   ("amount_cents", "38.20", "amount", "amount_cents", 3820),
+                   ('amount', "38.20", "amount", 'amount', '38.2'),
                    ("status", "Pending", "status", "status", "Pending"),
                    ("name", "Boat parts", "name", "name", "Boat parts corrected"),
                    ("category", "Boat", "category", "category", "Boat"),
@@ -194,9 +194,9 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), notes)
         self.finish_cell()
         saved = self.repo.get_flow(flow["flow_id"])
-        self.assertEqual(saved, {**flow, "date": "2026-10-07",
+        self.assertEqual(saved, {"units": "USD", **flow, "date": "2026-10-07",
                                 "from_account": "AmEx", "to_account": "Marina",
-                                "amount_cents": 3820, "status": "Pending",
+                                'amount': '38.2', "status": "Pending",
                                 "name": "Boat parts corrected", "category": "Boat",
                                 "tags": ["Fall", "Trailer, repair"], "notes": notes})
         self.assertEqual(self.app.ledger.selection(), (flow["flow_id"],))
@@ -346,13 +346,13 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assert_closed()
         self.click_cell(original)
         self.assertEqual(self.app.editing_id, original["flow_id"])
-        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
+        self.assertEqual(self.app.form_vars["amount"].get(), "20")
         self.assertEqual(self.repo.list_flows(), [original])
 
     def test_invalid_cell_values_remain_correctable_without_partial_database_changes(self):
         flow = self.seed()
         for column, invalid, correct, stored_field, stored in (
-                ("amount_cents", "12.345", "12.34", "amount_cents", 1234),
+                ('amount', "invalid", "12.34", 'amount', '12.34'),
                 ("date", "2026-02-30", "2026-10-07", "date", "2026-10-07")):
             with self.subTest(field=column):
                 original = self.repo.get_flow(flow["flow_id"])
@@ -417,7 +417,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         entry = self.replace_cell(flow, "name", "New name")
         entry.event_generate("<Tab>")
         self.pump()
-        self.assertEqual(self.app.ledger_editor.field, "category")
+        self.assertEqual(self.app.ledger_editor.field, "from_account")
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "New name")
         self.assertEqual(len(self.repo.list_flows()), 2)
 
@@ -469,7 +469,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         original_notes = "First line\nSecond line\nThird line\nFourth line"
         flow = self.seed(notes=original_notes)
         for index in range(45):
-            self.repo.save_flow(dict(date="2026-10-03", from_account="Checking",
+            self.repo.save_flow(dict(units="USD", date="2026-10-03", from_account="Checking",
                                      to_account="Shop", amount="1.00", name=f"Row {index}"))
         self.app.refresh_all()
         self.app.ledger.see(flow["flow_id"])
@@ -499,16 +499,16 @@ class LedgerInlineEditingTests(unittest.TestCase):
     def test_resize_keeps_editor_on_its_cell_and_scrolling_dismisses_it(self):
         flow = self.seed(date="2026-10-04")
         for index in range(45):
-            self.repo.save_flow(dict(date="2026-10-03", from_account="Checking",
+            self.repo.save_flow(dict(units="USD", date="2026-10-03", from_account="Checking",
                                      to_account="Shop", amount="1.00", name=f"Row {index}"))
         self.app.refresh_all()
         self.pump()
-        self.replace_cell(flow, "amount_cents", "33.00")
+        self.replace_cell(flow, 'amount', "33.00")
         widget = self.app.ledger_editor.widget
         for geometry in ("1200x780+0+0", "1500x900+0+0"):
             self.app.geometry(geometry)
             self.pump()
-            bounds = self.app.ledger.bbox(flow["flow_id"], "amount_cents")
+            bounds = self.app.ledger.bbox(flow["flow_id"], 'amount')
             self.assertTrue(bounds)
             self.assertEqual((widget.winfo_x(), widget.winfo_y(),
                               widget.winfo_width(), widget.winfo_height()), bounds)
@@ -516,8 +516,8 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.pump()
         self.assertFalse(widget.winfo_exists())
         self.assert_closed()
-        self.assertEqual(self.app.form_vars["amount"].get(), "33.00")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 3300)
+        self.assertEqual(self.app.form_vars["amount"].get(), "33")
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '33')
 
     def test_f2_and_note_newline_keep_editing_until_control_enter(self):
         flow = self.seed(notes="First line")
@@ -547,20 +547,20 @@ class LedgerInlineEditingTests(unittest.TestCase):
 
     def test_escape_reverts_unfinished_cell_and_control_s_finishes_without_duplicate(self):
         flow = self.seed()
-        entry = self.replace_cell(flow, "amount_cents", "44.00")
+        entry = self.replace_cell(flow, 'amount', "44.00")
         entry.focus_force()
         self.pump()
         entry.event_generate("<Escape>")
         self.pump()
         self.assert_closed()
-        self.assertEqual(self.app.form_vars["amount"].get(), "20.00")
+        self.assertEqual(self.app.form_vars["amount"].get(), "20")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        entry = self.replace_cell(flow, "amount_cents", "44.00")
+        entry = self.replace_cell(flow, 'amount', "44.00")
         entry.focus_force()
         self.pump()
         entry.event_generate("<Control-s>")
         self.settle()
-        self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount_cents"], 4400)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])['amount'], '44')
         self.assertEqual(self.app.editing_id, flow["flow_id"])
         self.assertEqual(len(self.repo.list_flows()), 1)
 

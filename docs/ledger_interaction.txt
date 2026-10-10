@@ -1,4 +1,4 @@
-Flow 0.5.12: native X11 XTest mouse and keyboard audit
+Native X11 XTest interaction audit
 PASS: 19 workflows; 0 callback exceptions.
 
 PASS Moving from suggestions to the native Status list closes the old popup without focus errors

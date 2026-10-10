@@ -5,7 +5,7 @@ fixtures = {}
 
 
 def seed_accounts(repo):
-    repo.save_account("Unused", 100000)
+    repo.save_account("Unused", '1000')
     for day, source, destination, status, name, category, tag, amount in (
         (1, "Checking", "Diner", "Complete", "Lunch", "Dining", "Trip", "12"),
         (2, "AmEx", "Shop", "Pending", "Groceries", "Groceries", "Work", "25"),
@@ -14,7 +14,7 @@ def seed_accounts(repo):
         (5, "Cash", "Shop", "Planned", "Supplies", "Groceries", "Trip", "8"),
     ):
         fixtures[name] = repo.save_flow(dict(date=f"2026-10-0{day} 12:34:56", from_account=source,
-            to_account=destination, amount=amount, status=status, name=name, category=category,
+            to_account=destination, amount=amount, units="USD", status=status, name=name, category=category,
             tags=[tag], notes="Checking mentioned in notes"))
 
 
@@ -103,7 +103,7 @@ try:
     replace(app.search_entry, "lunch")
     assert names() == {"Lunch"}
     assert [value.get() for value in app.metric_vars] == ["1", "0", "1"]
-    assert app.report_summary.get() == "Complete · $12.00 flow volume"
+    assert app.report_summary.get() == "Complete · 12 USD"
     source = open_filter("From")
     assert "Checking Reserve" in source.checkbuttons and "Shop" in source.checkbuttons
     assert "Unused" not in source.checkbuttons

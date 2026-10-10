@@ -22,7 +22,7 @@ class WindowTests(unittest.TestCase):
                 errors.append(str(error))
 
         self.repo = Repository(":memory:")
-        self.repo.save_account("Checking", 10000)
+        self.repo.save_account("Checking", "100")
         self.app = CheckedApp(self.repo)
         self.app.update()
         self.app.focus_force()
@@ -70,7 +70,7 @@ class WindowTests(unittest.TestCase):
         self.assertFalse(self.app._fullscreen_requested)
 
     def test_escape_reverts_existing_field_then_exits_fullscreen(self):
-        flow = self.repo.save_flow(dict(date="2026-10-02", from_account="Checking",
+        flow = self.repo.save_flow(dict(units="USD", date="2026-10-02", from_account="Checking",
                                        to_account="Shop", amount="12.34"))
         self.app.refresh_all()
         self.app.ledger.selection_set(flow["flow_id"])

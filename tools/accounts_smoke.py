@@ -7,25 +7,25 @@ from pathlib import Path
 
 
 def seed_account_data(repo):
-    for name, cents, date in (
-        ("AmEx", -25000, "2026-10-01"),
-        ("Checking", 100000, "2026-10-01 09:10:11"),
-        ("Savings", 50000, "2026-10-01"),
+    for name, amount, date in (
+        ("AmEx", "-250", "2026-10-01"),
+        ("Checking", "1000", "2026-10-01 09:10:11"),
+        ("Savings", "500", "2026-10-01"),
         ("Unknown", None, "2026-10-01"),
         ("Zero", 0, "2026-10-01"),
     ):
-        repo.save_account(name, cents, date)
+        repo.save_account(name, amount, date)
     for index in range(45):
-        repo.save_account(f"Z reserve {index:02d}", index * 100, "2026-10-01")
+        repo.save_account(f"Z reserve {index:02d}", str(index), "2026-10-01")
     for account in repo.list_accounts():
         if account["name"] not in ("Checking", "AmEx", "Savings"):
             repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                                to_account=account["name"], amount="1", status="Void"))
+                                to_account=account["name"], amount="1", units="USD", status="Void"))
     repo.save_flow(dict(date="2026-10-02 12:00:00", from_account="Checking",
-                        to_account="AmEx", amount="12.34", status="Complete",
+                        to_account="AmEx", amount="12.34", units="USD", status="Complete",
                         name="Card payment"))
     repo.save_flow(dict(date="2026-10-03 12:00:00", from_account="Checking",
-                        to_account="Savings", amount="23.45", status="Pending",
+                        to_account="Savings", amount="23.45", units="USD", status="Pending",
                         name="Pending transfer"))
 
 
@@ -47,9 +47,9 @@ def double_cell(name, column):
     # Queue the two physical clicks before Tk handles either one. Pumping
     # between them would let a row-change dialog interrupt the gesture.
     pump(.55)
-    app.accounts_tree.see(name)
+    app.accounts_tree.see(account_iid(name))
     pump(.05)
-    bounds = app.accounts_tree.bbox(name, column)
+    bounds = app.accounts_tree.bbox(account_iid(name), column)
     assert bounds, (name, column)
     x0, y0, width, height = bounds
     visible_height = min(height, app.accounts_tree.winfo_height() - y0 - 2)
@@ -67,7 +67,7 @@ def edit_cell(name, column):
     double_cell(name, column)
     controller = app.account_cell_editor
     assert controller.widget is not None, (name, column, "No cell editor")
-    assert controller.flow_id == name and controller.field == column
+    assert controller.flow_id == account_iid(name) and controller.field == column
     assert controller.input.winfo_viewable()
     return controller.input
 
@@ -77,7 +77,7 @@ def saved(name):
 
 
 def preview(name, column):
-    return app.accounts_tree.set(name, column)
+    return app.accounts_tree.set(account_iid(name), column)
 
 
 def editor_closed():
@@ -103,7 +103,7 @@ def aligned_or_closed(name, column):
     if controller.widget is None:
         assert not popups()
         return
-    bounds = app.accounts_tree.bbox(name, column)
+    bounds = app.accounts_tree.bbox(account_iid(name), column)
     assert bounds, "Account editor remains after its row disappeared"
     x0, y0, width, height = bounds
     widget = controller.widget
@@ -136,65 +136,65 @@ try:
     original = saved("Checking")
     confirmed = preview("Checking", "confirmed")
     pending = preview("Checking", "pending")
-    assert confirmed == "$987.66" and pending == "$964.21"
+    assert confirmed == "987.66" and pending == "964.21"
     replace_all(edit_cell("Checking", "balance"), "1234.56")
     assert app.account_vars["opening"].get() == "1234.56"
-    assert preview("Checking", "balance") == "$1,234.56"
+    assert preview("Checking", "balance") == "1,234.56"
     assert saved("Checking") == original
     assert preview("Checking", "confirmed") == confirmed
     key("Return")
     editor_closed()
-    assert saved("Checking")["opening_cents"] == 123456
-    assert preview("Checking", "confirmed") == "$1,222.22"
-    assert preview("Checking", "pending") == "$1,198.77"
-    assert app.account_editing == "Checking"
+    assert saved("Checking")["opening_amount"] == '1234.56'
+    assert preview("Checking", "confirmed") == "1,222.22"
+    assert preview("Checking", "pending") == "1,198.77"
+    assert app.account_editing == account_iid("Checking")
     no_prompt()
     chord("Control_L", "z")
     assert saved("Checking") == original
     assert preview("Checking", "confirmed") == confirmed
     chord("Control_L", "y")
-    assert saved("Checking")["opening_cents"] == 123456
+    assert saved("Checking")["opening_amount"] == '1234.56'
     ok("Enter saves an inline starting balance and recalculates totals; Ctrl+Z/Ctrl+Y restore both values and totals")
 
     row(app.accounts_tree, "Checking")
     replace_all(app.account_widgets["opening"], "1357.90")
-    assert saved("Checking")["opening_cents"] == 123456
+    assert saved("Checking")["opening_amount"] == '1234.56'
     click(app.account_widgets["date"])
-    assert saved("Checking")["opening_cents"] == 135790
+    assert saved("Checking")["opening_amount"] == '1357.9'
     replace_all(edit_cell("Checking", "balance"), "1400.01")
     key("Tab")
     assert app.account_cell_editor.field == "anchor"
-    assert saved("Checking")["opening_cents"] == 140001
+    assert saved("Checking")["opening_amount"] == '1400.01'
     key("Return")
     chord("Control_L", "z")
-    assert saved("Checking")["opening_cents"] == 135790
+    assert saved("Checking")["opening_amount"] == '1357.9'
     chord("Control_L", "z")
-    assert saved("Checking")["opening_cents"] == 123456
+    assert saved("Checking")["opening_amount"] == '1234.56'
     chord("Control_L", "y")
     chord("Control_L", "y")
-    assert saved("Checking")["opening_cents"] == 140001
+    assert saved("Checking")["opening_amount"] == '1400.01'
     ok("Account top fields save on click-away and inline Tab saves once before moving to Starting Date")
 
-    for name, text, cents, display_text in (
-        ("AmEx", "-300.25", -30025, "$-300.25"),
-        ("Zero", "0", 0, "$0.00"),
+    for name, text, amount, display_text in (
+        ("AmEx", "-300.25", "-300.25", "-300.25"),
+        ("Zero", "0", "0", "0"),
         ("Unknown", "", None, "Unknown"),
     ):
         replace_all(edit_cell(name, "balance"), text)
         assert preview(name, "balance") == display_text
         key("Return")
-        assert saved(name)["opening_cents"] == cents
+        assert saved(name)["opening_amount"] == amount
         editor_closed()
     replace_all(edit_cell("Zero", "balance"), "")
     key("Return")
-    assert saved("Zero")["opening_cents"] is None
+    assert saved("Zero")["opening_amount"] is None
     replace_all(edit_cell("Zero", "balance"), "0")
     key("Return")
-    assert saved("Zero")["opening_cents"] == 0
-    for column in ("name", "confirmed", "pending"):
+    assert saved("Zero")["opening_amount"] == '0'
+    for column in ("name", "units", "confirmed", "pending"):
         double_cell("Checking", column)
         editor_closed()
-        assert app.account_editing == "Checking"
+        assert app.account_editing == account_iid("Checking")
         assert str(app.account_name_entry.cget("state")) == "disabled"
         assert saved("Checking")["name"] == "Checking"
     click(app.account_new_button)
@@ -218,29 +218,29 @@ try:
 
     replace_all(edit_cell("Checking", "balance"), "2000.25")
     double_cell("AmEx", "balance")
-    assert saved("Checking")["opening_cents"] == 200025
-    assert app.account_editing == "AmEx" and app.account_cell_editor.flow_id == "AmEx"
+    assert saved("Checking")["opening_amount"] == '2000.25'
+    assert app.account_editing == account_iid("AmEx") and app.account_cell_editor.flow_id == account_iid("AmEx")
     replace_all(app.account_cell_editor.input, "-400.75")
     double_cell("Checking", "balance")
-    assert saved("AmEx")["opening_cents"] == -40075
-    assert app.account_editing == "Checking"
+    assert saved("AmEx")["opening_amount"] == '-400.75'
+    assert app.account_editing == account_iid("Checking")
     key("Return")
     no_prompt()
     chord("Control_L", "z")
-    assert saved("AmEx")["opening_cents"] == -30025
+    assert saved("AmEx")["opening_amount"] == '-300.25'
     chord("Control_L", "y")
-    assert saved("AmEx")["opening_cents"] == -40075
+    assert saved("AmEx")["opening_amount"] == '-400.75'
     ok("Switching between account rows saves the old field and opens the right record without confirmations")
 
-    saved_balance = saved("Checking")["opening_cents"]
+    saved_balance = saved("Checking")["opening_amount"]
     replace_all(edit_cell("Checking", "balance"), "oops")
     key("Return")
-    assert app.account_editing == "Checking"
+    assert app.account_editing == account_iid("Checking")
     assert app.account_vars["opening"].get() == "oops"
-    assert saved("Checking")["opening_cents"] == saved_balance
+    assert saved("Checking")["opening_amount"] == saved_balance
     assert app.account_feedback.get()
     key("Escape")
-    assert app.account_vars["opening"].get() == f"{saved_balance / 100:.2f}"
+    assert app.account_vars["opening"].get() == saved_balance
     replace_all(edit_cell("Checking", "anchor"), "2026-99-01")
     key("Return")
     assert saved("Checking")["opening_at"] == "2026-10-01 08:09:10"
@@ -256,7 +256,7 @@ try:
     type_text("1200.25")
     key("Tab")
     assert app.account_cell_editor.field == "anchor"
-    assert saved("Checking")["opening_cents"] == 120025
+    assert saved("Checking")["opening_amount"] == '1200.25'
     key("Shift_L", True)
     key("Tab")
     key("Shift_L", False)
@@ -264,7 +264,7 @@ try:
     type_text("9999.99")
     key("Escape")
     editor_closed()
-    assert saved("Checking")["opening_cents"] == 120025
+    assert saved("Checking")["opening_amount"] == '1200.25'
     assert app.account_vars["opening"].get() == "1200.25"
     ok("F2 and Tab/Shift+Tab navigate editable cells; Escape abandons only the current unfinished field")
 
@@ -279,12 +279,12 @@ try:
     replace_all(app.account_widgets["opening"], "88.25")
     assert str(app.account_save_button.cget("text")) == "Add Account"
     click(app.account_save_button)
-    assert saved("Travel cash")["opening_cents"] == 8825
+    assert saved("Travel cash")["opening_amount"] == '88.25'
     fresh_form()
     chord("Control_L", "z")
     assert "Travel cash" not in [a["name"] for a in repo.list_accounts()]
     chord("Control_L", "y")
-    assert saved("Travel cash")["opening_cents"] == 8825
+    assert saved("Travel cash")["opening_amount"] == '88.25'
     ok("New account drafts are discarded on row selection; Add Account creates one undoable record")
 
     replace_all(edit_cell("Checking", "balance"), "1777.88")
@@ -297,7 +297,7 @@ try:
     wheel_down(app.accounts_tree)
     assert app.accounts_tree.yview() != before_scroll
     aligned_or_closed("Checking", "balance")
-    assert saved("Checking")["opening_cents"] == 177788
+    assert saved("Checking")["opening_amount"] == '1777.88'
     click_text("Flows")
     assert app.current_view == "flows"
     editor_closed()

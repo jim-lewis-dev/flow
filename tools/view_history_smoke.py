@@ -7,15 +7,15 @@ from pathlib import Path
 
 
 def seed_view_data(repo):
-    for name, cents in (("Checking", 100000), ("Savings", 50000), ("Shop", 0)):
-        repo.save_account(name, cents, "2026-10-01")
+    for name, amount in (("Checking", "1000"), ("Savings", "500"), ("Shop", "0")):
+        repo.save_account(name, amount, "2026-10-01")
     for when, target, amount, name, category, status, tags in (
         ("2026-10-02 12:34:56", "Shop", "20", "Lunch", "Dining", "Complete", ["Trip"]),
         ("2026-10-03", "Shop", "30", "Repair", "Boat", "Pending", ["Boat"]),
         ("2026-10-15", "Savings", "50", "Transfer", "Transfer", "Planned", []),
     ):
         repo.save_flow(dict(date=when, from_account="Checking", to_account=target,
-            amount=amount, name=name, category=category, status=status, tags=tags))
+            amount=amount, units="USD", name=name, category=category, status=status, tags=tags))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text().split("try:\n    exec(Path(__file__)", 1)[0]
@@ -83,6 +83,7 @@ def drag_header(tree, source, target):
 
 def double_cell(tree, iid, field):
     pump(.55)
+    if tree is app.accounts_tree and not tree.exists(iid):iid=account_iid(iid)
     tree.see(iid)
     pump(.08)
     bx, by, width, height = tree.bbox(iid, field)
@@ -159,14 +160,14 @@ try:
     click(category.checkbuttons["Boat"])
     assert lunch not in app.ledger_rows
     undo()
-    assert category.get() == () and repo.get_flow(lunch)["amount_cents"] == 75
+    assert category.get() == () and repo.get_flow(lunch)["amount"] == '0.75'
     assert app.editing_id == lunch and app.form_vars["amount"].get() == "0.75"
     key_escape()
     undo()
-    assert repo.get_flow(lunch)["amount_cents"] == 2000
+    assert repo.get_flow(lunch)["amount"] == '20'
     redo()
     redo()
-    assert category.get() == ("Boat",) and repo.get_flow(lunch)["amount_cents"] == 75
+    assert category.get() == ("Boat",) and repo.get_flow(lunch)["amount"] == '0.75'
     undo()
     undo()
     ok("An edit followed by a filter undoes the filter first, then the edit, including hidden rows and redo")
@@ -244,9 +245,9 @@ try:
 
     order = displayed_columns(app.ledger)
     sort = app.sort_column, app.sort_reverse
-    drag_header(app.ledger, "amount_cents", "date")
+    drag_header(app.ledger, "amount", "date")
     moved = displayed_columns(app.ledger)
-    assert moved[0] == "amount_cents", moved
+    assert moved[0] == "amount", moved
     assert (app.sort_column, app.sort_reverse) == sort
     undo()
     assert displayed_columns(app.ledger) == order
@@ -256,16 +257,16 @@ try:
     ImageGrab.grab().save(Path(__file__).resolve().parents[1] / "docs" / "Flow_Columns.png")
     ok("Drag a ledger header across several columns; one undo restores it and dragging does not sort")
 
-    double_cell(app.ledger, lunch, "amount_cents")
+    double_cell(app.ledger, lunch, "amount")
     editor = app.ledger_editor
-    assert editor.field == "amount_cents"
+    assert editor.field == "amount"
     replace(editor.input, ".05")
     key("Tab")
-    assert repo.get_flow(lunch)["amount_cents"] == 5
+    assert repo.get_flow(lunch)["amount"] == '0.05'
     assert editor.field == "date"
     key("Return")
     undo()
-    assert repo.get_flow(lunch)["amount_cents"] == 2000
+    assert repo.get_flow(lunch)["amount"] == '20'
     assert displayed_columns(app.ledger) == moved
     ok("Reordered cells still edit the correct field; Tab follows the visible column order")
 
@@ -295,7 +296,7 @@ try:
     account_order = displayed_columns(app.accounts_tree)
     drag_header(app.accounts_tree, "anchor", "balance")
     account_moved = displayed_columns(app.accounts_tree)
-    assert account_moved[:3] == ("name", "anchor", "balance"), account_moved
+    assert account_moved[:4] == ("name", "units", "anchor", "balance"), account_moved
     undo()
     assert displayed_columns(app.accounts_tree) == account_order
     redo()
@@ -306,9 +307,9 @@ try:
     assert app.account_cell_editor.field == "balance"
     replace(app.account_cell_editor.input, "1000.50")
     key("Return")
-    assert repo.get_account("Checking")["opening_cents"] == 100050
+    assert repo.get_account("Checking")["opening_amount"] == '1000.5'
     undo()
-    assert repo.get_account("Checking")["opening_cents"] == 100000
+    assert repo.get_account("Checking")["opening_amount"] == '1000'
     assert displayed_columns(app.accounts_tree) == account_moved
     ok("Accounts headers reorder too; date/balance editing and visual Tab order survive, calculated cells stay read-only")
 
@@ -361,7 +362,7 @@ try:
     assert app.chart_basis.get() == "Confirmed"
     redo()
     assert app.chart_basis.get() == "Including Pending"
-    click_text("Combine selected accounts")
+    click_text("Combine accounts within each unit")
     assert app.chart_combined.get()
     undo()
     assert not app.chart_combined.get()

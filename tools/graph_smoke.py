@@ -8,18 +8,18 @@ from pathlib import Path
 
 def seed_graph_data(repo):
     anchor = "2026-10-01 00:00:00"
-    repo.save_account("Checking", 100000, anchor)
-    repo.save_account("Savings", 50000, anchor)
+    repo.save_account("Checking", '1000', anchor)
+    repo.save_account("Savings", '500', anchor)
     repo.save_account("Unknown", None, anchor)
     repo.save_flow(dict(date="2026-10-01", from_account="Checking",
-                        to_account="Unknown", amount="1", status="Void"))
+                        to_account="Unknown", amount="1", units="USD", status="Void"))
     for date, source, destination, amount, name in (
         ("2026-10-01", "Checking", "Shop", "12", "Midnight purchase"),
         ("2026-10-02 12:00:00", "Shop", "Checking", "20", "Refund"),
         ("2026-10-02 18:00:00", "Savings", "Checking", "50", "Transfer"),
     ):
         repo.save_flow(dict(date=date, from_account=source, to_account=destination,
-                            amount=amount, name=name, status="Complete"))
+                            amount=amount, units="USD", name=name, status="Complete"))
 
 
 shared = Path(__file__).with_name("ui_smoke.py").read_text()
@@ -38,11 +38,11 @@ def variable_entry(variable):
 def select_accounts(*names):
     click_text("None")
     for name in names:
-        index = app.chart_accounts.get(0, "end").index(name)
+        index = chart_index(name)
         x, y, width, height = app.chart_accounts.bbox(index)
         click_xy(app.chart_accounts.winfo_rootx() + 15,
                  app.chart_accounts.winfo_rooty() + y + height / 2)
-    assert {app.chart_accounts.get(index)
+    assert {app.chart_account_pairs[index][0]
             for index in app.chart_accounts.curselection()} == set(names)
 
 
@@ -116,11 +116,11 @@ try:
     ok("A flow at the graph's first midnight preserves the opening value and the resulting balance")
 
     hover("2026-10-01 12:00:00", 988)
-    tooltip_has("Checking", "$988.00")
+    tooltip_has("Checking", "988")
     hover("2026-10-01 00:00:00", 1000)
-    tooltip_has("Checking", "$1,000.00")
+    tooltip_has("Checking", "1,000")
     hover("2026-10-02 18:00:00", 1033)
-    tooltip_has("Checking", "$1,008.00", "$1,058.00")
+    tooltip_has("Checking", "1,008", "1,058")
     move(start_entry.winfo_rootx() + 5, start_entry.winfo_rooty() + 5)
     assert not app.chart_tooltip.get_visible()
     ok("Native hover shows exact account balances, opening value, and both ends of a vertical change")
@@ -128,29 +128,29 @@ try:
     select_accounts("Checking", "Savings")
     update()
     hover("2026-10-01 12:00:00", 500)
-    tooltip_has("Savings", "$500.00")
+    tooltip_has("Savings", "500")
     click_legend("Savings")
     assert not line("Savings").get_visible()
     hover("2026-10-01 12:00:00", 500)
     assert not app.chart_tooltip.get_visible()
     hover("2026-10-01 12:00:00", 988)
-    assert "Savings" not in tooltip_has("Checking", "$988.00")
+    assert "Savings" not in tooltip_has("Checking", "988")
     click_legend("Savings")
     assert line("Savings").get_visible()
     hover("2026-10-01 12:00:00", 500)
-    tooltip_has("Savings", "$500.00")
+    tooltip_has("Savings", "500")
     ok("Multiple accounts have distinct hover amounts; hidden lines stop responding until shown")
 
-    click_text("Combine selected accounts")
+    click_text("Combine accounts within each unit")
     update()
     combined = list(line("Combined").get_ydata())
     assert combined[:2] == [1500.0, 1488.0], combined
     assert combined[-1] == 1508.0, combined
     hover("2026-10-01 12:00:00", 1488)
-    tooltip_has("Combined", "$1,488.00")
+    tooltip_has("Combined", "1,488")
     ok("Combined plotting preserves the same first instant and counts transfers once per endpoint")
 
-    click_text("Combine selected accounts")
+    click_text("Combine accounts within each unit")
     select_accounts("Unknown")
     update()
     visible_message("Unknown")
@@ -161,14 +161,14 @@ try:
     visible_message("Unknown")
     assert len(app.chart_series) == 1
     assert line("Checking").get_ydata()[-1] == 1058
-    click_text("Combine selected accounts")
+    click_text("Combine accounts within each unit")
     update()
     visible_message("Unknown")
     assert not app.chart_series
     assert any("Combined balance is unknown" in text.get_text() for text in app.axes.texts)
     ok("Missing starting balances are prominent for single, mixed, and combined account selections")
 
-    click_text("Combine selected accounts")
+    click_text("Combine accounts within each unit")
     select_accounts("Checking", "Savings")
     replace(start_entry, "2026-9-30")
     replace(end_entry, "2026-10-3")
@@ -229,7 +229,7 @@ try:
     pump()
     update()
     hover("2026-10-03 12:00:00", 1058)
-    tooltip_has("Checking", "$1,058.00")
+    tooltip_has("Checking", "1,058")
     box = app.chart_tooltip.get_window_extent(app.canvas.get_renderer())
     bounds = app.figure.bbox
     assert box.x0 >= bounds.x0 and box.x1 <= bounds.x1, (box, bounds)
@@ -243,7 +243,7 @@ try:
     pump()
     update()
     hover("2026-10-02 08:00:00", 988)
-    tooltip_has("Checking", "$988.00")
+    tooltip_has("Checking", "988")
     docs = Path(__file__).resolve().parents[1] / "docs"
     ImageGrab.grab().save(docs / "Flow_Graphs.png")
 

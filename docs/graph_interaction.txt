@@ -1,4 +1,4 @@
-Flow 0.5.12: native X11 XTest mouse and keyboard audit
+Native X11 XTest interaction audit
 PASS: 10 workflows; 0 callback exceptions.
 
 PASS Startup requests fullscreen and a native Escape key returns to windowed mode
@@ -11,3 +11,5 @@ PASS Typed month/day values without leading zeros normalize and graph successful
 PASS Invalid dates and reversed ranges display visible errors and clear stale graph contents
 PASS Both calendars select dates; month navigation, Escape, switching calendars, and outside click work without origin flashing
 PASS Resized graphs keep the date controls and edge hover labels visible
+
+Limitations: Xvfb has no window manager or physical monitor layout; this audit does not verify fullscreen placement across real monitors.

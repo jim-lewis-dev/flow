@@ -1,13 +1,18 @@
--- Flowledger schema v4. Account/category/tag names are their identities.
--- Integer cents avoid floating-point rounding; one flow changes both endpoints.
+-- Flowledger schema v5. Names identify accounts; units distinguish quantities.
+-- Exact decimal text avoids rounding. Starting balances belong to account/unit pairs.
 PRAGMA application_id = 1179406167;
-PRAGMA user_version = 4;
+PRAGMA user_version = 5;
 
 CREATE TABLE accounts (
     account_key TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    opening_cents INTEGER CHECK(opening_cents IS NULL OR typeof(opening_cents) = 'integer'),
-    opening_at TEXT NOT NULL
+    name TEXT NOT NULL
+);
+CREATE TABLE account_balances (
+    account_key TEXT NOT NULL REFERENCES accounts(account_key),
+    units TEXT NOT NULL CHECK(typeof(units) = 'text' AND length(trim(units)) > 0),
+    opening_amount TEXT CHECK(opening_amount IS NULL OR typeof(opening_amount) = 'text'),
+    opening_at TEXT NOT NULL,
+    PRIMARY KEY(account_key, units)
 );
 CREATE TABLE categories (category_key TEXT PRIMARY KEY, name TEXT NOT NULL);
 CREATE TABLE tags (tag_key TEXT PRIMARY KEY, name TEXT NOT NULL);
@@ -16,14 +21,17 @@ INSERT INTO categories VALUES ('uncategorized', 'Uncategorized');
 CREATE TABLE flows (
     flow_id TEXT PRIMARY KEY,
     date TEXT NOT NULL,
-    from_key TEXT NOT NULL REFERENCES accounts(account_key),
-    to_key TEXT NOT NULL REFERENCES accounts(account_key),
-    amount_cents INTEGER NOT NULL CHECK(typeof(amount_cents) = 'integer' AND amount_cents > 0),
+    from_key TEXT NOT NULL,
+    to_key TEXT NOT NULL,
+    amount TEXT NOT NULL CHECK(typeof(amount) = 'text' AND length(amount) > 0),
+    units TEXT NOT NULL CHECK(typeof(units) = 'text' AND length(trim(units)) > 0),
     status TEXT NOT NULL CHECK(status IN ('Complete', 'Pending', 'Planned', 'Void')),
     name TEXT NOT NULL,
     notes TEXT NOT NULL DEFAULT '',
     category_key TEXT NOT NULL REFERENCES categories(category_key),
-    CHECK(from_key <> to_key)
+    CHECK(from_key <> to_key),
+    FOREIGN KEY(from_key, units) REFERENCES account_balances(account_key, units),
+    FOREIGN KEY(to_key, units) REFERENCES account_balances(account_key, units)
 );
 CREATE INDEX flows_date ON flows(datetime(date), flow_id);
 CREATE INDEX flows_from ON flows(from_key, date);

@@ -1,4 +1,5 @@
 """End-to-end example arithmetic with independently computed dollar results."""
+from decimal import Decimal
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,11 +25,11 @@ class DemoIntegrationTests(unittest.TestCase):
 
     def test_demo_confirmed_and_pending_totals(self):
         # $7,960 opening - $152.75 purchases + $5 refund. Card payment is neutral.
-        self.assertEqual(self.total("2026-10-02 23:59:59"), 781225)
-        self.assertEqual(self.total("2026-10-02 23:59:59", statuses=("Complete", "Pending")), 771485)
+        self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
+        self.assertEqual(self.total("2026-10-02 23:59:59", statuses=("Complete", "Pending")), Decimal("7714.85"))
 
     def test_planned_flows_are_plain_records_selected_by_status(self):
-        self.assertEqual(self.total("2026-12-31 23:59:59", ("Complete", "Pending", "Planned")), 1490985)
+        self.assertEqual(self.total("2026-12-31 23:59:59", ("Complete", "Pending", "Planned")), Decimal("14909.85"))
         self.assertEqual(len(self.repo.list_flows()), 17)
         self.assertTrue(all("scenario" not in row for row in self.repo.list_flows()))
 
@@ -48,7 +49,7 @@ class DemoIntegrationTests(unittest.TestCase):
         first = self.repo.list_flows()[0]
         self.repo.void_flow(first["flow_id"])
         self.repo.restore(snapshot)
-        self.assertEqual(self.total("2026-10-02 23:59:59"), 781225)
+        self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
         self.assertEqual(len(self.repo.list_flows()), 17)
 
 

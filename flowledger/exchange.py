@@ -1,11 +1,12 @@
 """Previewed, atomic flow import and portable CSV/JSON export.
 
-The canonical export has the nine flow fields plus ``flow_id``: ``date``,
-``from_account``, ``to_account``, ``amount`` (an exact decimal string),
-``status``, ``name``, ``notes``, ``category``, and ``tags`` (a string array).
+The canonical export has the ten flow fields plus ``flow_id``: ``date``,
+``name``, ``from_account``, ``to_account``, ``amount`` (an exact decimal string),
+``units``, ``status``, ``category``, ``tags`` (a string array), and ``notes``.
 Dates retain optional time: a date alone stays a date alone; an entered time
-is normalized to seconds. ``from`` and ``to`` are accepted import aliases;
-``amount_cents`` is accepted instead of ``amount``. CSV tags may use ``|``.
+is normalized to seconds. ``from`` and ``to`` are accepted import aliases.
+Units are required, case-sensitive labels; quantities are not limited to
+currency precision. CSV tags may use ``|``.
 
 Preview performs no writes. Repeated IDs with identical content are skipped;
 conflicting IDs abort the batch; equal content with a new or missing ID needs
@@ -23,16 +24,15 @@ import tempfile
 from typing import Any, Iterable
 import uuid
 
-from .core import STATUSES, normalize_flow_date, parse_money
+from .core import STATUSES, normalize_flow_date, parse_quantity, quantity_text
 
 
 EXPORT_FIELDS = (
-    "flow_id", "date", "from_account", "to_account", "amount", "status",
-    "name", "notes", "category", "tags",
+    "flow_id", "date", "name", "from_account", "to_account", "amount", "units",
+    "status", "category", "tags", "notes",
 )
 _ALIASES = {"from": "from_account", "to": "to_account"}
-_IMPORT_FIELDS = frozenset(EXPORT_FIELDS) | {"amount_cents"}
-_MAX_CENTS = (1 << 63) - 1
+_IMPORT_FIELDS = frozenset(EXPORT_FIELDS)
 
 
 def _key(value: str) -> str:
@@ -137,6 +137,7 @@ def _canonical(row: Any, accounts: dict[str, str],
     if not isinstance(row, dict):
         raise ValueError("Each flow must be an object or CSV row.")
     row = _headers(row)
+    units = _text(row.get("units", ""), "units", required=True)
     unsupported = sorted(set(row) - _IMPORT_FIELDS)
     if unsupported:
         raise ValueError("Unsupported fields: " + ", ".join(unsupported) + ".")
@@ -147,31 +148,11 @@ def _canonical(row: Any, accounts: dict[str, str],
     destination = accounts.get(_key(destination), destination)
     if _key(source) == _key(destination):
         raise ValueError("From and To must be different accounts.")
-    has_amount = "amount" in row and row["amount"] not in (None, "")
-    has_cents = "amount_cents" in row and row["amount_cents"] not in (None, "")
-    if not has_amount and not has_cents:
+    if "amount" not in row or row["amount"] in (None, ""):
         raise ValueError("amount is required.")
-    amount_cents = None
-    if has_amount:
-        if isinstance(row["amount"], bool):
-            raise ValueError("amount must be a decimal amount, not a boolean.")
-        amount_cents = parse_money(row["amount"])
-    if has_cents:
-        cents = row["amount_cents"]
-        if isinstance(cents, str):
-            try:
-                if str(int(cents)) != cents.strip():
-                    raise ValueError
-                cents = int(cents)
-            except ValueError as exc:
-                raise ValueError("amount_cents must be an integer.") from exc
-        if isinstance(cents, bool) or not isinstance(cents, int):
-            raise ValueError("amount_cents must be an integer.")
-        if amount_cents is not None and amount_cents != cents:
-            raise ValueError("amount and amount_cents disagree.")
-        amount_cents = cents
-    if amount_cents <= 0 or amount_cents > _MAX_CENTS:
-        raise ValueError("amount must be positive and fit in a signed 64-bit number of cents.")
+    amount = parse_quantity(row["amount"])
+    if amount <= 0:
+        raise ValueError("amount must be greater than zero.")
     status = _text(row.get("status", "Complete"), "status") or "Complete"
     if status not in STATUSES:
         raise ValueError("status must be Complete, Pending, Planned, or Void.")
@@ -182,7 +163,7 @@ def _canonical(row: Any, accounts: dict[str, str],
     parsed_tags = [tags.get(_key(tag), tag) for tag in _parse_tags(row.get("tags", []))]
     result = {"date": date,
               "from_account": source, "to_account": destination,
-              "amount_cents": amount_cents, "status": status, "name": name,
+              "amount": quantity_text(amount), "units": units, "status": status, "name": name,
               "notes": notes, "category": category, "tags": parsed_tags}
     flow_id = row.get("flow_id")
     if flow_id not in (None, ""):
@@ -195,9 +176,9 @@ def _canonical(row: Any, accounts: dict[str, str],
 
 
 def _fingerprint(data: dict) -> tuple:
-    """Semantic payload identity; account/category/tag casing is immaterial."""
+    """Payload identity, retaining unit case and normalizing quantities/labels."""
     return (normalize_flow_date(data["date"]), _key(data["from_account"]),
-            _key(data["to_account"]), data["amount_cents"], data["status"],
+            _key(data["to_account"]), quantity_text(data["amount"]), data["units"], data["status"],
             data["name"].strip(), data["notes"], _key(data["category"]),
             tuple(sorted({_key(tag) for tag in data["tags"]})))
 
@@ -285,12 +266,12 @@ def export_flows(repo, path: str | os.PathLike) -> int:
         raise ValueError("Choose a .csv or .json export file.")
     rows = []
     for flow in repo.list_flows():
-        cents = flow["amount_cents"]
         rows.append({"flow_id": flow["flow_id"], "date": flow["date"],
+                     "name": flow["name"],
                      "from_account": flow["from_account"], "to_account": flow["to_account"],
-                     "amount": f"{cents // 100}.{cents % 100:02d}", "status": flow["status"],
-                     "name": flow["name"], "notes": flow["notes"], "category": flow["category"],
-                     "tags": list(flow["tags"])})
+                     "amount": quantity_text(flow["amount"]), "units": flow["units"],
+                     "status": flow["status"], "category": flow["category"],
+                     "tags": list(flow["tags"]), "notes": flow["notes"]})
     temporary = None
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="", delete=False,
