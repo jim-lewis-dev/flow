@@ -1,4 +1,4 @@
-Flow 0.5.16 automated regression tests
+Flow 0.5.17 automated regression tests
 Command: python3 -m unittest discover -s tests -v
 Display: isolated Xvfb 1920x1200
 
@@ -152,6 +152,13 @@ test_units_are_case_sensitive_in_duplicate_detection (test_exchange.ExchangeTest
 test_units_are_required_for_csv_json_and_preview (test_exchange.ExchangeTests.test_units_are_required_for_csv_json_and_preview) ... ok
 test_unknown_fields_are_rejected_without_writes (test_exchange.ExchangeTests.test_unknown_fields_are_rejected_without_writes) ... ok
 test_unsupported_cents_input_and_missing_units_never_infer_currency (test_exchange.ExchangeTests.test_unsupported_cents_input_and_missing_units_never_infer_currency) ... ok
+test_control_and_drag_undo_redo_change_only_session_view (test_experimental_integration.ExperimentalIntegrationTests.test_control_and_drag_undo_redo_change_only_session_view) ... ok
+test_current_ledger_filters_then_unit_date_and_status_basis (test_experimental_integration.ExperimentalIntegrationTests.test_current_ledger_filters_then_unit_date_and_status_basis) ... ok
+test_empty_range_error_keeps_prior_map_and_resizes (test_experimental_integration.ExperimentalIntegrationTests.test_empty_range_error_keeps_prior_map_and_resizes) ... ok
+test_filter_change_while_map_visible_refreshes_and_detail_opens_ledger (test_experimental_integration.ExperimentalIntegrationTests.test_filter_change_while_map_visible_refreshes_and_detail_opens_ledger) ... ok
+test_last_tab_groups_equal_instants_and_steps_with_exact_labels (test_experimental_integration.ExperimentalIntegrationTests.test_last_tab_groups_equal_instants_and_steps_with_exact_labels) ... ok
+test_play_advances_to_last_instant_without_writing_records (test_experimental_integration.ExperimentalIntegrationTests.test_play_advances_to_last_instant_without_writing_records) ... ok
+test_play_tab_change_and_close_cancel_deferred_animation (test_experimental_integration.ExperimentalIntegrationTests.test_play_tab_change_and_close_cancel_deferred_animation) ... ok
 test_disabled_controls_and_destroy_cancel_pending_focus_work (test_filter_widget.CheckFilterTests.test_disabled_controls_and_destroy_cancel_pending_focus_work) ... ok
 test_empty_captions_are_consistent_and_custom_all_label_is_retained (test_filter_widget.CheckFilterTests.test_empty_captions_are_consistent_and_custom_all_label_is_retained) ... ok
 test_entry_handoff_then_new_filter_keeps_keyboard_focus (test_filter_widget.CheckFilterTests.test_entry_handoff_then_new_filter_keeps_keyboard_focus) ... ok
@@ -174,6 +181,12 @@ test_deleting_void_record_is_distinct_from_voiding (test_flow_delete_core.Delete
 test_failed_audit_rolls_back_deletion_and_cascaded_tags (test_flow_delete_core.DeleteFlowTests.test_failed_audit_rolls_back_deletion_and_cascaded_tags) ... ok
 test_repeated_undo_redo_preserves_exact_record_tags_and_identity (test_flow_delete_core.DeleteFlowTests.test_repeated_undo_redo_preserves_exact_record_tags_and_identity) ... ok
 test_unknown_flow_changes_neither_database_nor_redo (test_flow_delete_core.DeleteFlowTests.test_unknown_flow_changes_neither_database_nor_redo) ... ok
+test_bad_range_status_and_dates_raise (test_flow_motion.EventSelectionTests.test_bad_range_status_and_dates_raise) ... ok
+test_grouped_midnight_and_explicit_midnight_are_one_instant (test_flow_motion.EventSelectionTests.test_grouped_midnight_and_explicit_midnight_are_one_instant) ... ok
+test_inclusive_day_boundary_explicit_second_and_stable_ties (test_flow_motion.EventSelectionTests.test_inclusive_day_boundary_explicit_second_and_stable_ties) ... ok
+test_status_and_unit_are_exact_and_canceled_always_excluded (test_flow_motion.EventSelectionTests.test_status_and_unit_are_exact_and_canceled_always_excluded) ... ok
+test_invalid_or_nonpositive_quantities_rejected (test_flow_motion.PulseTests.test_invalid_or_nonpositive_quantities_rejected) ... ok
+test_scaled_fraction_and_huge_exact_amounts_are_bounded (test_flow_motion.PulseTests.test_scaled_fraction_and_huge_exact_amounts_are_bounded) ... ok
 test_combined_keeps_start_transition_and_hover (test_graph_ui.GraphUiTests.test_combined_keeps_start_transition_and_hover) ... ok
 test_export_excludes_hover_annotation (test_graph_ui.GraphUiTests.test_export_excludes_hover_annotation) ... ok
 test_hidden_lines_and_redraw_remove_old_tooltip (test_graph_ui.GraphUiTests.test_hidden_lines_and_redraw_remove_old_tooltip) ... ok
@@ -490,8 +503,5 @@ test_entry_dropdown_closes_first_then_escape_exits_fullscreen (test_window.Windo
 test_escape_reverts_existing_field_then_exits_fullscreen (test_window.WindowTests.test_escape_reverts_existing_field_then_exits_fullscreen) ... ok
 test_filter_button_without_popup_does_not_swallow_escape (test_window.WindowTests.test_filter_button_without_popup_does_not_swallow_escape) ... ok
 test_startup_requests_fullscreen_escape_preserves_draft (test_window.WindowTests.test_startup_requests_fullscreen_escape_preserves_draft) ... ok
-
-----------------------------------------------------------------------
-Ran 488 tests in 87.468s
-
+Ran 501 tests in 94.376s
 OK

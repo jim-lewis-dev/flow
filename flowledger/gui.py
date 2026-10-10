@@ -28,6 +28,7 @@ from .ledger_editor import LedgerEditor
 from .account_editor import AccountEditor
 from .history import SessionHistory
 from .view_history import ViewHistory
+from .experimental import ExperimentalView
 from .units import decimal_places, format_display
 from .table_columns import ColumnDrag, displayed_columns
 
@@ -105,6 +106,7 @@ class FlowApp(tk.Tk):
             variable.trace_add("write", self._sync_account_draft)
         self._build_charts()
         self._build_data()
+        self._build_experimental()
         for entry_class in ("TEntry", "Entry", "TCombobox"):
             self.bind_class(entry_class, "<Control-a>", self._select_all_entry)
         self.bind_class("Text", "<Control-a>", self._select_all_text)
@@ -166,7 +168,7 @@ class FlowApp(tk.Tk):
         bar.grid(row=0, column=0, sticky="ew")
         tk.Label(bar, text="Flow", bg=CARD, fg=TEAL, font=(FONT, 18, "bold")).pack(side="left", padx=(0, 25))
         self.nav_buttons = {}
-        for key, title in (("flows", "Flows"), ("accounts", "Accounts"), ("charts", "Graphs"), ("data", "Data")):
+        for key, title in (("flows", "Flows"), ("accounts", "Accounts"), ("charts", "Graphs"), ("data", "Data"), ("experimental", "Experimental")):
             button = tk.Button(bar, text=title, font=(FONT, 10, "bold"), padx=17, pady=8,
                                bg=CARD, fg=MUTED, relief="flat", borderwidth=0,
                                activebackground="#e5efe9", activeforeground=INK,
@@ -186,7 +188,7 @@ class FlowApp(tk.Tk):
         self.view_host.rowconfigure(0, weight=1)
         self.view_host.columnconfigure(0, weight=1)
         self.views = {}
-        for name in ("flows", "accounts", "charts", "data"):
+        for name in ("flows", "accounts", "charts", "data", "experimental"):
             self.views[name] = ttk.Frame(self.view_host)
             self.views[name].grid(row=0, column=0, sticky="nsew")
         footer = ttk.Frame(self, padding=(20, 7))
@@ -260,6 +262,7 @@ class FlowApp(tk.Tk):
                           lambda t=tree: tuple((c, t.column(c, "width")) for c in t["columns"]),
                           lambda values, t=tree: self._put_column_widths(t, values))
         view.register("graph", self._graph_state, self._put_graph_state)
+        view.register("experimental", self.experimental.get_state, self.experimental.put_state)
         for variable, key in ((self.chart_basis, "basis"), (self.chart_start, "start"),
                               (self.chart_end, "end"), (self.chart_combined, "combined")):
             variable.trace_add("write", lambda *args, k=key:
@@ -705,6 +708,7 @@ class FlowApp(tk.Tk):
 
     def request_close(self):
         if self._confirm_changes("flow") and self._confirm_changes("account"):
+            self.experimental.close()
             self._close_popups()
             self.history.close()
             self.destroy()
@@ -722,6 +726,8 @@ class FlowApp(tk.Tk):
                 else:
                     self.new_account(focus=False, confirm=False)
                 self._record_discarded_draft(kind, before)
+            if old_view == "experimental":
+                self.experimental.pause()
             self.focus_set()
         self._close_popups()
         self.current_view = name
@@ -730,6 +736,8 @@ class FlowApp(tk.Tk):
             button.configure(bg="#e1eee7" if key == name else CARD, fg=TEAL if key == name else MUTED)
         if name == "charts":
             self.draw_chart()
+        elif name == "experimental":
+            self.experimental.refresh()
         return True
 
     def _repeat_row_click(self, event):
@@ -1470,6 +1478,8 @@ class FlowApp(tk.Tk):
         totals = [f"{format_display(decimal_sum(parse_quantity(f['amount']) for f in self.report_rows if f['status'] == 'Complete' and f['units'] == unit), unit)} {unit}"
                   for unit in units]
         self.report_summary.set("Complete · " + (" · ".join(totals) if totals else "0 flows"))
+        if self.current_view == "experimental" and hasattr(self, "experimental"):
+            self.experimental.refresh()
 
     def _remove_suggestion(self, field, value):
         """Forget an entry suggestion without touching the draft or records."""
@@ -1543,6 +1553,27 @@ class FlowApp(tk.Tk):
             self.db_path_label.configure(text=str(self.repo.path))
         if self.current_view == "charts":
             self.draw_chart()
+
+    def _build_experimental(self):
+        self.experimental = ExperimentalView(self.views["experimental"], self.repo,
+            get_flows=lambda: list(self.ledger_rows.values()),
+            on_select_flow=self._open_experimental_flow,
+            on_view_change=self._experimental_view_changed)
+        self.experimental.pack(fill="both", expand=True)
+
+    def _experimental_view_changed(self, before, label):
+        if hasattr(self, "view_history"):
+            self.view_history.record("experimental", label, before=before)
+            self._update_history_buttons()
+
+    def _open_experimental_flow(self, flow_id):
+        if not self.show_view("flows") or not self.ledger.exists(flow_id):
+            return
+        flow = self.repo.get_flow(flow_id)
+        if flow:
+            self._load_form(flow)
+            self.ledger.see(flow_id)
+            self.ledger.focus_force()
 
     def _build_accounts(self):
         page = self.views["accounts"]

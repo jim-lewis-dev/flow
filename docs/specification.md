@@ -72,8 +72,10 @@ Within its unit, a flow contributes +amount to To and -amount to From. Confirmed
 
 Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Readonly display: USD 2 decimals, others 4 (flowledger/units.py). Editors, JSON and hover keep exact values.
 
+Experimental maps filtered ledger flows for one unit, period and status basis. Step or play grouped timestamps; Canceled is excluded. Drag nodes for this session. Pulses show relative size with exact amount/unit labels. This view adds no records, fields, tables or backups.
+
 ### Migration and scope
 
 Schema 5 -> 6 changes Void to Canceled in one transaction, without a backup file. Failure rolls back schema and data. IDs, quantities, anchors, metadata and audit remain exact. Older schema 1-4 conversions retain their one-time backup/recovery. Databases and backups stay out of Git and project snapshots.
 
-Import/export: ten fields plus ID; units required. Git rollback changes code, not records; old schema 5 code cannot open schema 6. Scope: any units, per-unit anchors, local timestamps, one computer. No automatic conversion or forecast collections. Checks: docs/test_results.txt and docs/clipboard_interaction.txt.
+Import/export: ten fields plus ID; units required. Git rollback changes code, not records; schema 5 code cannot open schema 6. Scope: local timestamps and per-unit anchors on one computer; no automatic conversions or forecast collections.
