@@ -1,0 +1,166 @@
+{
+  "success": true,
+  "input": "X11 XTest mouse and keyboard events",
+  "passed": [
+    "From checkboxes match whole source names and allow multiple selections",
+    "Searching accounts retains hidden checks; checkbox undo/redo keeps the popup synchronized",
+    "From choice-search undo/redo restores the query without changing account selections",
+    "To supports multiple choices and popup undo/redo; From and To combine correctly",
+    "Five filters combine with Search and totals; choices include Void/refunds and ignore other restrictions",
+    "All clears each of the five restrictions without changing saved records",
+    "Refunds are filterable in their actual From and To directions",
+    "Editing a source refreshes choices and hides the matching row; record undo/redo restores both correctly",
+    "Add resets entry and retains endpoint filters; addition undo/redo refreshes saved account choices",
+    "Compact Search, all five filters, Dates and ledger columns fit widths 1920, 1280 and 1120",
+    "Account dropdowns first map at their final position; native edits leave original records intact"
+  ],
+  "errors": [],
+  "maps": [
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel",
+      "geometry": "305x193+859+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel",
+      "geometry": "306x219+1174+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter5.!toplevel",
+      "geometry": "306x141+1490+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel2",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel3",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel2",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel2",
+      "geometry": "305x193+859+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel2",
+      "geometry": "306x219+1174+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter5.!toplevel2",
+      "geometry": "306x141+1490+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel3",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel4",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame2.!filtercombo.!toplevel2",
+      "geometry": "300x109+263+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame3.!filtercombo.!toplevel",
+      "geometry": "300x109+474+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame.!frame2.!frame6.!filtercombo.!toplevel",
+      "geometry": "300x95+974+175",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel5",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel4",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel6",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel5",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel7",
+      "geometry": "300x219+228+365",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel6",
+      "geometry": "300x167+415+365",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel8",
+      "geometry": "300x219+228+365",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel7",
+      "geometry": "300x167+383+365",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel9",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel8",
+      "geometry": "306x167+543+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel10",
+      "geometry": "305x219+228+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel9",
+      "geometry": "306x167+543+306",
+      "override": true
+    }
+  ],
+  "database": "/tmp/flow-real-input-yfwg1wy9/demo.sqlite3"
+}

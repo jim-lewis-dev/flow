@@ -942,18 +942,24 @@ class FlowApp(tk.Tk):
         filters.columnconfigure(0, weight=1)
         primary = ttk.Frame(filters, style="Card.TFrame")
         primary.grid(row=0, column=0, sticky="ew")
-        primary.columnconfigure(1, weight=1)
         ttk.Label(primary, text="Search", style="CardMuted.TLabel").grid(row=0, column=0, padx=(0, 8))
-        self.search_entry = ttk.Entry(primary, textvariable=self.search_var, width=18)
+        self.search_entry = ttk.Entry(primary, textvariable=self.search_var, width=20)
         self.search_entry.grid(row=0, column=1, sticky="ew")
-        for col, key, label, values in ((2, "Status", "Statuses", STATUSES),
-                                        (3, "Category", "Categories", ()),
-                                        (4, "Tag", "Tags", ())):
+        for col, key, label, values in ((2, "From", "From", ()),
+                                        (3, "To", "To", ()),
+                                        (4, "Status", "Statuses", STATUSES),
+                                        (5, "Category", "Categories", ()),
+                                        (6, "Tag", "Tags", ())):
+            primary.columnconfigure(col, weight=1, uniform="ledger_filters")
             choice = CheckFilter(primary, label=label, values=values,
+                                 all_label=f"{label}: All" if key in ("From", "To") else None,
                                  on_change=lambda k=key: self._ledger_filter_changed(k))
-            choice.grid(row=0, column=col, padx=(10, 0))
+            # Search has a compact fixed request. The five filter buttons share
+            # the remaining width, including in the smallest supported window.
+            choice.button.configure(width=1)
+            choice.grid(row=0, column=col, sticky="ew", padx=(10, 0))
             self.ledger_filters[key] = choice
-        ttk.Button(primary, text="Dates…", style="Small.TButton", command=self.edit_date_filters).grid(row=0, column=5, padx=(10, 0))
+        ttk.Button(primary, text="Dates…", style="Small.TButton", command=self.edit_date_filters).grid(row=0, column=7, padx=(10, 0))
         self.date_filter_label = ttk.Label(top, text="All Dates", style="CardMuted.TLabel")
         self.date_filter_label.pack(side="right")
         tree_box = ttk.Frame(ledger_card, style="Card.TFrame")
@@ -1335,6 +1341,8 @@ class FlowApp(tk.Tk):
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
         query = self.search_var.get().strip().casefold()
+        from_accounts = {value.casefold() for value in self.ledger_filters["From"].get()}
+        to_accounts = {value.casefold() for value in self.ledger_filters["To"].get()}
         categories = {value.casefold() for value in self.ledger_filters["Category"].get()}
         tags = {value.casefold() for value in self.ledger_filters["Tag"].get()}
         statuses = set(self.ledger_filters["Status"].get())
@@ -1355,6 +1363,8 @@ class FlowApp(tk.Tk):
             haystack = " ".join(str(flow.get(key, "")) for key in ("date", "name", "from_account", "to_account", "category", "tags", "notes", "amount_cents")).casefold()
             haystack += " " + format_money(flow["amount_cents"]) + " " + format_money(flow["amount_cents"]).replace(",", "")
             return (query in haystack
+                    and (not from_accounts or flow["from_account"].casefold() in from_accounts)
+                    and (not to_accounts or flow["to_account"].casefold() in to_accounts)
                     and (not categories or flow["category"].casefold() in categories)
                     and (not tags or tags.intersection(value.casefold() for value in flow["tags"]))
                     and (not date_start or normalize_date(flow["date"]) >= date_start)
@@ -1439,6 +1449,9 @@ class FlowApp(tk.Tk):
 
     def refresh_all(self):
         self.refresh_suggestions()
+        flows = self.repo.list_flows()
+        for key, field in (("From", "from_account"), ("To", "to_account")):
+            self.ledger_filters[key].set_values(sorted({flow[field] for flow in flows}, key=str.casefold))
         self.ledger_filters["Category"].set_values(self.repo.list_categories())
         self.ledger_filters["Tag"].set_values(self.repo.list_tags())
         self.refresh_ledger()

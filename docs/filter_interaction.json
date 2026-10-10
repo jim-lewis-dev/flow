@@ -9,28 +9,28 @@
     "Add Flow stores a new flow hidden by current filters and immediately clears entry",
     "Entry suggestions and checkbox filters are mutually exclusive; Escape and outside click dismiss",
     "All clears each restriction; every observed custom dropdown first maps at its final position",
-    "Search, all three filters, dates, and ledger columns fit a 1280-pixel-wide window"
+    "Search, all five filters, dates, and ledger columns fit a 1280-pixel-wide window"
   ],
   "errors": [],
   "maps": [
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel",
-      "geometry": "300x297+1478+306",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel",
-      "geometry": "300x193+1314+306",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel",
+      "geometry": "306x297+1174+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel",
-      "geometry": "300x271+1620+306",
+      "geometry": "305x193+859+306",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel2",
-      "geometry": "300x193+1314+306",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter5.!toplevel",
+      "geometry": "306x271+1490+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel2",
+      "geometry": "305x193+859+306",
       "override": true
     },
     {
@@ -49,8 +49,8 @@
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel2",
-      "geometry": "300x297+1478+306",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel2",
+      "geometry": "306x297+1174+306",
       "override": true
     },
     {
@@ -59,40 +59,40 @@
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel2",
-      "geometry": "300x271+1620+306",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel3",
-      "geometry": "300x193+1314+306",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter.!toplevel4",
-      "geometry": "300x193+1314+306",
-      "override": true
-    },
-    {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel3",
-      "geometry": "300x297+1478+306",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter5.!toplevel2",
+      "geometry": "306x271+1490+306",
       "override": true
     },
     {
       "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel3",
-      "geometry": "300x271+1620+306",
+      "geometry": "305x193+859+306",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel4",
-      "geometry": "300x297+838+365",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter3.!toplevel4",
+      "geometry": "305x193+859+306",
       "override": true
     },
     {
-      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter2.!toplevel5",
-      "geometry": "300x297+1478+306",
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel3",
+      "geometry": "306x297+1174+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter5.!toplevel3",
+      "geometry": "306x271+1490+306",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel4",
+      "geometry": "300x297+790+365",
+      "override": true
+    },
+    {
+      "path": ".!frame2.!frame.!frame3.!frame2.!frame.!checkfilter4.!toplevel5",
+      "geometry": "306x297+1174+306",
       "override": true
     }
   ],
-  "database": "/tmp/flow-real-input-0lags0g9/demo.sqlite3"
+  "database": "/tmp/flow-real-input-0_5jpe3p/demo.sqlite3"
 }

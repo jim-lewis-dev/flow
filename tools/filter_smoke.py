@@ -173,7 +173,7 @@ try:
     category = open_filter("Category")
     assert category.popup.winfo_rootx() + category.popup.winfo_width() <= 1280
     key("Escape")
-    ok("Search, all three filters, dates, and ledger columns fit a 1280-pixel-wide window")
+    ok("Search, all five filters, dates, and ledger columns fit a 1280-pixel-wide window")
 
     from PIL import ImageGrab
     app.geometry("1920x1200+0+0")
