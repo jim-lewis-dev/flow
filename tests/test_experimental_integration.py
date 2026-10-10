@@ -260,8 +260,7 @@ class ExperimentalIntegrationTests(unittest.TestCase):
     def test_play_advances_to_last_instant_without_writing_records(self):
         view = self.app.experimental
         self.select_basis(2)
-        view.speed_combo.current(3)
-        view.speed_combo.event_generate("<<ComboboxSelected>>")
+        view.speed_scale.set(5)
         self.pump()
         self.assertEqual(len(view._groups), 3)
         before = self.saved_state()

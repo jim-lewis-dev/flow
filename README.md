@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.17 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
+Flow 0.5.18 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
 
 ## Install and update
 
@@ -158,7 +158,9 @@ Hover near a line to see its account, exact quantity and units. Overlapping line
 
 ## Experimental flow map
 
-The last tab, **Experimental**, animates transfers between account nodes. It starts from the flows currently visible under the Flow Ledger filters. Select a date range, one unit and a status basis for this view. **Previous/Next** steps through timestamps; **Play/Pause** advances automatically. Flows sharing a timestamp move together. Each moving pulse scales with the quantity while its label gives the exact amount and unit. Drag account nodes to arrange the map; positions last only for this app session.
+The last tab, **Experimental**, animates transfers between account nodes. It starts from the flows currently visible under the Flow Ledger filters. Select a date range, one unit and a status basis for this view. The transport controls jump to the first or last time step, move back or forward one step, and play or pause. The speed slider runs from 0 (paused) through 1 (normal) to 5 (fastest). Flows sharing a timestamp move together. Each moving pulse scales with the quantity while its label gives the exact amount and unit. Hover over a pulse for its date/time, name, status, route, exact quantity/unit, category, tags and a notes preview. Drag account nodes to arrange the map; positions last only for this app session.
+
+Hover over an account node for its name/unit, saved starting balance/date (or Unknown), and balance after the selected timestamp at the selected status basis. This balance is calculated from **all saved flows**, including flows hidden by Flow Ledger filters. Separately labeled **In/Out** totals count only flows shown in this Experimental view through the current step. Hover details appear near the pointer and in the detail line below the map.
 
 This view reads saved flows and does not edit records or create forecasts. Canceled flows do not animate. Changing ledger filters changes which transfers are shown; it does not change stored balances or the existing graphs. Account placement and playback add no fields, tables or backup files.
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date
+from decimal import Decimal
 import math
 import time
 import tkinter as tk
@@ -15,7 +16,8 @@ from tkinter import ttk
 from typing import Callable
 
 from .calendar_widget import CalendarEntry
-from .core import format_quantity, normalize_date, parse_quantity
+from .core import (decimal_sum, format_quantity, ledger_balance_at,
+                   normalize_date, parse_quantity)
 from .flow_motion import grouped_events, pulse_radius, select_events
 from .graphing import normalize_graph_date
 
@@ -33,7 +35,7 @@ BASIS = {
     "Including Pending": ("Complete", "Pending"),
     "Including Planned": ("Complete", "Pending", "Planned"),
 }
-SPEEDS = {"0.5×": 0.5, "1×": 1.0, "2×": 2.0, "4×": 4.0}
+MAX_SPEED = 5
 
 
 class ExperimentalView(ttk.Frame):
@@ -56,7 +58,9 @@ class ExperimentalView(ttk.Frame):
         self.through_var = tk.StringVar(self)
         self.units_var = tk.StringVar(self)
         self.basis_var = tk.StringVar(self, "Confirmed")
-        self.speed_var = tk.StringVar(self, "1×")
+        # Integer playback rates: zero pauses; one is the original 1 s/step.
+        self.speed_var = tk.IntVar(self, 1)
+        self.speed_label_var = tk.StringVar(self, "1×")
         self.progress_var = tk.StringVar(self, "No flows selected")
         self.message_var = tk.StringVar(self, "")
         self.hover_var = tk.StringVar(self, "Drag accounts to arrange the map · Click a pulse to open its flow")
@@ -78,9 +82,19 @@ class ExperimentalView(ttk.Frame):
         self._drag_before: dict | None = None
         self._node_items: dict[int, str] = {}
         self._pulse_items: dict[int, dict] = {}
+        self._balance_flows: list[dict] = []
+        self._account_anchors: dict[tuple[str, str], dict] = {}
+        self._hover_node_cache: dict[tuple[str, str, int, str], str] = {}
+        self._hover_popup: tk.Toplevel | None = None
+        self._hover_label: tk.Label | None = None
+        self._hover_after_id: str | None = None
+        self._hover_target: tuple[str, str] | None = None
+        self._hover_text = ""
+        self._hover_pointer = (0, 0)
         self._scene_width = 1000
         self._scene_height = 510
         self._history_state: dict | None = None
+        self._speed_drag_before: dict | None = None
         self._build()
 
     def _build(self):
@@ -94,7 +108,7 @@ class ExperimentalView(ttk.Frame):
         ttk.Label(controls, text="Account Flow Map", style="Section.TLabel").grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Label(controls, text="Uses current Flow Ledger filters", style="CardMuted.TLabel").grid(
-            row=0, column=3, columnspan=5, sticky="e", pady=(0, 8))
+            row=0, column=3, columnspan=4, sticky="e", pady=(0, 8))
         labels = (("FROM", 0), ("THROUGH", 1), ("UNITS", 2),
                   ("STATUS BASIS", 3), ("SPEED", 4))
         for title, column in labels:
@@ -110,35 +124,51 @@ class ExperimentalView(ttk.Frame):
         self.basis_combo = ttk.Combobox(controls, textvariable=self.basis_var,
                                         values=tuple(BASIS), state="readonly", width=19)
         self.basis_combo.grid(row=2, column=3, sticky="ew", padx=(0, 12))
-        self.speed_combo = ttk.Combobox(controls, textvariable=self.speed_var,
-                                        values=tuple(SPEEDS), state="readonly", width=6)
-        self.speed_combo.grid(row=2, column=4, sticky="ew", padx=(0, 12))
+        self.speed_scale = tk.Scale(controls, from_=0, to=MAX_SPEED, resolution=1,
+                                    orient="horizontal", variable=self.speed_var,
+                                    command=self._speed_changed, showvalue=False,
+                                    tickinterval=1, sliderlength=17,
+                                    bg=CARD, fg=INK, troughcolor=LINE,
+                                    activebackground=TEAL, bd=0,
+                                    highlightthickness=0, length=130)
+        self.speed_scale.grid(row=2, column=4, sticky="ew", padx=(0, 3))
+        ttk.Label(controls, textvariable=self.speed_label_var,
+                  style="Card.TLabel", width=3).grid(row=2, column=5, sticky="w", padx=(0, 12))
         self.update_button = ttk.Button(controls, text="Update", style="Primary.TButton",
                                         command=self.update)
-        self.update_button.grid(row=2, column=5, sticky="ew")
+        self.update_button.grid(row=2, column=6, sticky="ew")
         self.units_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose unit"))
         self.basis_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose status basis"))
-        self.speed_combo.bind("<<ComboboxSelected>>", self._speed_changed)
+        self.speed_scale.bind("<ButtonPress-1>", self._speed_change_started)
+        self.speed_scale.bind("<ButtonRelease-1>", self._speed_change_finished)
+        self.speed_scale.bind("<KeyPress>", self._speed_change_started)
+        self.speed_scale.bind("<KeyRelease>", self._speed_change_finished)
         for entry in (self.from_entry.entry, self.through_entry.entry):
             entry.bind("<Return>", lambda event: self.update())
 
         playback = ttk.Frame(self, style="Card.TFrame", padding=(12, 7))
         playback.grid(row=1, column=0, sticky="ew", pady=(0, 8))
-        playback.columnconfigure(3, weight=1)
-        self.previous_button = ttk.Button(playback, text="◀ Previous", style="Small.TButton",
+        playback.columnconfigure(5, weight=1)
+        self.start_button = ttk.Button(playback, text="|< Start", style="Small.TButton",
+                                       command=self.jump_start)
+        self.start_button.grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self.previous_button = ttk.Button(playback, text="< Step", style="Small.TButton",
                                           command=self.previous)
-        self.previous_button.grid(row=0, column=0, sticky="w", padx=(0, 5))
-        self.play_button = ttk.Button(playback, text="▶ Play", style="Small.TButton",
+        self.previous_button.grid(row=0, column=1, sticky="w", padx=(0, 5))
+        self.play_button = ttk.Button(playback, text="Play", style="Small.TButton",
                                       command=self.toggle_play)
-        self.play_button.grid(row=0, column=1, sticky="w", padx=(0, 5))
-        self.next_button = ttk.Button(playback, text="Next ▶", style="Small.TButton",
+        self.play_button.grid(row=0, column=2, sticky="w", padx=(0, 5))
+        self.next_button = ttk.Button(playback, text="Step >", style="Small.TButton",
                                       command=self.next)
-        self.next_button.grid(row=0, column=2, sticky="w", padx=(0, 13))
+        self.next_button.grid(row=0, column=3, sticky="w", padx=(0, 5))
+        self.end_button = ttk.Button(playback, text="End >|", style="Small.TButton",
+                                     command=self.jump_end)
+        self.end_button.grid(row=0, column=4, sticky="w", padx=(0, 13))
         ttk.Label(playback, textvariable=self.progress_var, style="Card.TLabel",
-                  font=(FONT, 10, "bold")).grid(row=0, column=3, sticky="w")
+                  font=(FONT, 10, "bold")).grid(row=0, column=5, sticky="w")
         self.message_label = ttk.Label(playback, textvariable=self.message_var,
                                        style="CardMuted.TLabel", wraplength=1100)
-        self.message_label.grid(row=1, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        self.message_label.grid(row=1, column=0, columnspan=6, sticky="w", pady=(5, 0))
         self.message_label.grid_remove()
 
         scene = ttk.Frame(self, style="Card.TFrame")
@@ -159,8 +189,7 @@ class ExperimentalView(ttk.Frame):
         self.canvas.bind("<B1-Motion>", self._pointer_drag)
         self.canvas.bind("<ButtonRelease-1>", self._pointer_up)
         self.canvas.bind("<Motion>", self._pointer_hover)
-        self.canvas.bind("<Leave>", lambda event: self.hover_var.set(
-            "Drag accounts to arrange the map · Click a pulse to open its flow"))
+        self.canvas.bind("<Leave>", lambda event: self.hide_hover())
 
         detail = ttk.Frame(self, style="Card.TFrame", padding=(12, 7))
         detail.grid(row=3, column=0, sticky="ew", pady=(8, 0))
@@ -198,7 +227,8 @@ class ExperimentalView(ttk.Frame):
         self.through_var.set(state.get("through", ""))
         self.units_var.set(state.get("units", ""))
         self.basis_var.set(state.get("basis", "Confirmed"))
-        self.speed_var.set(state.get("speed", "1×"))
+        self.speed_var.set(max(0, min(MAX_SPEED, int(state.get("speed", 1)))))
+        self.speed_label_var.set(f"{self.speed_var.get()}×")
         self._positions = {name: (float(pos[0]), float(pos[1]))
                            for name, pos in state.get("positions", {}).items()}
         self._initialized_dates = True
@@ -233,11 +263,26 @@ class ExperimentalView(ttk.Frame):
         if self._load_data(reset_index=True):
             self._notify(before, label)
 
-    def _speed_changed(self, event=None) -> None:
-        before = self._history_state or self.get_state()
-        if self._playing:
+    def _speed_change_started(self, event=None) -> None:
+        if self._speed_drag_before is None:
+            self._speed_drag_before = self.get_state()
+
+    def _speed_changed(self, value=None) -> None:
+        """Apply the slider immediately; record one undo action on release."""
+        speed = self.speed_var.get()
+        self.speed_label_var.set(f"{speed}×")
+        if speed == 0:
+            self.pause()
+        elif self._playing:
+            # Preserve the pulse's position when the rate changes mid-flight.
             self._started_at = time.monotonic() - self._progress * self._duration() / 1000
-        self._notify(before, "Change flow map speed")
+        self._update_progress()
+
+    def _speed_change_finished(self, event=None) -> None:
+        before = self._speed_drag_before
+        self._speed_drag_before = None
+        if before is not None:
+            self._notify(before, "Change flow map speed")
 
     def _load_data(self, *, reset_index: bool) -> bool:
         visible = [dict(flow) for flow in self.get_flows()]
@@ -264,6 +309,7 @@ class ExperimentalView(ttk.Frame):
             groups = grouped_events(chosen)
         except ValueError as error:
             self.pause()
+            self.hide_hover()
             self._events = []
             self._groups = []
             self._index = -1
@@ -274,9 +320,16 @@ class ExperimentalView(ttk.Frame):
             self._update_progress()
             return False
         self.pause()
+        self.hide_hover()
         self._all_visible = visible
         self._events = chosen
         self._groups = groups
+        self._balance_flows = self.repo.list_flows()
+        self._account_anchors = {
+            (account["name"].casefold(), account["units"]): account
+            for account in self.repo.list_accounts()
+        }
+        self._hover_node_cache.clear()
         self._directed_pairs = {(flow["from_account"], flow["to_account"]) for flow in chosen}
         self._max_amount = max((parse_quantity(flow["amount"]) for flow in chosen), default=1)
         self._invalid_message = ""
@@ -443,6 +496,8 @@ class ExperimentalView(ttk.Frame):
                                            tags=("moving_flow",))
                 self._pulse_items[label] = flow
         canvas.tag_raise("node")
+        if self._hover_target is not None:
+            self._refresh_hover_pointer()
 
     def _fill_details(self) -> None:
         self.flow_list.delete(*self.flow_list.get_children())
@@ -463,10 +518,36 @@ class ExperimentalView(ttk.Frame):
             stamp, simultaneous = self._groups[self._index]
             self.progress_var.set(f"{stamp} · {self._index + 1} of {total} times"
                                   f" · {len(simultaneous)} flow{'s' if len(simultaneous) != 1 else ''}")
+        self.start_button.configure(state="normal" if total else "disabled")
         self.previous_button.configure(state="normal" if self._index >= 0 else "disabled")
         self.next_button.configure(state="normal" if self._index < total - 1 else "disabled")
-        self.play_button.configure(state="normal" if total else "disabled",
-                                   text="❚❚ Pause" if self._playing else "▶ Play")
+        self.end_button.configure(state="normal" if total else "disabled")
+        self.play_button.configure(state="normal" if total and self.speed_var.get() else "disabled",
+                                   text="Pause" if self._playing else "Play")
+
+    def jump_start(self) -> None:
+        """Show the first timestamp with its pulses at the sources."""
+        self.pause()
+        if self._groups:
+            self._index = 0
+            self._progress = 0.0
+            self._stepped = True
+            self._render_pulses()
+            self._fill_details()
+            self._update_progress()
+        self._history_state = self.get_state()
+
+    def jump_end(self) -> None:
+        """Show the last timestamp with its pulses at the destinations."""
+        self.pause()
+        if self._groups:
+            self._index = len(self._groups) - 1
+            self._progress = 1.0
+            self._stepped = True
+            self._render_pulses()
+            self._fill_details()
+            self._update_progress()
+        self._history_state = self.get_state()
 
     def next(self) -> None:
         self.pause()
@@ -491,13 +572,14 @@ class ExperimentalView(ttk.Frame):
         self._history_state = self.get_state()
 
     def _duration(self) -> float:
-        return 1000 / SPEEDS.get(self.speed_var.get(), 1)
+        speed = self.speed_var.get()
+        return 1000 / speed if speed else float("inf")
 
     def toggle_play(self) -> None:
         if self._playing:
             self.pause()
             return
-        if not self._groups:
+        if not self._groups or self.speed_var.get() == 0:
             return
         if self._index < 0 or (self._index == len(self._groups) - 1 and self._progress >= 1):
             self._index = 0
@@ -541,17 +623,22 @@ class ExperimentalView(ttk.Frame):
 
     def close(self) -> None:
         self.pause()
+        self.hide_hover(destroy=True)
         self.from_entry.close_popup()
         self.through_entry.close_popup()
 
-    def _item_at(self, event) -> int | None:
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+    def _item_at_position(self, px: int, py: int) -> int | None:
+        x, y = self.canvas.canvasx(px), self.canvas.canvasy(py)
         for item in reversed(self.canvas.find_overlapping(x - 1, y - 1, x + 1, y + 1)):
             if item in self._node_items or item in self._pulse_items:
                 return item
         return None
 
+    def _item_at(self, event) -> int | None:
+        return self._item_at_position(event.x, event.y)
+
     def _pointer_down(self, event) -> None:
+        self.hide_hover()
         item = self._item_at(event)
         name = self._node_items.get(item)
         if name is not None:
@@ -562,6 +649,7 @@ class ExperimentalView(ttk.Frame):
     def _pointer_drag(self, event) -> None:
         if self._drag_name is None:
             return
+        self.hide_hover()
         x = self.canvas.canvasx(event.x)
         y = self.canvas.canvasy(event.y)
         self._positions[self._drag_name] = (
@@ -582,19 +670,143 @@ class ExperimentalView(ttk.Frame):
         if flow is not None:
             self.on_select_flow(flow["flow_id"])
 
-    def _pointer_hover(self, event) -> None:
-        if self._drag_name:
-            return
-        current = self.canvas.find_withtag("current")
-        item = current[-1] if current else None
-        flow = self._pulse_items.get(item)
-        if flow is not None:
-            self.hover_var.set(f"{flow['name']} · {flow['status']} · {flow['from_account']} → {flow['to_account']}"
-                               f" · {format_quantity(flow['amount'])} {flow['units']}")
-        elif item in self._node_items:
-            self.hover_var.set(self._node_items[item] + " · Drag to reposition")
+    def _node_hover_text(self, name: str) -> str:
+        unit = self.units_var.get()
+        key = (name, unit, self._index, self.basis_var.get())
+        if key in self._hover_node_cache:
+            return self._hover_node_cache[key]
+        account = self._account_anchors.get((name.casefold(), unit))
+        lines = [f"{name} · {unit}"]
+        if account is None or account["opening_amount"] is None:
+            lines.append("Starting balance: Unknown")
         else:
-            self.hover_var.set("Drag accounts to arrange the map · Click a pulse to open its flow")
+            lines.append(f"Starting balance: {format_quantity(account['opening_amount'])} {unit}"
+                         f" · {account['opening_at']}")
+        if self._index >= 0:
+            stamp = self._groups[self._index][0]
+            balance = (ledger_balance_at(account, self._balance_flows, stamp,
+                                         BASIS[self.basis_var.get()])
+                       if account is not None else None)
+            amount = "Unknown" if balance is None else f"{format_quantity(balance)} {unit}"
+            lines.append(f"Balance after {stamp} ({self.basis_var.get()}): {amount}")
+            shown = [flow for _, flows in self._groups[:self._index + 1] for flow in flows]
+            scope = "Shown through this step"
+        else:
+            shown = self._events
+            scope = "Shown in selected period"
+        incoming = decimal_sum(parse_quantity(flow["amount"]) for flow in shown
+                               if flow["to_account"].casefold() == name.casefold())
+        outgoing = decimal_sum(parse_quantity(flow["amount"]) for flow in shown
+                               if flow["from_account"].casefold() == name.casefold())
+        lines.append(f"{scope}: In {format_quantity(incoming)} {unit}"
+                     f" · Out {format_quantity(outgoing)} {unit}")
+        result = "\n".join(lines)
+        self._hover_node_cache[key] = result
+        return result
+
+    @staticmethod
+    def _flow_hover_text(flow: dict) -> str:
+        lines = [flow["name"] or "(Unnamed flow)",
+                 f"{normalize_date(flow['date'])} · {flow['status']}",
+                 f"{flow['from_account']} → {flow['to_account']}"
+                 f" · {format_quantity(flow['amount'])} {flow['units']}"]
+        if flow["category"]:
+            lines.append(f"Category: {flow['category']}")
+        if flow["tags"]:
+            lines.append("Tags: " + ", ".join(flow["tags"]))
+        notes = " ".join(flow["notes"].split())
+        if notes:
+            lines.append("Notes: " + (notes[:197] + "…" if len(notes) > 200 else notes))
+        return "\n".join(lines)
+
+    def _position_hover(self) -> None:
+        if self._hover_popup is None:
+            return
+        self._hover_popup.update_idletasks()
+        width = self._hover_popup.winfo_reqwidth()
+        height = self._hover_popup.winfo_reqheight()
+        px, py = self._hover_pointer
+        x = max(0, min(px + 18, self.winfo_screenwidth() - width))
+        y = max(0, min(py + 20, self.winfo_screenheight() - height))
+        self._hover_popup.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _show_hover(self, target: tuple[str, str]) -> None:
+        self._hover_after_id = None
+        if target != self._hover_target or not self.canvas.winfo_viewable():
+            return
+        if self._hover_popup is None:
+            popup = self._hover_popup = tk.Toplevel(self.canvas)
+            popup.withdraw()
+            popup.overrideredirect(True)
+            popup.transient(self.winfo_toplevel())
+            popup.configure(bg=TEAL, padx=1, pady=1)
+            self._hover_label = tk.Label(popup, bg=CARD, fg=INK, font=(FONT, 10),
+                                         justify="left", anchor="w", wraplength=430,
+                                         padx=11, pady=8)
+            self._hover_label.pack(fill="both", expand=True)
+        self._hover_label.configure(text=self._hover_text)
+        self._position_hover()
+        self._hover_popup.deiconify()
+
+    def hide_hover(self, *, destroy: bool = False) -> None:
+        if self._hover_after_id is not None:
+            self.after_cancel(self._hover_after_id)
+            self._hover_after_id = None
+        if self._hover_popup is not None:
+            if destroy:
+                self._hover_popup.destroy()
+                self._hover_popup = None
+                self._hover_label = None
+            else:
+                self._hover_popup.withdraw()
+        self._hover_target = None
+        self._hover_text = ""
+        self.hover_var.set("Drag accounts to arrange the map · Click a pulse to open its flow")
+
+    def _update_hover_at(self, x: int, y: int, root_x: int, root_y: int) -> None:
+        if self._drag_name is not None:
+            return
+        item = self._item_at_position(x, y)
+        flow = self._pulse_items.get(item)
+        name = self._node_items.get(item)
+        if flow is not None:
+            target = ("flow", flow["flow_id"])
+            details = self._flow_hover_text(flow)
+            brief = (f"{flow['name']} · {flow['status']} · {flow['from_account']} → "
+                     f"{flow['to_account']} · {format_quantity(flow['amount'])} {flow['units']}")
+        elif name is not None:
+            target = ("node", name)
+            details = self._node_hover_text(name)
+            brief = details.replace("\n", " · ")
+        else:
+            self.hide_hover()
+            return
+        self._hover_pointer = (root_x, root_y)
+        if target != self._hover_target:
+            self.hide_hover()
+            self._hover_target = target
+            self._hover_after_id = self.after(250, lambda t=target: self._show_hover(t))
+        elif details != self._hover_text and self._hover_popup is not None:
+            self._hover_label.configure(text=details)
+            if self._hover_popup.winfo_viewable():
+                self._position_hover()
+        self._hover_text = details
+        self.hover_var.set(brief)
+        if self._hover_popup is not None and self._hover_popup.winfo_viewable():
+            self._position_hover()
+
+    def _refresh_hover_pointer(self) -> None:
+        px = self.canvas.winfo_pointerx()
+        py = self.canvas.winfo_pointery()
+        x = px - self.canvas.winfo_rootx()
+        y = py - self.canvas.winfo_rooty()
+        if 0 <= x < self.canvas.winfo_width() and 0 <= y < self.canvas.winfo_height():
+            self._update_hover_at(x, y, px, py)
+        else:
+            self.hide_hover()
+
+    def _pointer_hover(self, event) -> None:
+        self._update_hover_at(event.x, event.y, event.x_root, event.y_root)
 
     def _open_detail(self, event=None) -> None:
         chosen = self.flow_list.selection()

@@ -728,6 +728,7 @@ class FlowApp(tk.Tk):
                 self._record_discarded_draft(kind, before)
             if old_view == "experimental":
                 self.experimental.pause()
+                self.experimental.hide_hover()
             self.focus_set()
         self._close_popups()
         self.current_view = name
