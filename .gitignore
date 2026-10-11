@@ -1,9 +1,18 @@
 __pycache__/
 *.py[cod]
-venv/
 .pytest_cache/
 .mypy_cache/
-# Records, SQLite sidecars, backups, and local suggestion preferences
+*.zip
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Local-only scripts
+/update.py
+/export.py
+
+# Personal records, SQLite sidecars, and backups
 *.db
 *.db-*
 *.db.*
@@ -16,5 +25,3 @@ venv/
 *.bak
 *.bak.*
 *.suggestions.json
-.venv/
-/flow-snapshot.zip

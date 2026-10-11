@@ -1,0 +1,22 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install desktop test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk python3-matplotlib xvfb x11-xkb-utils
+      - name: Run complete test suite
+        run: xvfb-run -a -s '-screen 0 1920x1200x24' python3 -m unittest discover -s tests -v
