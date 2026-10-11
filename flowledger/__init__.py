@@ -1,3 +1,3 @@
 """Flow: exact resource transfers between named accounts."""
 
-__version__ = "0.5.18"
+__version__ = "0.5.19"

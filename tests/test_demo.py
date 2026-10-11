@@ -1,4 +1,4 @@
-"""End-to-end example arithmetic with independently computed dollar results."""
+"""End-to-end example arithmetic in independent units."""
 from decimal import Decimal
 import tempfile
 import unittest
@@ -30,8 +30,22 @@ class DemoIntegrationTests(unittest.TestCase):
 
     def test_planned_flows_are_plain_records_selected_by_status(self):
         self.assertEqual(self.total("2026-12-31 23:59:59", ("Complete", "Pending", "Planned")), Decimal("14909.85"))
-        self.assertEqual(len(self.repo.list_flows()), 17)
+        self.assertEqual(len(self.repo.list_flows()), 20)
         self.assertTrue(all("scenario" not in row for row in self.repo.list_flows()))
+
+    def test_materials_have_independent_balances_and_status_bases(self):
+        warehouse = self.repo.get_account("Warehouse", "kg")
+        workshop = self.repo.get_account("Workshop", "kg")
+        flows = self.repo.list_flows()
+        at = "2026-10-10 23:59:59"
+        for statuses, expected in [
+            (("Complete",), ("19.875", "0.125")),
+            (("Complete", "Pending"), ("18.375", "1.625")),
+            (("Complete", "Pending", "Planned"), ("16.125", "3.875")),
+        ]:
+            self.assertEqual(ledger_balance_at(warehouse, flows, at, statuses), Decimal(expected[0]))
+            self.assertEqual(ledger_balance_at(workshop, flows, at, statuses), Decimal(expected[1]))
+        self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
 
     def test_seed_never_mixes_into_existing_database(self):
         before = (self.repo.list_flows(), self.repo.history())
@@ -43,14 +57,14 @@ class DemoIntegrationTests(unittest.TestCase):
         export_flows(self.repo, path)
         result = commit_import(self.repo, preview_import(self.repo, read_import(path)))
         self.assertEqual(result["imported"], 0)
-        self.assertEqual(result["skipped"], 17)
+        self.assertEqual(result["skipped"], 20)
         snapshot = Path(self.directory.name) / "snapshot.sqlite3"
         self.repo.backup(snapshot)
         first = self.repo.list_flows()[0]
         self.repo.void_flow(first["flow_id"])
         self.repo.restore(snapshot)
         self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
-        self.assertEqual(len(self.repo.list_flows()), 17)
+        self.assertEqual(len(self.repo.list_flows()), 20)
 
 
 if __name__ == "__main__":

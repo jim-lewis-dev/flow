@@ -242,6 +242,8 @@ try:
     redo()
     assert repo.get_flow(copied["flow_id"]) == copied
     assert copied["date"] == "2026-10-02 12:34:56"
+    undo()
+    assert repo.get_flow(copied["flow_id"]) is None
     click(app.new_flow_button)
     ok("Row paste is immediately saved and undoable with its exact ID and every field")
 
@@ -335,7 +337,9 @@ try:
     click_text("Apply", dialog)
     assert set(app.ledger_rows) == {flow_named("Repair")["flow_id"]}
     undo()
-    assert (app.filter_start.get(), app.filter_end.get()) == ("", "") and len(app.ledger_rows) == 3
+    assert (app.filter_start.get(), app.filter_end.get()) == ("", "") and len(app.ledger_rows) == 3, (
+        app.filter_start.get(), app.filter_end.get(), len(app.ledger_rows),
+        app.history.undo_label, app.history.redo_label)
     redo()
     assert app.filter_start.get() == app.filter_end.get() == "2026-10-03"
     undo()
@@ -374,19 +378,19 @@ try:
     ok("Balance basis and combined-balance checkbox share the same undo order as other controls")
 
     render_before = app._chart_rendered_controls
-    click(app.chart_start_picker.button)
-    click(app.chart_start_picker.day_buttons[5])
-    assert app.chart_start.get() == "2026-10-05"
-    click_text("Update Graph")
+    click(app.chart_end_picker.button)
+    click(app.chart_end_picker.day_buttons[5])
+    pump(.25)
+    assert app.chart_end.get() == "2026-10-05"
     render_after = app._chart_rendered_controls
+    assert render_after == app._graph_controls()
     undo()
-    assert app.chart_start.get() == "2026-10-05" and app._chart_rendered_controls == render_before
-    undo()
-    assert app.chart_start.get() == "2026-10-01"
+    assert app.chart_end.get() == render_before[3]
+    assert app._chart_rendered_controls == render_before
     redo()
-    redo()
+    assert app.chart_end.get() == "2026-10-05"
     assert app._chart_rendered_controls == render_after
-    ok("Calendar day selection and Update Graph undo independently while restoring the displayed plot")
+    ok("Calendar day selection redraws without an update button; one undo restores the controls and plot")
 
     legend, line = next(iter(app.chart_line_map.items()))
     bounds = legend.get_window_extent(app.canvas.get_renderer())

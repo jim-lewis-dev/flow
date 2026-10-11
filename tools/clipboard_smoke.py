@@ -104,7 +104,7 @@ try:
              app.chart_accounts.winfo_rooty() + by + bh / 2)
     replace(app.chart_start_picker.entry, "2026-10-01")
     replace(app.chart_end_picker.entry, "2026-10-04")
-    click_text("Update Graph")
+    pump(.3)
     assert all(value == 120.25 for line in app.chart_series for value in line.get_ydata())
     click(app.nav_buttons["flows"])
     row(app.ledger, original["flow_id"], "name")
