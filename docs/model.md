@@ -1,0 +1,72 @@
+# Data model
+
+Flow represents a transfer as one quantity moving from one named account to another. The same account may hold several units. There is one starting balance and timestamp for each account/unit pair; calculated balances are derived from those anchors and the flow ledger.
+
+## Records
+
+An account has a name, a unit, and an optional starting balance and time:
+
+```json
+{
+  "name": "Warehouse",
+  "units": "kg",
+  "opening_amount": "20",
+  "opening_at": "2026-10-01 00:00:00"
+}
+```
+
+A saved flow has the ten user-facing fields plus its internal ID:
+
+```json
+{
+  "flow_id": "22222222-2222-4222-8222-222222222222",
+  "date": "2026-10-03 09:15:06",
+  "name": "Materials",
+  "from_account": "Warehouse",
+  "to_account": "Workshop",
+  "amount": "0.125",
+  "units": "kg",
+  "status": "Complete",
+  "category": "Materials",
+  "tags": ["Project"],
+  "notes": "Exact fractional quantity"
+}
+```
+
+Account names are identities, matched after trimming whitespace and case folding. Unit names are trimmed but retain case: `mW` and `MW` differ. Amount must be a positive, finite decimal; a starting balance can be negative or unknown (`null`). Decimal strings avoid binary float rounding and preserve arbitrary supported precision. Read-only displays show USD to two places and other units to four by default; calculations and record values remain exact.
+
+Dates are local wall-clock times. A date without a time denotes midnight; an entered time can include seconds. There is no separate flag indicating whether a time was typed. A flow ID is generated when a record is created and remains stable through editing; copying a flow creates a new ID.
+
+## Balance calculation
+
+For a flow of quantity `q` and unit `u`:
+
+| Pair | Change |
+| --- | ---: |
+| `(from, u)` | `-q` |
+| `(to, u)` | `+q` |
+| Every other unit | `0` |
+
+Within a unit, the sum across all accounts is unchanged by a transfer. No conversion or addition across units occurs. The starting balance is the confirmed value *immediately before flows at its timestamp*. Earlier completed activity is already reflected in that anchor. If you edit completed history from before the anchor, revisit the anchor as needed.
+
+Confirmed includes Complete flows. Including Pending also includes Pending; Including Planned adds Planned. Canceled contributes nothing. Graphs create separate plots for different units, and a combined line sums selected accounts only within one unit. An unknown starting balance prevents a trustworthy line for that pair; it is not silently treated as zero.
+
+## SQLite
+
+The current schema has seven persistent tables; [`schema.sql`](../flowledger/schema.sql) defines their columns and constraints.
+
+| Table | Role |
+| --- | --- |
+| `accounts` | Names and identity keys. |
+| `account_balances` | Starting amount/time keyed by account and unit. |
+| `flows` | Quantified transfers and their metadata. |
+| `categories` | Reusable category names. |
+| `tags` | Reusable tag names. |
+| `flow_tags` | Ordered tag assignments. |
+| `audit` | Before/after record of saved changes. |
+
+`Repository.save_flow` validates and writes a flow, its endpoint/unit entries, tags, and audit entry in one SQLite transaction. Failed writes roll back together. Session undo/redo can restore record and view changes but is not a permanent history of UI actions. The audit table preserves saved record changes.
+
+CSV/JSON import requires units. The preview distinguishes new records, duplicates, conflicts, similar records, and invalid rows; approved entries commit atomically. Data export contains flows; use database backup to preserve anchors and audit as well. Old schema files are migrated when opened; the legacy migrations that convert cents to quantities retain a one-time copy of the old database.
+
+The Experimental tab reads matching saved flows and animates them without changing the database. Its draggable layout lasts only for the current session. Account hover balances come from all eligible saved flows at the selected time; its displayed In/Out totals use only flows selected for the animation.
