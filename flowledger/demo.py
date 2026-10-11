@@ -1,4 +1,4 @@
-"""Illustrative October-December 2026 flows, never inserted into a nonempty file.
+"""Illustrative October-December 2026 resource flows, seeded only into an empty file.
 
 Future demo entries are explicit individual records. There is no recurrence
 generator. This file is a useful example of programmatic entry into the engine.
@@ -13,6 +13,8 @@ def seed_demo(repo) -> bool:
     with repo.atomic():
         for name, amount in [("Checking", "3200"), ("Savings", "5000"), ("Cash", "180"), ("AmEx", "-420")]:
             repo.save_account(name, opening_amount=amount, opening_at=anchor, units="USD")
+        repo.save_account("Warehouse", opening_amount="20", opening_at=anchor, units="kg")
+        repo.save_account("Workshop", opening_amount="0", opening_at=anchor, units="kg")
         rows = [
             ("2026-10-01 08:15", "AmEx", "Joe's Diner", "12.00", "Complete", "Breakfast at Joe's", "Dining", ["Everyday"]),
             ("2026-10-01 17:40", "AmEx", "H-E-B", "84.32", "Complete", "Groceries for the week", "Groceries", []),
@@ -36,4 +38,13 @@ def seed_demo(repo) -> bool:
             repo.save_flow(dict(date=date, from_account=source, to_account=destination,
                                 amount=amount, units="USD", status=status, name=name, category=category,
                                 tags=tags, notes="Illustrative demo record."))
+        for date, amount, status, name in [
+            ("2026-10-01 14:00", "0.125", "Complete", "Material sample"),
+            ("2026-10-02 11:00", "1.5", "Pending", "Material shipment"),
+            ("2026-10-09", "2.25", "Planned", "Upcoming materials"),
+        ]:
+            repo.save_flow(dict(date=date, from_account="Warehouse", to_account="Workshop",
+                                amount=amount, units="kg", status=status, name=name,
+                                category="Materials", tags=["Workshop"],
+                                notes="Illustrative material transfer."))
     return True

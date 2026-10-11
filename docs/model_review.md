@@ -77,9 +77,9 @@ An eligible flow adds its amount to To and subtracts it from From, in that flow'
 
 Each anchor describes the confirmed balance immediately before flows at its own timestamp. Earlier Complete flows are reflected in that snapshot; earlier eligible Pending/Planned effects enter estimates once. Unknown anchors remain unknown. Corrections to completed history may require adjusting the anchor. Exact arithmetic uses sufficient Decimal precision for all operands, independently of the caller's default precision.
 
-Graph selections identify account/unit pairs. Units have separate plots on one time range; Combine sums selected accounts only within each unit. Unknown pairs are identified explicitly, and an unknown constituent makes only its own combined unit unknown. A transfer cancels when both endpoints in the same unit are selected.
+Graph selections identify account/unit pairs. Units have separate plots on one time range; Combine sums selected accounts only within each unit and names those accounts in the legend. Unknown pairs are identified explicitly, and an unknown constituent makes only its own combined unit unknown. A transfer cancels when both endpoints in the same unit are selected.
 
-A flow at the graph start has before/after values at that same timestamp. Hover uses exact quantity/unit values, including both sides of a jump. Plot drawing uses Matplotlib floating-point coordinates; stored values and calculations do not. Ledger and category totals group by units.
+A flow at the graph start has before/after values at that same timestamp. Default dates fit selected account/unit starting dates and eligible flow times; manual dates persist until Fit Dates. The graph redraws after controls or saved values change. Each unit's vertical range fits its actual series with 10% padding, without forcing zero into view; wheel and toolbar zoom work both ways. Hover uses exact quantity/unit values, including both sides of a jump. Plot drawing uses Matplotlib floating-point coordinates; stored values and calculations do not. Ledger and category totals group by units.
 
 ## Experimental flow map
 

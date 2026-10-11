@@ -47,8 +47,8 @@ def select_accounts(*names):
 
 
 def update():
-    click_text("Update Graph")
-    pump(.2)
+    # Graph controls redraw automatically after the last date/control change.
+    pump(.35)
 
 
 def line(name):

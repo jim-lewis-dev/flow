@@ -266,7 +266,7 @@ class FlowApp(tk.Tk):
         for variable, key in ((self.chart_basis, "basis"), (self.chart_start, "start"),
                               (self.chart_end, "end"), (self.chart_combined, "combined")):
             variable.trace_add("write", lambda *args, k=key:
-                view.record("graph", "Graph settings", merge=k))
+                self._graph_setting_changed(k))
         for widget in (self.chart_basis_widget, self.chart_start_picker.entry,
                        self.chart_end_picker.entry):
             view.watch_entry(widget)
@@ -736,6 +736,8 @@ class FlowApp(tk.Tk):
         for key, button in self.nav_buttons.items():
             button.configure(bg="#e1eee7" if key == name else CARD, fg=TEAL if key == name else MUTED)
         if name == "charts":
+            if self._chart_auto_dates:
+                self._fit_chart_dates()
             self.draw_chart()
         elif name == "experimental":
             self.experimental.refresh()
@@ -1553,6 +1555,8 @@ class FlowApp(tk.Tk):
         if hasattr(self, "db_path_label"):
             self.db_path_label.configure(text=str(self.repo.path))
         if self.current_view == "charts":
+            if self._chart_auto_dates:
+                self._fit_chart_dates()
             self.draw_chart()
 
     def _build_experimental(self):
@@ -1870,8 +1874,12 @@ class FlowApp(tk.Tk):
         ttk.Button(account_buttons, text="None", width=5, style="Small.TButton", command=lambda: self._select_graph_accounts(False)).pack(side="left")
         self.chart_basis = tk.StringVar(self, "Confirmed")
         self.chart_basis_widget = self._field(controls, "Balance basis", self.chart_basis, 4, kind="choice", values=("Confirmed", "Including Pending", "Including Planned"))
-        self.chart_start = tk.StringVar(self, "2026-10-01")
-        self.chart_end = tk.StringVar(self, "2027-01-01")
+        self.chart_start = tk.StringVar(self, "")
+        self.chart_end = tk.StringVar(self, "")
+        self._chart_auto_dates = True
+        self._chart_setting_dates = False
+        self._chart_restoring = False
+        self._chart_redraw_pending = None
         for label, variable, row, attribute in (
                 ("From", self.chart_start, 5, "chart_start_picker"),
                 ("Through", self.chart_end, 6, "chart_end_picker")):
@@ -1883,7 +1891,8 @@ class FlowApp(tk.Tk):
             setattr(self, attribute, picker)
         self.chart_combined = tk.BooleanVar(self, False)
         ttk.Checkbutton(controls, text="Combine accounts within each unit", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
-        ttk.Button(controls, text="Update Graph", style="Primary.TButton", command=self.update_chart).grid(row=8, column=0, sticky="ew", pady=(14, 0))
+        self.chart_fit_dates_button = ttk.Button(controls, text="Fit Dates", command=self.fit_chart_dates)
+        self.chart_fit_dates_button.grid(row=8, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(controls, text="Export Graph…", command=self.export_chart).grid(row=9, column=0, sticky="ew", pady=(8, 0))
         chart_card = self._card(page)
         chart_card.grid(row=0, column=1, sticky="nsew")
@@ -1910,13 +1919,14 @@ class FlowApp(tk.Tk):
         toolbar_frame.grid(row=3, column=0, sticky="ew")
         self.chart_toolbar = NavigationToolbar2Tk(self.canvas, toolbar_frame, pack_toolbar=False)
         self.chart_toolbar.pack(fill="x")
-        self.chart_note = tk.StringVar(self, "Select accounts and update the graph. Pan, zoom, and click to inspect.")
+        self.chart_note = tk.StringVar(self, "Select accounts to see their balances. Scroll to zoom; drag with the toolbar to pan.")
         ttk.Label(chart_card, textvariable=self.chart_note, style="CardMuted.TLabel", wraplength=750).grid(row=4, column=0, sticky="w", pady=(10, 0))
         self.chart_inspect = tk.StringVar(self, "")
         ttk.Label(chart_card, textvariable=self.chart_inspect, style="CardMuted.TLabel", wraplength=750).grid(row=5, column=0, sticky="w", pady=(5, 0))
         self.canvas.mpl_connect("button_press_event", self.inspect_chart)
         self.canvas.mpl_connect("pick_event", self.toggle_chart_line)
         self.canvas.mpl_connect("motion_notify_event", self.hover_chart)
+        self.canvas.mpl_connect("scroll_event", self._scroll_chart)
         self.canvas.mpl_connect("figure_leave_event", self._hide_chart_tooltip)
         self.canvas.mpl_connect("axes_leave_event", self._hide_chart_tooltip)
         self.chart_line_map = {}
@@ -1959,28 +1969,91 @@ class FlowApp(tk.Tk):
                         for line in self.chart_series)
         limits = tuple((units, tuple(axes.get_xlim()), tuple(axes.get_ylim()))
                        for units, axes in self.chart_axes.items())
-        return self._graph_controls(), self._chart_rendered_controls, visible, limits
+        return self._graph_controls(), self._chart_rendered_controls, visible, limits, self._chart_auto_dates
 
     def _put_graph_state(self, state):
-        controls, rendered, visible, limits = state
-        self._put_graph_controls(rendered or controls)
-        self.draw_chart()
-        visibility = dict(visible)
-        for legend, line in self.chart_line_map.items():
-            line.set_visible(visibility.get((line.get_label(), self.chart_line_units[line]), True))
-            legend.set_alpha(1 if line.get_visible() else .25)
-        for units, xlim, ylim in limits:
-            axes = self.chart_axes.get(units)
-            if axes is not None:
-                axes.set_xlim(xlim)
-                axes.set_ylim(ylim)
-        self._put_graph_controls(controls)
-        self._chart_rendered_controls = rendered
-        self.canvas.draw_idle()
+        controls, rendered, visible, limits, auto_dates = state
+        if self._chart_redraw_pending is not None:
+            self.after_cancel(self._chart_redraw_pending)
+            self._chart_redraw_pending = None
+        self._chart_restoring = True
+        try:
+            self._chart_auto_dates = auto_dates
+            self._put_graph_controls(rendered or controls)
+            self.draw_chart()
+            visibility = dict(visible)
+            for legend, line in self.chart_line_map.items():
+                line.set_visible(visibility.get((line.get_label(), self.chart_line_units[line]), True))
+                legend.set_alpha(1 if line.get_visible() else .25)
+            for units, xlim, ylim in limits:
+                axes = self.chart_axes.get(units)
+                if axes is not None:
+                    axes.set_xlim(xlim)
+                    axes.set_ylim(ylim)
+            self._put_graph_controls(controls)
+            self._chart_rendered_controls = rendered
+            self.canvas.draw_idle()
+        finally:
+            self._chart_restoring = False
+
+    def _fit_chart_dates(self):
+        """Use the selected accounts' anchors and eligible flow instants."""
+        selected = {self.chart_account_pairs[i] for i in self.chart_accounts.curselection()}
+        pairs = {(name.casefold(), units) for name, units in selected}
+        dates = [normalize_date(account["opening_at"])
+                 for name, units in selected
+                 if (account := self.repo.get_account(name, units)) is not None]
+        statuses = {"Confirmed": ("Complete",),
+                    "Including Pending": ("Complete", "Pending"),
+                    "Including Planned": ("Complete", "Pending", "Planned")}[self.chart_basis.get()]
+        for flow in self.repo.list_flows():
+            if flow["status"] in statuses and (
+                    (flow["from_account"].casefold(), flow["units"]) in pairs or
+                    (flow["to_account"].casefold(), flow["units"]) in pairs):
+                dates.append(normalize_date(flow["date"]))
+        def display(when):
+            return when[:-9] if when.endswith(" 00:00:00") else when
+        self._chart_setting_dates = True
+        try:
+            self.chart_start.set(display(min(dates)) if dates else "")
+            self.chart_end.set(display(max(dates)) if dates else "")
+        finally:
+            self._chart_setting_dates = False
+
+    def fit_chart_dates(self):
+        """Return to a live range after manually choosing From or Through."""
+        if not hasattr(self, "view_history"):
+            return
+        before = self.view_history.before["graph"]
+        self._chart_auto_dates = True
+        self._fit_chart_dates()
+        self.draw_chart(remember=False)
+        self.view_history.record("graph", "Fit graph dates", before=before)
+
+    def _graph_setting_changed(self, key):
+        if self._chart_setting_dates or self._chart_restoring or self.view_history.depth:
+            return
+        if key in ("start", "end"):
+            self._chart_auto_dates = False
+            if self._chart_redraw_pending is not None:
+                self.after_cancel(self._chart_redraw_pending)
+            self._chart_redraw_pending = self.after(140, lambda k=key: self._apply_graph_settings(k))
+        else:
+            self._apply_graph_settings(key)
+
+    def _apply_graph_settings(self, key):
+        if self._chart_redraw_pending is not None:
+            self.after_cancel(self._chart_redraw_pending)
+            self._chart_redraw_pending = None
+        before = self.view_history.before["graph"]
+        if self._chart_auto_dates:
+            self._fit_chart_dates()
+        self.draw_chart(remember=False)
+        self.view_history.record("graph", "Graph settings", merge=key, before=before)
 
     def _graph_accounts_changed(self, event=None):
         if hasattr(self, "view_history"):
-            self.view_history.record("graph", "Graph accounts")
+            self._apply_graph_settings("accounts")
 
     def _select_graph_accounts(self, all_accounts):
         if all_accounts:
@@ -1990,9 +2063,8 @@ class FlowApp(tk.Tk):
         self._graph_accounts_changed()
 
     def update_chart(self):
-        before = self._graph_state()
+        """Compatibility for callers that ask to redraw; controls already redraw."""
         self.draw_chart()
-        self.view_history.record("graph", "Update graph", before=before)
 
     def _watch_chart_limits(self):
         for axes in self.chart_axes.values():
@@ -2025,16 +2097,20 @@ class FlowApp(tk.Tk):
         if hasattr(self, "view_history"):
             self.view_history.remember("graph")
 
-    def draw_chart(self):
+    def draw_chart(self, *, remember=True):
+        if self._chart_redraw_pending is not None:
+            self.after_cancel(self._chart_redraw_pending)
+            self._chart_redraw_pending = None
         if hasattr(self, "view_history"):
             with self.view_history.suspended():
                 self._draw_chart()
             self._watch_chart_limits()
-            self.view_history.remember("graph")
+            if remember:
+                self.view_history.remember("graph")
         else:
             self._draw_chart()
         self._chart_rendered_controls = self._graph_controls()
-        if hasattr(self, "view_history"):
+        if remember and hasattr(self, "view_history"):
             self.view_history.remember("graph")
 
     def _draw_chart(self):
@@ -2053,20 +2129,27 @@ class FlowApp(tk.Tk):
         self.chart_axes = {}
         self.chart_toolbar.update()
         try:
+            selected = [self.chart_account_pairs[i] for i in self.chart_accounts.curselection()]
             normalized = []
             for label, variable in (("From", self.chart_start), ("Through", self.chart_end)):
                 try:
-                    normalized.append(normalize_graph_date(variable.get()))
+                    raw = variable.get() or (datetime.now().date().isoformat() if not selected else "")
+                    normalized.append(normalize_graph_date(raw))
                 except ValueError as exc:
                     raise ValueError(f"{label}: invalid date {variable.get()!r}. Use YYYY-MM-DD; time is optional.") from exc
             start, end = map(normalize_date, normalized)
-            if len(normalized[1]) == 10:
+            if len(normalized[1]) == 10 and not self._chart_auto_dates:
                 end = end[:11] + "23:59:59"
             if end < start:
                 raise ValueError("Through must be on or after From.")
-            self.chart_start.set(normalized[0])
-            self.chart_end.set(normalized[1])
-            selected = [self.chart_account_pairs[i] for i in self.chart_accounts.curselection()]
+            self._chart_setting_dates = True
+            try:
+                if selected or self.chart_start.get():
+                    self.chart_start.set(normalized[0])
+                if selected or self.chart_end.get():
+                    self.chart_end.set(normalized[1])
+            finally:
+                self._chart_setting_dates = False
             accounts = [self.repo.get_account(name, units) for name, units in selected]
             accounts = [account for account in accounts if account is not None]
             statuses = {"Confirmed": ("Complete",),
@@ -2093,7 +2176,19 @@ class FlowApp(tk.Tk):
                 axes.spines["bottom"].set_color(LINE)
                 axes.grid(axis="y", color="#e8eee8", linewidth=.8)
                 axes.tick_params(axis="both", labelsize=9, colors=MUTED, length=0, pad=8)
-                axes.yaxis.set_major_formatter(ticker.FuncFormatter(lambda value, pos, u=units: f"{value:,.{decimal_places(u)}f}"))
+                def format_y_tick(value, pos, u=units, plotted_axes=axes):
+                    places = decimal_places(u)
+                    span = abs(plotted_axes.get_ylim()[1] - plotted_axes.get_ylim()[0])
+                    step = span / 8 or span
+                    needed = (max(places, math.ceil(-math.log10(step)) + 1)
+                              if step else places)
+                    if needed > 15:
+                        return f"{value:.15g}"
+                    if value and abs(value) < 10.0 ** -places:
+                        significant = max(4, needed + math.floor(math.log10(abs(value))) + 1)
+                        return f"{value:.{min(15, significant)}g}"
+                    return f"{value:,.{needed}f}"
+                axes.yaxis.set_major_formatter(ticker.FuncFormatter(format_y_tick))
                 axes.set_ylabel(units, color=INK, fontsize=10)
                 locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
                 axes.xaxis.set_major_locator(locator)
@@ -2111,6 +2206,7 @@ class FlowApp(tk.Tk):
                     axes.text(.5, .5, "Starting balance required\nSet a starting balance in Accounts.", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=13)
                 series = graph_timeline(valid, flows, start, end, statuses, combined=self.chart_combined.get())
                 all_lines = []
+                all_values = []
                 for index, ((name, series_units), rows) in enumerate(series.items()):
                     xs = [datetime.fromisoformat(date) for date, value in rows]
                     ys = [float(value) for date, value in rows]
@@ -2123,15 +2219,40 @@ class FlowApp(tk.Tk):
                     self.chart_series[line] = rows
                     self.chart_line_units[line] = series_units
                     all_lines.append(line)
+                    all_values.extend(ys)
                 if all_lines:
-                    legend = axes.legend(loc="upper left", frameon=False, fontsize=9, ncol=1 if len(all_lines) < 6 else 2)
+                    labels = [line.get_label() for line in all_lines]
+                    if self.chart_combined.get():
+                        labels = ["Combined: " + " + ".join(account["name"] for account in valid)]
+                    legend = axes.legend(all_lines, labels, loc="lower left",
+                                         bbox_to_anchor=(0, 1.005), frameon=False,
+                                         fontsize=9, ncol=1 if len(all_lines) < 6 else 2)
                     for legline, origline in zip(legend.get_lines(), all_lines):
                         legline.set_picker(6)
                         self.chart_line_map[legline] = origline
                 start_dt, end_dt = datetime.fromisoformat(start), datetime.fromisoformat(end)
-                padding = max((end_dt - start_dt) * .02, timedelta(seconds=1))
-                axes.set_xlim(start_dt - padding, end_dt + padding)
-                axes.axhline(0, color="#b4c7bb", linewidth=.8)
+                padding = max((end_dt - start_dt) * .02,
+                              timedelta(hours=1 if self._chart_auto_dates else 12)
+                              if start_dt == end_dt else timedelta(seconds=1))
+                # Keep the opening marker inside the hit-testable plot area.
+                # The limited leading margin will not expose a preceding
+                # midnight tick; the end stays on its selected calendar day.
+                first_day = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                last_day = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+                leading = min(padding, timedelta(minutes=1)) if start_dt == end_dt else padding
+                x_low = max(start_dt - leading, first_day - timedelta(hours=12))
+                x_high = min(end_dt + padding, last_day)
+                axes.set_xlim(x_low, x_high)
+                if all_values:
+                    low, high = min(all_values), max(all_values)
+                    padding_y = ((high - low) * .1 if high > low else
+                                 abs(low) * .1 if low else 10.0 ** -decimal_places(units))
+                    low_limit, high_limit = low - padding_y, high + padding_y
+                    if not all(math.isfinite(value) for value in (low_limit, high_limit)):
+                        raise ValueError(f"Outside graph display range: {units}.")
+                    if low_limit <= 0 <= high_limit:
+                        axes.axhline(0, color="#b4c7bb", linewidth=.8)
+                    axes.set_ylim(low_limit, high_limit)
                 now = datetime.now()
                 if start_dt <= now <= end_dt:
                     axes.axvline(now, color="#b4c7bb", linewidth=1, linestyle=":")
@@ -2146,9 +2267,10 @@ class FlowApp(tk.Tk):
                 axes.callbacks.connect("xlim_changed", self._hide_chart_tooltip)
                 axes.callbacks.connect("ylim_changed", self._hide_chart_tooltip)
             self.chart_tooltip = self.chart_tooltips[self.axes]
-            self.figure.subplots_adjust(left=.12, bottom=.11, right=.97, top=.94, hspace=.28)
+            self.figure.subplots_adjust(left=.14, bottom=.11, right=.97, top=.88, hspace=.48)
+            self.chart_toolbar.push_current()
             self.chart_title.configure(text="Account Balances · " + self.chart_basis.get())
-            self.chart_note.set("Hover for exact balances; click legend lines to hide/show.")
+            self.chart_note.set("Hover for exact balances; scroll to zoom, toolbar Home to fit; click legend lines to hide/show.")
             self.chart_inspection_context = (accounts, flows, statuses, ledger_balance_at)
         except (ValueError, sqlite3.Error) as exc:
             self.chart_message.set(str(exc))
@@ -2158,6 +2280,25 @@ class FlowApp(tk.Tk):
                 self.chart_axes = {"": self.axes}
             self.axes.text(.5, .5, "Unable to draw graph\nCheck the controls above.", ha="center", va="center", transform=self.axes.transAxes, color=MUTED, fontsize=13)
             self.chart_note.set("")
+        self.canvas.draw_idle()
+
+    def _scroll_chart(self, event):
+        """Wheel zooms in or out around the cursor, including the date axis."""
+        if (event.inaxes not in self.chart_axes.values() or event.xdata is None
+                or event.ydata is None or self.chart_toolbar.mode):
+            return
+        direction = getattr(event, "button", None)
+        if direction not in ("up", "down"):
+            return
+        if hasattr(self, "view_history"):
+            self.view_history.begin()
+        factor = .8 if direction == "up" else 1.25
+        axes = event.inaxes
+        for getter, setter, cursor in ((axes.get_xlim, axes.set_xlim, event.xdata),
+                                       (axes.get_ylim, axes.set_ylim, event.ydata)):
+            low, high = getter()
+            setter(cursor + (low - cursor) * factor,
+                   cursor + (high - cursor) * factor)
         self.canvas.draw_idle()
 
     def _hide_chart_tooltip(self, event=None):

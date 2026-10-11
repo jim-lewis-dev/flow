@@ -1,6 +1,6 @@
 # Flow
 
-Flow 0.5.18 tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities.
+Flow tracks quantities transferred between named accounts, in any unit. It is a local Python/Tk desktop app using SQLite and exact decimal quantities. Money is one possible resource, alongside materials, fuel, inventory or anything else you can measure.
 
 ## Install and update
 
@@ -20,7 +20,7 @@ For each subsequent patch, close Flow, download the ZIP into `~/Downloads`, then
 ~/projects/flow/update.py
 ```
 
-The updater uses the most recently downloaded `Flow_patch_*.zip`, prints the change description, validates it, replaces the application files, commits, then deletes that ZIP from Downloads. Launch separately with `~/projects/flow/launch.sh`. It prints the commit and exact rollback command. Pass a ZIP path to select a particular download. A bad newest download stops the update; it never silently installs an older one. Automatic selection also refuses a version older than the installed release.
+The updater uses the most recently downloaded `Flow_patch_*.zip`, prints the change description, validates it, replaces the application files, runs the bundled display-free tests, commits, then deletes that ZIP from Downloads. On test failure, it restores the previous files and keeps the ZIP. GUI tests still require a display and run separately. Launch with `~/projects/flow/launch.sh`. It prints the commit and exact rollback command. Pass a ZIP path to select a particular download. A bad newest download stops the update; it never silently installs an older one. Automatic selection also refuses a version older than the installed release.
 
 An existing repository must be clean: uncommitted changes or untracked files stop the update before anything is replaced or committed. Commit or remove those changes yourself, then rerun. Ignored records and snapshots do not block updates. Files removed from a later release are removed only when the previous release listed them. Other local files, databases and `.git` stay in place. No duplicate commit is made when the installed files are already identical; the already-committed ZIP is still removed. Failed updates keep the ZIP. If deletion alone fails, the successful commit stays and the error says the ZIP remains.
 
@@ -67,7 +67,7 @@ The app requests fullscreen through your window manager at startup. **Escape** r
 - **Account:** its name, with a separate starting balance and starting date/time for each unit it holds.
 - **Flow:** date, name, from, to, amount, units, status, category, tags, notes, plus a flow ID for editing/imports.
 
-There are no scenario or time-flag fields. Dates store `2026-10-02` or `2026-10-02 12:30:00`. A date alone means midnight in calculations; entered time is stored down to the second. Forecast collections and simulation controls are deferred.
+There are no scenario or time-flag fields. Dates store `2026-10-02` or `2026-10-02 12:30:00`. A date alone means midnight in calculations; entered time is stored down to the second. What-if forecast collections are deferred; Experimental animates existing saved flows.
 
 [The model review](docs/model_review.md) shows actual objects, every SQLite table and their interactions. [JSON examples](examples/record_objects.json) and [SQL rows](examples/review.sql) are generated from the repository. **JSON record** shows a selected saved record. **Data > View Schema** shows the database structure.
 
@@ -109,7 +109,7 @@ Select a ledger row and press **Ctrl+C**, then **Ctrl+V** to insert and select a
 
 Press **Delete** on a selected ledger row to remove it without confirmation. **Ctrl+Z** restores its complete record; **Ctrl+Y** removes it again. Delete inside a field edits text. Set **Status = Canceled** to keep a record while excluding it from every balance and graph. Unreferenced account/unit rows disappear; their starting balances remain available for reuse and undo.
 
-**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons use the same history. Record edits, additions, deletion, status changes, imports, suggestion removal/restoration, draft typing, New Flow/New Account clearing and row paste are reversible. Filters, ledger search, date ranges, sorting, graph account selections, basis, dates, combined balance, Update Graph, line visibility, pan/zoom and table column changes join that same action order. A filter changed after an edit undoes first; the next undo reverses the edit. Shortcuts work inside custom dropdowns and Notes. Consecutive typing in one focused field is one step. New changes discard redo. Closing the app or successfully restoring a database clears history; saved records stay saved. File exports, scrolling and opening a page or popup do not create undo steps.
+**Ctrl+Z** undoes and **Ctrl+Y** redoes during the current app session. Undo and Redo buttons use the same history. Record edits, additions, deletion, status changes, imports, suggestion removal/restoration, draft typing, New Flow/New Account clearing and row paste are reversible. Filters, ledger search, date ranges, sorting, graph account selections, basis, dates, combined balance, line visibility, pan/zoom and table column changes join that same action order. A filter changed after an edit undoes first; the next undo reverses the edit. Shortcuts work inside custom dropdowns and Notes. Consecutive typing in one focused field is one step. New changes discard redo. Closing the app or successfully restoring a database clears history; saved records stay saved. File exports, scrolling and opening a page or popup do not create undo steps.
 
 **Drag a column title** to move it in Flow Ledger or Accounts. Click a ledger title to sort; drag its edge to resize. Cell editing and Tab follow the displayed column order. Moves and resizing are undoable. Column order and view settings last for the current session.
 
@@ -148,11 +148,13 @@ Canceled contributes nothing. The starting balance is confirmed immediately befo
 
 AmEx -> Joe's Diner, 12 USD reduces AmEx's USD balance by 12 and increases Joe's Diner's USD balance by 12. Warehouse -> Workshop, 0.125 kg changes only their kg balances. Transfers conserve each unit independently. Refunds are reverse flows. Settle a Pending flow by updating its existing record.
 
-Select the **account/unit pairs** to graph; **All** and **None** control selection. Separate lines compare accounts. Different units get separate plots sharing the time range; Combine sums selected accounts **within each unit**, never across units. Missing starting balances identify their account and unit above the plot. Known pairs can still be plotted separately; a combined unit needs a starting balance for every selected pair in that unit. Selecting every endpoint conserves each unit's total.
+Select the **account/unit pairs** to graph; **All** and **None** control selection. Separate lines compare accounts. Different units get separate plots sharing the time range; Combine sums selected accounts **within each unit**, never across units. Its legend names the accounts included. Missing starting balances identify their account and unit above the plot. Known pairs can still be plotted separately; a combined unit needs a starting balance for every selected pair in that unit. Selecting every endpoint conserves each unit's total.
 
 When a flow occurs exactly at From, the graph shows the value immediately before those flows and the change at that same timestamp. A dot marks the starting value. Simultaneous flows are combined, and no event is moved to an invented earlier time. Combining accounts preserves both sides of the initial change too.
 
-From and Through have calendar buttons. Typed graph dates accept omitted leading zeros, such as `2026-10-1` or `2026-1-3`; optional local times remain supported. Selecting a calendar day preserves a valid entered time. A date-only Through includes the whole day. Invalid dates replace the old graph with a visible explanation identifying the field and value.
+The graph initially fits its dates to the selected accounts' starting dates and flows included by the balance basis, including future Planned flows only when that basis is selected. Canceled flows do not extend the range. From and Through have calendar buttons; manual dates remain in force until **Fit Dates** resets them. Typed graph dates accept omitted leading zeros, such as `2026-10-1` or `2026-1-3`; optional local times remain supported. Selecting a calendar day preserves a valid entered time. A date-only Through includes the whole day. Invalid dates show an explanation identifying the field and value.
+
+Selections, dates, balance basis and saved records redraw the graph automatically. Each unit's vertical range fits its plotted values with about 10% space above and below; it does not force zero into view. Use the toolbar or mouse wheel to zoom in and out; Home restores the fitted view.
 
 Hover near a line to see its account, exact quantity and units. Overlapping lines can show multiple accounts; vertical changes show the quantities before and after the change. Hidden lines are excluded. Click a time to inspect selected pairs, use the toolbar to pan/zoom, or export PNG/PDF. Calculations and hover quantities remain exact; Matplotlib uses floating-point coordinates to draw them. A quantity outside that display range gets an inline error rather than an infinite or silently zero plot; its stored value remains exact. Hover labels are excluded from exports.
 
@@ -188,7 +190,7 @@ Git rollback restores application code, not schema 6 records. Schema 5 code cann
 
 | File | Responsibility |
 | --- | --- |
-| `update.py` | Installs a verified ZIP, commits locally, then removes the downloaded ZIP. |
+| `update.py` | Installs a verified ZIP, runs display-free tests, commits locally, then removes the downloaded ZIP. |
 | `export.py` | Overwrites the project snapshot ZIP with current files and Git status/log. |
 | `tools/package_update.py` | Builds the application ZIP and its file manifest. |
 | `flowledger/core.py` | Validation, repository, transactions, audit and balance functions. |

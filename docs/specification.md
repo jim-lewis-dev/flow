@@ -1,10 +1,10 @@
 # Flow software specification
 
-10 October 2026 | Schema 6
+11 October 2026 | Schema 6
 
 ## Objects and editing
 
-01 / Flow - 10 October 2026
+01 / Flow - 11 October 2026
 
 A flow subtracts a quantity from one named account and adds it to another, in one unit. Accounts can hold several units; each account/unit pair has its own starting balance and time.
 
@@ -70,7 +70,7 @@ GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anc
 
 Within its unit, a flow contributes +amount to To and -amount to From. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Canceled contributes zero. Each pair has a confirmed anchor immediately before events at its own timestamp; unknown remains unknown.
 
-Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Readonly display: USD 2 decimals, others 4 (flowledger/units.py). Editors, JSON and hover keep exact values.
+Graph account/unit pairs separately. Combine sums each unit and names its members. Dates fit selected anchors and eligible flows; manual dates persist until Fit Dates. Controls and saved edits redraw. Each unit pads plotted values 10% without forcing zero. Wheel and toolbar zoom both ways. Hover shows exact values; drawing uses floating-point coordinates. Transfers cancel if both endpoints are selected. Readonly decimal display is configured in flowledger/units.py; stored quantities remain exact.
 
 Experimental animates ledger-filtered flows. First/last jump; previous/next step by timestamp; play/pause speed runs 0 to 5 (0 pauses). Hover pulses for flow details, accounts for saved anchors, balances from all flows and shown-flow In/Out totals. Canceled is excluded; node placement lasts this session. No data or schema changes.
 

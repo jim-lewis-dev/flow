@@ -34,7 +34,8 @@ shared = shared.replace("repo=Repository(path);seed_demo(repo)",
                         "repo=Repository(path);seed_units_data(repo)")
 exec(compile(shared, str(Path(__file__).with_name("ui_smoke.py")), "exec"))
 from flowledger.table_columns import displayed_columns
-from flowledger.core import format_quantity
+from flowledger.core import format_quantity, ledger_balance_at
+from flowledger.units import format_display
 
 
 def entry(field):
@@ -182,9 +183,10 @@ try:
     warehouse_kg = account_iid("Warehouse", "kg")
     warehouse_usd = account_iid("Warehouse", "USD")
     assert app.accounts_tree.exists(warehouse_kg) and app.accounts_tree.exists(warehouse_usd)
-    assert app.accounts_tree.set(warehouse_kg, "confirmed") == "10.123456788"
-    assert app.accounts_tree.set(warehouse_kg, "pending") == "9.623456788"
-    assert app.accounts_tree.set(warehouse_usd, "confirmed") == "87.655"
+    assert app.accounts_tree.set(warehouse_kg, "confirmed") == format_display("10.123456788", "kg")
+    assert app.accounts_tree.set(warehouse_kg, "pending") == format_display("9.623456788", "kg")
+    assert app.accounts_tree.set(warehouse_usd, "confirmed") == format_display("87.655", "USD")
+    assert str(ledger_balance_at(repo.get_account("Warehouse", "kg"), repo.list_flows(), app._now())) == "10.123456788"
     row(app.accounts_tree, warehouse_kg)
     assert app.account_vars["units"].get() == "kg"
     assert str(app.account_widgets["units"].entry.cget("state")) == "disabled"
@@ -192,7 +194,7 @@ try:
     key("Return")
     assert repo.get_account("Warehouse", "kg")["opening_amount"] == "12.123456789123456789"
     assert repo.get_account("Warehouse", "USD")["opening_amount"] == "100"
-    assert app.accounts_tree.set(warehouse_kg, "confirmed") == "12.123456788123456789"
+    assert app.accounts_tree.set(warehouse_kg, "confirmed") == format_display("12.123456788123456789", "kg")
     chord("Control_L", "z")
     assert repo.get_account("Warehouse", "kg")["opening_amount"] == "10.123456789"
     chord("Control_L", "y")
@@ -233,7 +235,6 @@ try:
     replace(start, "2026-10-01")
     replace(end, "2026-10-05")
     select_pairs(("Warehouse", "kg"), ("Warehouse", "USD"), ("Market", "kg"), ("Market", "USD"))
-    click_text("Update Graph")
     pump(.3)
     assert set(app.chart_axes) == {"kg", "USD"}, app.chart_axes
     assert len(app.chart_series) == 4
@@ -258,14 +259,12 @@ try:
     ok("Legend toggles and undo target one account/unit line even when the same account appears on another unit plot")
 
     click_text("Combine accounts within each unit")
-    click_text("Update Graph")
     pump(.25)
     assert len(app.chart_series) == 2 and set(app.chart_line_units.values()) == {"kg", "USD"}
     assert app.chart_series[plotted("Combined", "kg")][-1][1] == Decimal("12.123456789123456789")
     assert app.chart_series[plotted("Combined", "USD")][-1][1] == Decimal("120")
     hover("Combined", "kg", "2026-10-04", "12.123456789123456789")
     hover("Combined", "USD", "2026-10-04", "120")
-    chord("Control_L", "z")
     chord("Control_L", "z")
     assert not app.chart_combined.get() and len(app.chart_series) == 4
     ok("Combine totals only compatible units; kg and USD stay separate, and graph controls/rendering undo without changing flows")
@@ -277,7 +276,6 @@ try:
     key("Down")
     key("Return")
     assert app.chart_basis.get() == "Including Planned"
-    click_text("Update Graph")
     pump(.2)
     assert set(app.chart_axes) == {"kg"}
     assert app.chart_series[plotted("Warehouse", "kg")][-1][1] == Decimal("11.373456788123456789")
@@ -290,7 +288,7 @@ try:
     ok("Pending and planned flows forecast the selected unit with exact quantities and leave other units out")
 
     select_pairs(("Warehouse", "kWh"), ("Market", "kWh"))
-    click_text("Update Graph")
+    pump(.25)
     assert "Market" in app.chart_message.get() and "kWh" in app.chart_message.get()
     assert app.chart_series[plotted("Warehouse", "kWh")][-1][1] == Decimal("0.000000000864197532")
     ok("A missing starting balance identifies the exact account/unit pair while valid pairs remain graphed")
@@ -298,7 +296,6 @@ try:
     from PIL import ImageGrab
     docs = Path(__file__).resolve().parents[1] / "docs"
     select_pairs(("Warehouse", "kg"), ("Warehouse", "USD"))
-    click_text("Update Graph")
     pump(.3)
     ImageGrab.grab().save(docs / "Flow_Units_Graphs.png")
     click(app.nav_buttons["flows"])

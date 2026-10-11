@@ -257,7 +257,6 @@ index = next(i for i in range(app.chart_accounts.size()) if app.chart_account_pa
 bounds = app.chart_accounts.bbox(index)
 assert bounds
 click_xy(app.chart_accounts.winfo_rootx() + 20, app.chart_accounts.winfo_rooty() + bounds[1] + bounds[3] / 2)
-click_text('Update Graph')
 pump(.4)
 assert [account['name'] for account in app.chart_inspection_context[0]] == ['Cash']
 chart = app.canvas.get_tk_widget()

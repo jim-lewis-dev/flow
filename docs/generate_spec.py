@@ -38,7 +38,7 @@ else:
 styles = getSampleStyleSheet()
 styles.add(ParagraphStyle('FlowTitle', fontName=FONT+'-Bold', fontSize=25, leading=30, textColor=INK, spaceAfter=12))
 styles.add(ParagraphStyle('FlowSub', fontName=FONT+'-Bold', fontSize=12, leading=16, textColor=TEAL, spaceBefore=12, spaceAfter=6))
-styles.add(ParagraphStyle('FlowBody', fontName=FONT, fontSize=9.2, leading=13.8, textColor=INK, spaceAfter=7))
+styles.add(ParagraphStyle('FlowBody', fontName=FONT, fontSize=9.2, leading=13.8, textColor=INK, spaceAfter=6))
 styles.add(ParagraphStyle('FlowSmall', fontName=FONT, fontSize=8, leading=11.5, textColor=MUTED, spaceAfter=5))
 styles.add(ParagraphStyle('FlowCell', fontName=FONT, fontSize=8.1, leading=11.7, textColor=INK))
 styles.add(ParagraphStyle('FlowHead', fontName=FONT+'-Bold', fontSize=8.1, leading=11.7, textColor=WHITE))
@@ -62,8 +62,8 @@ def tbl(head, rows, widths):
         ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('LEFTPADDING', (0, 0), (-1, -1), 8),
         ('RIGHTPADDING', (0, 0), (-1, -1), 8),
-        ('TOPPADDING', (0, 0), (-1, -1), 7),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [WHITE, colors.HexColor('#F3F7F8')]),
         ('LINEBELOW', (0, 0), (-1, 0), 0.5, TEAL),
         ('LINEBELOW', (0, 1), (-1, -1), 0.35, GRID),
@@ -75,7 +75,7 @@ PAGES = []
 def page(title, subtitle, blocks):
     PAGES.append((title, subtitle, blocks))
 
-page('Objects and editing', '01 / Flow - 10 October 2026', [
+page('Objects and editing', '01 / Flow - 11 October 2026', [
  ('p', 'A flow subtracts a quantity from one named account and adds it to another, in one unit. Accounts can hold several units; each account/unit pair has its own starting balance and time.'),
  ('code', '{\n  "name": "Warehouse", "units": "kg",\n  "opening_amount": "20",\n  "opening_at": "2026-10-01 00:00:00"\n}'),
  ('code', '{\n  "flow_id": "22222222-2222-4222-8222-222222222222",\n  "date": "2026-10-03 09:15:06", "name": "Materials",\n  "from_account": "Warehouse", "to_account": "Workshop",\n  "amount": "0.125", "units": "kg", "status": "Complete",\n  "category": "Materials", "tags": ["Project"],\n  "notes": "Exact fractional quantity"\n}'),
@@ -108,7 +108,7 @@ page('Storage and calculations', '02 / Schema 6 - seven tables', [
  ('sub', 'Save, calculate and inspect'),
  ('p', 'GUI draft -> Repository.save_flow() -> validate -> write flow, endpoint/unit anchors, choices, tags and audit atomically. Failed writes roll back. Ctrl+Z/Ctrl+Y reverse records/deletion, drafts, filters, searches, graph controls and all plot/column changes in one session order.'),
  ('p', 'Within its unit, a flow contributes +amount to To and -amount to From. Confirmed includes Complete; Including Pending adds Pending; Including Planned adds Planned. Canceled contributes zero. Each pair has a confirmed anchor immediately before events at its own timestamp; unknown remains unknown.'),
- ('p', 'Select account/unit pairs to graph. Different units have separate plots sharing time. Combine sums selected accounts within each unit only. Hover gives exact quantity/unit; drawing uses floating-point coordinates. A transfer cancels if both endpoints are selected in its unit. Readonly display: USD 2 decimals, others 4 (flowledger/units.py). Editors, JSON and hover keep exact values.'),
+ ('p', 'Graph account/unit pairs separately. Combine sums each unit and names its members. Dates fit selected anchors and eligible flows; manual dates persist until Fit Dates. Controls and saved edits redraw. Each unit pads plotted values 10% without forcing zero. Wheel and toolbar zoom both ways. Hover shows exact values; drawing uses floating-point coordinates. Transfers cancel if both endpoints are selected. Readonly decimal display is configured in flowledger/units.py; stored quantities remain exact.'),
  ('p', 'Experimental animates ledger-filtered flows. First/last jump; previous/next step by timestamp; play/pause speed runs 0 to 5 (0 pauses). Hover pulses for flow details, accounts for saved anchors, balances from all flows and shown-flow In/Out totals. Canceled is excluded; node placement lasts this session. No data or schema changes.'),
  ('sub', 'Migration and scope'),
  ('p', 'Schema 5 -> 6 changes Void to Canceled in one transaction, without a backup file. Failure rolls back schema and data. IDs, quantities, anchors, metadata and audit remain exact. Older schema 1-4 conversions retain their one-time backup/recovery. Databases and backups stay out of Git and project snapshots.'),
@@ -126,7 +126,7 @@ def page_footer(c, doc):
 
 def build():
     story=[]
-    md=['# Flow software specification','', '10 October 2026 | Schema 6','']
+    md=['# Flow software specification','', '11 October 2026 | Schema 6','']
     for n,(title,subtitle,blocks) in enumerate(PAGES):
         if n: story.append(PageBreak())
         story.append(p(subtitle.upper(),'FlowSmall'))
