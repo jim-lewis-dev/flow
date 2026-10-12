@@ -94,6 +94,8 @@ class FlowApp(tk.Tk):
         self.ledger_rows = {}
         self.sort_column = "date"
         self.sort_reverse = True
+        self.account_sort_column = None
+        self.account_sort_reverse = False
         self.status_message = tk.StringVar(self, "Ready")
         self._configure_styles()
         self._build_shell()
@@ -255,6 +257,8 @@ class FlowApp(tk.Tk):
         view.register("dates", lambda: (self.filter_start.get(), self.filter_end.get()),
                       self._put_date_filters)
         view.register("sort", lambda: (self.sort_column, self.sort_reverse), self._put_sort)
+        view.register("account_sort", lambda: (self.account_sort_column, self.account_sort_reverse),
+                      self._put_account_sort)
         for key, tree in (("ledger", self.ledger), ("accounts", self.accounts_tree)):
             view.register("columns:" + key, lambda t=tree: displayed_columns(t),
                           lambda values, t=tree: self._put_column_order(t, values))
@@ -382,6 +386,10 @@ class FlowApp(tk.Tk):
     def _put_sort(self, value):
         self.sort_column, self.sort_reverse = value
         self.refresh_ledger()
+
+    def _put_account_sort(self, value):
+        self.account_sort_column, self.account_sort_reverse = value
+        self.refresh_accounts()
 
     def _prepare_column_move(self, kind):
         self._finish_existing(kind)
@@ -1633,7 +1641,8 @@ class FlowApp(tk.Tk):
                  ("confirmed", "Confirmed", 18), ("pending", "Including Pending", 18)]
         self.accounts_tree = ttk.Treeview(card, columns=[s[0] for s in specs], show="headings", selectmode="browse")
         for key, label, weight in specs:
-            self.accounts_tree.heading(key, text=label, anchor="e" if key in {"balance", "confirmed", "pending"} else "w")
+            self.accounts_tree.heading(key, text=label, anchor="e" if key in {"balance", "confirmed", "pending"} else "w",
+                                       command=lambda k=key: self.sort_accounts(k))
             self.accounts_tree.column(key, width=80, minwidth=20, stretch=False, anchor="e" if key in {"balance", "confirmed", "pending"} else "w")
         self._fit_columns(self.accounts_tree, {k: w for k, label, w in specs})
         self.accounts_tree.grid(row=1, column=0, sticky="nsew")
@@ -1650,7 +1659,8 @@ class FlowApp(tk.Tk):
         self.account_column_drag = ColumnDrag(self.accounts_tree,
             prepare=lambda: self._prepare_column_move("account"),
             changed=lambda before: self._columns_moved("accounts", before),
-            resized=lambda before: self._columns_resized("accounts", before))
+            resized=lambda before: self._columns_resized("accounts", before),
+            click=self.sort_accounts)
         self.account_rows = {}
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda row: "Starting balance immediately before " + self._account_record(row)["opening_at"] if self._account_record(row) else None)
         ttk.Label(card, text="Click a row · Double-click Starting Balance or Starting Date · Changes save automatically", style="CardMuted.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(12, 0))
@@ -1710,6 +1720,32 @@ class FlowApp(tk.Tk):
         self.accounts_tree.set(name, "balance", opening)
         self.accounts_tree.set(name, "anchor", self.account_vars["date"].get()[:10])
 
+    def sort_accounts(self, key):
+        if not self._finish_existing("account") or not self.account_cell_editor.close():
+            return
+        self.account_sort_reverse = (not self.account_sort_reverse
+                                     if self.account_sort_column == key else False)
+        self.account_sort_column = key
+        self.refresh_accounts()
+        if hasattr(self, "view_history"):
+            self.view_history.record("account_sort", "Sort accounts")
+
+    @staticmethod
+    def _sorted_account_rows(rows, column, reverse):
+        """Sort numeric balances by value and leave unknown balances last."""
+        if column in {"balance", "confirmed", "pending"}:
+            index = {"balance": 1, "confirmed": 2, "pending": 3}[column]
+            known = [row for row in rows if row[index] is not None]
+            unknown = [row for row in rows if row[index] is None]
+            known.sort(key=lambda row: parse_quantity(row[index], allow_negative=True),
+                       reverse=reverse)
+            return known + unknown
+        if column == "anchor":
+            return sorted(rows, key=lambda row: row[0]["opening_at"], reverse=reverse)
+        if column in {"name", "units"}:
+            return sorted(rows, key=lambda row: row[0][column].casefold(), reverse=reverse)
+        return rows
+
     def refresh_accounts(self):
         if not hasattr(self, "accounts_tree"):
             return
@@ -1724,12 +1760,17 @@ class FlowApp(tk.Tk):
         now = self._now()
         def quantity(value, units):
             return "Unknown" if value is None else format_display(value, units)
-        for index, account in enumerate(accounts):
-            confirmed = ledger_balance_at(account, flows, now, ("Complete",))
-            pending = ledger_balance_at(account, flows, now, ("Complete", "Pending"))
+        rows = [(account, account["opening_amount"],
+                 ledger_balance_at(account, flows, now, ("Complete",)),
+                 ledger_balance_at(account, flows, now, ("Complete", "Pending")))
+                for account in accounts]
+        if self.account_sort_column is not None:
+            rows = self._sorted_account_rows(rows, self.account_sort_column,
+                                             self.account_sort_reverse)
+        for index, (account, opening, confirmed, pending) in enumerate(rows):
             key = self._account_key(account)
             self.account_rows[key] = account
-            self.accounts_tree.insert("", "end", iid=key, values=(account["name"], account["units"], quantity(account["opening_amount"], account["units"]), account["opening_at"][:10], quantity(confirmed, account["units"]), quantity(pending, account["units"])), tags=("odd" if index % 2 else "even",))
+            self.accounts_tree.insert("", "end", iid=key, values=(account["name"], account["units"], quantity(opening, account["units"]), account["opening_at"][:10], quantity(confirmed, account["units"]), quantity(pending, account["units"])), tags=("odd" if index % 2 else "even",))
         if self.account_editing and not self.accounts_tree.exists(self.account_editing):
             self.new_account(focus=False, confirm=False)
         else:

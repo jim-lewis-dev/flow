@@ -294,6 +294,51 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.repo.get_account("Checking"), original)
         self.assertIsNone(self.repo.get_account("Accidental new account"))
 
+    def test_header_sort_reverses_and_keeps_editing_bound_to_account(self):
+        for name, opening in (("Small", "9"), ("Missing", None)):
+            self.repo.save_account(name, opening, "2026-10-01")
+            self.repo.save_flow(dict(units="USD", date="2026-10-01", from_account="Checking",
+                                     to_account=name, amount="1", status="Canceled"))
+        self.app.refresh_all()
+        tree = self.app.accounts_tree
+        self.pump()
+
+        def click_heading(field):
+            columns = list(tree["displaycolumns"])
+            if columns == ["#all"]:
+                columns = list(tree["columns"])
+            x = sum(tree.column(col, "width") for col in columns[:columns.index(field)])
+            x += tree.column(field, "width") // 2
+            self.assertEqual(tree.identify_region(x, 5), "heading")
+            self.click_time += 1000
+            tree.event_generate("<ButtonPress-1>", x=x, y=5, time=self.click_time)
+            tree.event_generate("<ButtonRelease-1>", x=x, y=5, time=self.click_time + 40)
+            self.pump()
+
+        def names():
+            return [tree.set(key, "name") for key in tree.get_children()]
+
+        click_heading("balance")
+        self.assertEqual(names(), ["AmEx", "Small", "Checking", "Missing"])
+        click_heading("balance")
+        self.assertEqual(names(), ["Checking", "Small", "AmEx", "Missing"])
+        click_heading("name")
+        self.assertEqual(names(), ["AmEx", "Checking", "Missing", "Small"])
+        self.app.refresh_accounts()
+        self.assertEqual(names(), ["AmEx", "Checking", "Missing", "Small"])
+        self.app.undo()
+        self.assertEqual(names(), ["Checking", "Small", "AmEx", "Missing"])
+        self.app.redo()
+        self.assertEqual(names(), ["AmEx", "Checking", "Missing", "Small"])
+
+        self.click_cell("Small")
+        self.replace_cell("Small", "balance", "11")
+        self.finish_cell()
+        self.assertEqual(self.repo.get_account("Small")["opening_amount"], "11")
+        self.assertEqual(self.app.account_editing, account_key("Small"))
+        self.assertEqual(names(), ["AmEx", "Checking", "Missing", "Small"])
+
+
     def test_keyboard_navigation_skips_read_only_columns_and_completes_edits(self):
         original = self.repo.get_account("Checking")
         self.click_cell("Checking")
@@ -480,6 +525,27 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.app.new_account()
         self.settle()
         self.assert_new_form()
+
+
+class AccountRowSortTests(unittest.TestCase):
+    def test_dates_use_full_timestamp_and_values_sort_as_decimals(self):
+        from flowledger.gui import FlowApp
+
+        rows = [
+            ({"name": "Unknown", "units": "kg", "opening_at": "2026-10-02 00:00:00"}, None, None, None),
+            ({"name": "Ten", "units": "USD", "opening_at": "2026-10-01 10:00:00"}, "10", "10", "10"),
+            ({"name": "Two", "units": "USD", "opening_at": "2026-10-01 09:00:00"}, "2", "2", "2"),
+            ({"name": "Debt", "units": "USD", "opening_at": "2026-10-01 11:00:00"}, "-3", "-3", "-3"),
+        ]
+
+        def names(column, reverse=False):
+            return [row[0]["name"] for row in FlowApp._sorted_account_rows(rows, column, reverse)]
+
+        for column in ("balance", "confirmed", "pending"):
+            self.assertEqual(names(column), ["Debt", "Two", "Ten", "Unknown"])
+            self.assertEqual(names(column, True), ["Ten", "Two", "Debt", "Unknown"])
+        self.assertEqual(names("anchor"), ["Two", "Ten", "Debt", "Unknown"])
+        self.assertEqual(names("name"), ["Debt", "Ten", "Two", "Unknown"])
 
 
 if __name__ == "__main__":
