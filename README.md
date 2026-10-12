@@ -38,7 +38,7 @@ A flow has a date/time, name, **from**, **to**, amount, units, status, category,
 }
 ```
 
-An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
+An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. Click a column heading to sort balances, and click again to reverse the order. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
 
 | Balance basis | Included flows |
 | --- | --- |
