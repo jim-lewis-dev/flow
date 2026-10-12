@@ -197,7 +197,7 @@ class AccountVisibilityGuiTests(unittest.TestCase):
             self.assertIn("invalid date", self.app.chart_message.get())
             bell.assert_not_called()
         self.assertEqual(self.app.tk.call("info", "body", "bell"), "")
-        self.assertFalse(self.app.tk.call("bell"))
+        self.assertEqual(self.app.tk.eval("bell"), "")
 
     def click_empty_ledger(self):
         tree = self.app.ledger

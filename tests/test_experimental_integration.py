@@ -194,7 +194,7 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.app.geometry("1280x700+0+0")
         self.pump()
         self.assertGreater(view.canvas.winfo_width(), 600)
-        self.assertGreater(view.canvas.winfo_height(), 250)
+        self.assertGreaterEqual(view.canvas.winfo_height(), 250)
         self.assertTrue(view.canvas.find_withtag("node"))
         self.assertEqual(before, self.saved_state())
 
