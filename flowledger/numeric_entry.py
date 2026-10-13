@@ -130,11 +130,13 @@ def evaluate_quantity(text: str) -> Decimal:
     """Evaluate a quantity entry, returning a finite Decimal without code execution.
 
     Operators use ordinary precedence and division is left-associative. A leading
-    equals sign is unnecessary and is rejected. Bounded input and nesting keep
+    equals sign is optional. Bounded input and nesting keep
     accidental or hostile calculations from occupying the UI indefinitely.
     """
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Enter a number or a calculation.")
+    if text.lstrip().startswith("="):
+        text = text.lstrip()[1:]
     # Existing plain quantities have no entry-size limit. Bound only expressions
     # that need calculation, rather than imposing a new limit on stored numbers.
     try:
