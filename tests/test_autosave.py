@@ -411,7 +411,7 @@ class AutosaveTests(unittest.TestCase):
         self.shortcut("<Control-s>", entry)
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
         self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
-        self.assertIn("decimal quantity", self.app.form_feedback.get())
+        self.assertEqual(self.app.form_feedback.get(), "Use numbers, +, -, *, / and parentheses only.")
         self.assertNotEqual(self.app.status_message.get(), "Saved")
 
     def test_new_and_add_reset_undo_baseline_when_date_keeps_focus(self):

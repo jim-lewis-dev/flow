@@ -46,6 +46,14 @@ def grouped_events(events: Iterable[dict]) -> list[tuple[str, list[dict]]]:
     return groups
 
 
+def flow_direction(flow: dict) -> tuple[str, str]:
+    """Return the actual resource direction without changing the signed record."""
+    source, target = flow["from_account"], flow["to_account"]
+    if parse_quantity(flow["amount"], allow_negative=True) < 0:
+        return target, source
+    return source, target
+
+
 def _log10_positive(value: Decimal) -> float:
     """Find log10 without converting potentially huge quantities to float."""
     digits = value.as_tuple().digits[:16]
@@ -59,10 +67,12 @@ def pulse_radius(amount: str | Decimal, max_amount: str | Decimal) -> float:
     The compression is for drawing only. Quantity comparisons and the ledger
     retain their exact Decimal values, including fractions and large numbers.
     """
-    quantity = parse_quantity(amount)
-    maximum = parse_quantity(max_amount)
-    if quantity <= 0 or maximum <= 0:
-        raise ValueError("Pulse quantities must be positive.")
+    # copy_abs preserves the exact Decimal digits even outside the current
+    # arithmetic precision. Signs determine direction, not visible size.
+    quantity = parse_quantity(amount, allow_negative=True).copy_abs()
+    maximum = parse_quantity(max_amount, allow_negative=True).copy_abs()
+    if not quantity:
+        return 5.0
     if quantity >= maximum:
         return 17.0
     if maximum < 1:

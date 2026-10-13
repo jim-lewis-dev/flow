@@ -23,6 +23,7 @@ from .suggestions import SuggestionPreferences
 from .filters import CheckFilter
 from .calendar_widget import CalendarEntry
 from .graphing import graph_timeline, normalize_graph_date
+from .numeric_entry import evaluate_quantity
 from .widgets import FilterCombo, TreeTooltip
 from .ledger_editor import LedgerEditor
 from .account_editor import AccountEditor
@@ -540,14 +541,48 @@ class FlowApp(tk.Tk):
                 return
             if key == "date":
                 self._normalize_date_field(kind)
+            elif key == ("amount" if kind == "flow" else "opening"):
+                if not self._normalize_numeric_field(kind):
+                    return
             self._finish_existing(kind)
         self.after_idle(finish)
 
     def _field_enter(self, kind, key):
         if key == "date":
             self._normalize_date_field(kind)
+        elif key == ("amount" if kind == "flow" else "opening"):
+            if not self._normalize_numeric_field(kind):
+                return "break"
         self._finish_existing(kind)
         return "break"
+
+    def _normalize_numeric_field(self, kind):
+        """Resolve new draft arithmetic without adding a record."""
+        if self._draft_identity(kind):
+            return True  # Existing edits evaluate in their atomic save path.
+        variable = self.form_vars["amount"] if kind == "flow" else self.account_vars["opening"]
+        raw = variable.get().strip()
+        if not raw:
+            return True  # An unfinished amount or unknown starting balance.
+        try:
+            value = quantity_text(evaluate_quantity(raw))
+        except ValueError as exc:
+            if kind == "flow":
+                self._feedback(str(exc), True)
+            else:
+                self.account_feedback.set(str(exc))
+                self.status_message.set(str(exc))
+            return False
+        try:
+            parse_quantity(raw)
+        except ValueError:
+            variable.set(value)  # Replace calculations, preserving plain input formatting.
+        if kind == "flow":
+            self.form_feedback.set("From, To, Amount, and Units required")
+        else:
+            self.account_feedback.set("Blank = unknown")
+        self.status_message.set("Ready")
+        return True
 
     def _escape_field(self, widget, kind, key):
         if isinstance(widget, FilterCombo) and widget.popup is not None:
@@ -1189,7 +1224,7 @@ class FlowApp(tk.Tk):
 
     def _flow_data(self):
         data = {key: var.get().strip() for key, var in self.form_vars.items()}
-        data["amount"] = quantity_text(parse_quantity(data["amount"]))
+        data["amount"] = quantity_text(evaluate_quantity(data["amount"]))
         try:
             data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
         except csv.Error as exc:
@@ -1223,10 +1258,19 @@ class FlowApp(tk.Tk):
                 message = "Updated: " + result["name"]
             else:
                 raw = self.account_vars["opening"].get().strip()
-                amount = quantity_text(parse_quantity(raw, allow_negative=True)) if raw else None
+                amount = quantity_text(evaluate_quantity(raw)) if raw else None
                 when = normalize_date(self._account_when())
                 account = self._account_record(self.account_editing)
                 result = self.history.perform("Edit account", lambda: self.repo.save_account(account["name"], opening_amount=amount, opening_at=when, units=account["units"]))
+                try:
+                    if raw:
+                        parse_quantity(raw)
+                except ValueError:
+                    self._loading = True
+                    try:
+                        self.account_vars["opening"].set(result["opening_amount"])
+                    finally:
+                        self._loading = False
                 self._clean_account = self._account_snapshot()
                 self.account_feedback.set("Edits save automatically · Blank = unknown")
                 message = "Updated: " + result["name"]
@@ -1972,7 +2016,7 @@ class FlowApp(tk.Tk):
         self._close_popups()
         try:
             raw = self.account_vars["opening"].get().strip()
-            amount = quantity_text(parse_quantity(raw, allow_negative=True)) if raw else None
+            amount = quantity_text(evaluate_quantity(raw)) if raw else None
             at = normalize_date(self._account_when())
             name = self.account_vars["name"].get().strip()
             units = self.account_vars["units"].get().strip()
@@ -2823,9 +2867,9 @@ class FlowApp(tk.Tk):
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(2, weight=1)
         ttk.Label(dialog, text="Category totals", font=(FONT, 20, "bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(20, 8))
-        ttk.Label(dialog, text="Flow volume · Each flow counted once, including transfers · Current ledger filter", style="Muted.TLabel", wraplength=800).grid(row=1, column=0, sticky="w", padx=22, pady=(0, 18))
+        ttk.Label(dialog, text="Signed totals · Current ledger filter", style="Muted.TLabel", wraplength=800).grid(row=1, column=0, sticky="w", padx=22, pady=(0, 18))
         tree = ttk.Treeview(dialog, columns=("category", "status", "amount", "units", "count"), show="headings")
-        for key, title, width in [("category", "Category", 230), ("status", "Status", 140), ("amount", "Flow Volume", 190), ("units", "Units", 100), ("count", "Flows", 90)]:
+        for key, title, width in [("category", "Category", 230), ("status", "Status", 140), ("amount", "Net Amount", 190), ("units", "Units", 100), ("count", "Flows", 90)]:
             tree.heading(key, text=title)
             tree.column(key, width=width, anchor="e" if key in {"amount", "count"} else "w")
         tree.grid(row=2, column=0, sticky="nsew", padx=22, pady=(0, 22))

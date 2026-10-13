@@ -1,6 +1,6 @@
 """Exact flow arithmetic and transactional SQLite storage.
 
-The database is authoritative. Each positive flow subtracts its exact quantity
+The database is authoritative. Each flow subtracts its signed exact quantity
 from its source and adds it to its destination, in the same case-sensitive units.
 An account can have an independent starting balance for each unit. Quantities
 are decimal text in SQLite and Decimal values in arithmetic, without rounding.
@@ -91,11 +91,12 @@ def format_money(cents: int) -> str:
     return f"{sign}{abs(cents) // 100:,}.{abs(cents) % 100:02d}"
 
 
-def parse_quantity(text: Any, allow_negative: bool = False) -> Decimal:
+def parse_quantity(text: Any, allow_negative: bool = True) -> Decimal:
     """Read an exact quantity without assuming currency or decimal precision.
 
     Plain decimal text, correctly grouped commas and omitted leading zeros are
-    accepted. Binary floats, currency symbols and exponent notation are refused.
+    accepted, including zero and negatives. Binary floats, currency symbols
+    and exponent notation are refused.
     Decimal objects are accepted for internal arithmetic without conversion loss.
     """
     if isinstance(text, bool) or isinstance(text, float) or not isinstance(text, (str, int, Decimal)):
@@ -113,7 +114,7 @@ def parse_quantity(text: Any, allow_negative: bool = False) -> Decimal:
     if not amount.is_finite():
         raise ValueError("Quantity must be finite.")
     if amount < 0 and not allow_negative:
-        raise ValueError("Amount cannot be negative; reverse From and To instead.")
+        raise ValueError("Quantity cannot be negative.")
     return amount
 
 
@@ -283,7 +284,7 @@ class Repository:
             raise ValueError("Database is missing its baseline scenario.")
         if version >= 5:
             for units, amount in conn.execute("SELECT units,amount FROM flows"):
-                if _name(units, "Units") != units or quantity_text(amount) != amount or parse_quantity(amount) <= 0:
+                if _name(units, "Units") != units or quantity_text(amount) != amount:
                     raise ValueError("Database contains an invalid flow quantity or units.")
             for units, amount, when in conn.execute("SELECT units,opening_amount,opening_at FROM account_balances"):
                 if _name(units, "Units") != units or (amount is not None and quantity_text(amount) != amount):
@@ -556,8 +557,6 @@ class Repository:
         if _key(source) == _key(destination):
             raise ValueError("From and To must be different accounts.")
         amount = parse_quantity(data.get("amount", ""))
-        if amount <= 0:
-            raise ValueError("Amount must be greater than zero.")
         amount = quantity_text(amount)
         units = _name(data.get("units"), "Units")
         status = data.get("status", "Complete")
