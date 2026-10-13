@@ -30,7 +30,8 @@ class LedgerEditor:
         self.tree.bind("<Configure>", self.queue_position, add="+")
         self.tree.bind("<Unmap>", lambda event: self.close(), add="+")
         for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.tree.bind(sequence, lambda event: None if self.close() else "break", add="+")
+            self.tree.bind(sequence, lambda event: None if self.close(
+                focus_tree=self.widget is not None) else "break", add="+")
         app.bind("<Destroy>", self._destroyed, add="+")
 
     def _double_click(self, event):
@@ -66,8 +67,9 @@ class LedgerEditor:
     def _select_draft(self, row):
         # A filter may hide then reveal this same draft with no selected row.
         # Resolve selection now, before a queued TreeviewSelect can reload it.
-        if self.tree.selection() != (row,):
+        if row not in self.tree.selection():
             self.tree.selection_set(row)
+        self.tree.focus(row)
         self.app._select_flow()
 
     def open(self, flow_id, field):

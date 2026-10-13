@@ -17,7 +17,8 @@ from tkinter import ttk, filedialog, messagebox
 
 from . import __version__
 from .core import (STATUSES, ledger_balance_at, normalize_flow_date, parse_quantity,
-                   format_quantity, quantity_text, decimal_sum, normalize_date)
+                   format_quantity, quantity_text, decimal_sum, normalize_date,
+                   FLOW_SORT_FIELDS, flow_sort_key)
 from .exchange import read_import, preview_import, commit_import, export_flows
 from .suggestions import SuggestionPreferences
 from .filters import CheckFilter
@@ -32,6 +33,7 @@ from .view_history import ViewHistory
 from .experimental import ExperimentalView
 from .units import decimal_places, format_display
 from .table_columns import ColumnDrag, displayed_columns
+from .table_selection import enable_multi_selection
 
 BG = "#f2f5f2"
 CARD = "#ffffff"
@@ -89,6 +91,9 @@ class FlowApp(tk.Tk):
         self.account_editing = None
         self._flow_selection = None
         self._account_selection = None
+        self._flow_selected_ids = ()
+        self._account_selected_ids = ()
+        self._ledger_order = []
         self._confirming = False
         self.form_vars = {k: tk.StringVar(self) for k in ("date", "name", "from_account", "to_account", "amount", "units", "status", "category", "tags")}
         self.form_widgets = {}
@@ -258,7 +263,7 @@ class FlowApp(tk.Tk):
         view.register("dates", lambda: (self.filter_start.get(), self.filter_end.get()),
                       self._put_date_filters)
         view.register("ledger_filters", self._ledger_filter_state, self._put_ledger_filter_state)
-        view.register("sort", lambda: (self.sort_column, self.sort_reverse), self._put_sort)
+        view.register("sort", self._ledger_sort_state, self._put_sort)
         view.register("account_sort", lambda: (self.account_sort_column, self.account_sort_reverse),
                       self._put_account_sort)
         view.register("account_as_of", self.account_as_of.get, self._put_account_as_of)
@@ -426,7 +431,9 @@ class FlowApp(tk.Tk):
         self.refresh_ledger()
 
     def _put_sort(self, value):
-        self.sort_column, self.sort_reverse = value
+        self.sort_column, self.sort_reverse = value[:2]
+        if len(value) > 2:
+            self._ledger_order = list(value[2])
         self.refresh_ledger()
 
     def _put_account_sort(self, value):
@@ -738,15 +745,31 @@ class FlowApp(tk.Tk):
                 if focused == str(entry):
                     self._begin_field(kind, key)
 
-    def _set_flow_selection(self, flow_id):
-        self._flow_selection = flow_id if flow_id and self.ledger.exists(flow_id) else None
-        self.ledger.selection_set((self._flow_selection,) if self._flow_selection else ())
+    @staticmethod
+    def _active_tree_row(tree, previous=None):
+        selected = tree.selection()
+        focused = tree.focus()
+        if focused in selected:
+            return focused
+        if previous in selected:
+            return previous
+        return selected[0] if selected else None
+
+    def _set_flow_selection(self, flow_id, *, selection=None):
+        selected = ((flow_id,) if flow_id else ()) if selection is None else selection
+        selected = tuple(fid for fid in selected if self.ledger.exists(fid))
+        self._flow_selection = flow_id if flow_id in selected else None
+        self._flow_selected_ids = selected
+        self.ledger.selection_set(selected)
         self.ledger.focus(self._flow_selection or "")
         self._show_selection()
 
-    def _set_account_selection(self, name):
-        self._account_selection = name if name and self.accounts_tree.exists(name) else None
-        self.accounts_tree.selection_set((self._account_selection,) if self._account_selection else ())
+    def _set_account_selection(self, name, *, selection=None):
+        selected = ((name,) if name else ()) if selection is None else selection
+        selected = tuple(key for key in selected if self.accounts_tree.exists(key))
+        self._account_selection = name if name in selected else None
+        self._account_selected_ids = selected
+        self.accounts_tree.selection_set(selected)
         self.accounts_tree.focus(self._account_selection or "")
 
     @staticmethod
@@ -834,6 +857,8 @@ class FlowApp(tk.Tk):
     def _repeat_row_click(self, event):
         """A rapid second click must select its row, just like a first click."""
         tree = event.widget
+        if event.state & (0x0001 | 0x0004):
+            return  # Native Shift/Ctrl selection keeps its range or toggle.
         row = tree.identify_row(event.y)
         if not row and tree is self.ledger:
             return self._ledger_background_click(event)
@@ -1076,14 +1101,14 @@ class FlowApp(tk.Tk):
         tree_box.columnconfigure(0, weight=1)
         specs = [("date", "Date", 13), ("name", "Name", 20), ("from_account", "From", 15), ("to_account", "To", 15), ("amount", "Amount", 11), ("units", "Units", 9),
                  ("status", "Status", 10), ("category", "Category", 13), ("tags", "Tags", 17), ("notes", "Notes", 24)]
-        self.ledger = ttk.Treeview(tree_box, columns=[spec[0] for spec in specs], show="headings", selectmode="browse")
+        self.ledger = ttk.Treeview(tree_box, columns=[spec[0] for spec in specs], show="headings", selectmode="extended")
         for key, label, weight in specs:
             self.ledger.heading(key, text=label, anchor="e" if key == "amount" else "w", command=lambda k=key: self.sort_ledger(k))
             self.ledger.column(key, width=80, minwidth=20, anchor="e" if key == "amount" else "w", stretch=False)
         self._fit_columns(self.ledger, {k: w for k, label, w in specs})
         self.ledger.grid(row=0, column=0, sticky="nsew")
         def scroll_ledger(*args):
-            if self.ledger_editor.close():
+            if self.ledger_editor.close(focus_tree=self.ledger_editor.widget is not None):
                 self.ledger.yview(*args)
         ys = ttk.Scrollbar(tree_box, command=scroll_ledger)
         ys.grid(row=0, column=1, sticky="ns")
@@ -1112,6 +1137,7 @@ class FlowApp(tk.Tk):
             changed=lambda before: self._columns_moved("ledger", before),
             resized=lambda before: self._columns_resized("ledger", before),
             click=self.sort_ledger)
+        enable_multi_selection(self.ledger)
         actions = ttk.Frame(ledger_card, style="Card.TFrame")
         actions.grid(row=3, column=0, sticky="ew", pady=(12, 8))
         for label, command in [("JSON record", self.show_flow_json)]:
@@ -1281,6 +1307,11 @@ class FlowApp(tk.Tk):
                 self._active_edit_history = self.history.undo_token
             self._draft_redo = None
             self.refresh_all()
+            if kind == "flow":
+                if self.ledger.exists(result["flow_id"]):
+                    self.ledger.see(result["flow_id"])
+                else:
+                    message += " · Hidden by current filters"
             self.status_message.set(message)
             self._update_history_buttons()
             return True
@@ -1319,11 +1350,14 @@ class FlowApp(tk.Tk):
         if not selection:
             self.status_message.set("Select a flow first.")
             return None
-        return self.ledger_rows.get(selection[0])
+        return self.ledger_rows.get(self._active_tree_row(self.ledger, self._flow_selection))
 
-    def _load_form(self, flow, repeat=False):
+    def _load_form(self, flow, repeat=False, *, selection=None):
         if not self.show_view("flows"):
             return
+        if selection is None:
+            selected = self.ledger.selection()
+            selection = selected if flow["flow_id"] in selected else (flow["flow_id"],)
         self.new_flow(focus=False, confirm=False, clear_selection=repeat)
         self._loading = True
         try:
@@ -1340,7 +1374,7 @@ class FlowApp(tk.Tk):
             self.form_feedback.set("New copy · Click Add Flow" if repeat else "Edits save automatically")
             self._clean_flow = self._flow_snapshot()
             if not repeat:
-                self._set_flow_selection(flow["flow_id"])
+                self._set_flow_selection(flow["flow_id"], selection=selection)
         finally:
             self._loading = False
         self._remember_draft("flow")
@@ -1352,19 +1386,21 @@ class FlowApp(tk.Tk):
         if self._loading or self._committing:
             return
         selection = self.ledger.selection()
-        selected = selection[0] if selection else None
+        selected = self._active_tree_row(self.ledger, self._flow_selection)
         if selected == self._flow_selection:
+            self._flow_selected_ids = selection
+            self._show_selection()
             return
         before = self._unadded_draft("flow")
         old = self._flow_selection
         if not self._finish_existing("flow"):
-            self._set_flow_selection(old)
+            self._set_flow_selection(old, selection=self._flow_selected_ids)
             return
         self.ledger_editor.close(commit=False)
-        self._set_flow_selection(selected)
+        self._set_flow_selection(selected, selection=selection)
         flow = self.repo.get_flow(selected) if selected else None
         if flow:
-            self._load_form(flow)
+            self._load_form(flow, selection=selection)
         else:
             self.new_flow(focus=False, confirm=False)
         self._record_discarded_draft("flow", before)
@@ -1380,42 +1416,71 @@ class FlowApp(tk.Tk):
             self.view_history.record("draft:flow", "Repeat flow", before=before)
 
     def copy_selected(self, event=None):
-        flow = self._selected()
-        if not flow or not self._finish_existing("flow"):
+        selected = self.ledger.selection()
+        if not selected:
+            self.status_message.set("Select a flow first.")
             return "break"
-        flow = self.repo.get_flow(flow["flow_id"])
-        if flow:
+        if not self._finish_existing("flow"):
+            return "break"
+        flows = [flow for fid in selected if (flow := self.repo.get_flow(fid)) is not None]
+        if flows:
             self.clipboard_clear()
-            self.clipboard_append(json.dumps(flow, ensure_ascii=False))
-            self.status_message.set("Flow copied")
+            self.clipboard_append(json.dumps(flows[0] if len(flows) == 1 else flows, ensure_ascii=False))
+            self.status_message.set("Flow copied" if len(flows) == 1 else f"{len(flows)} flows copied")
         return "break"
 
     def paste_flow(self, event=None):
-        """Insert one clipboard row under a new ID, then open the saved copy."""
+        """Save selected clipboard rows under fresh IDs as one undoable action."""
         try:
             data = json.loads(self.clipboard_get())
             fields = {"date", "name", "from_account", "to_account", "amount", "units",
                       "status", "category", "tags", "notes"}
-            if not isinstance(data, dict) or set(data) not in (fields, fields | {"flow_id"}):
-                raise ValueError("Clipboard must contain one complete flow row.")
-            data.pop("flow_id", None)
+            records = data if isinstance(data, list) else [data]
+            if not records or any(not isinstance(row, dict) or set(row) not in (fields, fields | {"flow_id"})
+                                  for row in records):
+                raise ValueError("Clipboard must contain complete flow rows.")
+            sources = [row.get("flow_id") if isinstance(row.get("flow_id"), str) else None
+                       for row in records]
+            records = [{key: value for key, value in row.items() if key != "flow_id"} for row in records]
             if not self._finish_existing("flow"):
                 return "break"
-            result = self.history.perform("Paste flow", lambda: self.repo.save_flow(data))
+            def insert():
+                with self.repo.atomic():
+                    return [self.repo.save_flow(row) for row in records]
+            results = self.history.perform("Paste flow" if len(records) == 1 else "Paste flows", insert)
+            self._place_pasted_rows(sources, results)
             self.new_flow(focus=False, confirm=False)
             self.refresh_all()
-            self._load_form(result)
-            if self.ledger.exists(result["flow_id"]):
+            selection = tuple(row["flow_id"] for row in results if self.ledger.exists(row["flow_id"]))
+            result = next((row for row in reversed(results) if row["flow_id"] in selection), results[-1])
+            self._load_form(result, selection=selection)
+            message = "Flow pasted" if len(results) == 1 else f"{len(results)} flows pasted"
+            if selection:
                 self.ledger.see(result["flow_id"])
-                self.status_message.set("Flow pasted")
+                self.status_message.set(message if len(selection) == len(results)
+                                        else message + " · Some hidden by current filters")
             else:
-                self.status_message.set("Flow pasted · Hidden by current filters")
+                self.status_message.set(message + " · Hidden by current filters")
             self._update_history_buttons()
         except (tk.TclError, json.JSONDecodeError):
-            self._feedback("Clipboard must contain one complete flow row.", True)
+            self._feedback("Clipboard must contain complete flow rows.", True)
         except (ValueError, sqlite3.Error) as exc:
             self._feedback(str(exc), True)
         return "break"
+
+    def _place_pasted_rows(self, sources, results):
+        """Keep identical-key copies next to their sources without stored fields."""
+        preceding = {}
+        for source, result in zip(sources, results):
+            fid = result["flow_id"]
+            original = self.repo.get_flow(source) if source else None
+            same_key = original and self._ledger_sort_key(original) == self._ledger_sort_key(result)
+            after = preceding.get(source, source)
+            if same_key and after in self._ledger_order:
+                self._ledger_order.insert(self._ledger_order.index(after) + 1, fid)
+                preceding[source] = fid
+            else:
+                self._ledger_order.append(fid)
 
     def void_selected(self):
         flow = self._selected()
@@ -1431,18 +1496,24 @@ class FlowApp(tk.Tk):
             self._feedback(str(exc), True)
 
     def delete_selected(self, event=None):
-        """Remove a saved row; session history restores its exact saved record."""
-        flow = self._selected()
-        if not flow:
+        """Remove selected saved rows together; undo restores every record."""
+        selected = self.ledger.selection()
+        if not selected:
+            self.status_message.set("Select a flow first.")
             return "break"
         self.ledger_editor.close(commit=False)
         self._committing = True
         try:
-            self.history.perform("Delete flow", lambda: self.repo.delete_flow(flow["flow_id"]))
+            def remove():
+                with self.repo.atomic():
+                    for fid in selected:
+                        self.repo.delete_flow(fid)
+            self.history.perform("Delete flow" if len(selected) == 1 else "Delete flows", remove)
             self.new_flow(focus=False, confirm=False)
             self.refresh_all()
             self._update_history_buttons()
-            self.status_message.set("Flow deleted · Ctrl+Z to undo")
+            self.status_message.set("Flow deleted · Ctrl+Z to undo" if len(selected) == 1
+                                    else f"{len(selected)} flows deleted · Ctrl+Z to undo")
         except (ValueError, sqlite3.Error) as exc:
             self._feedback(str(exc), True)
         finally:
@@ -1454,21 +1525,26 @@ class FlowApp(tk.Tk):
         if not selection:
             self.selection_detail.set("Double-click to edit · Ctrl+C / Ctrl+V copies rows · Delete removes · Changes save automatically")
             return
-        flow = self.ledger_rows.get(selection[0])
+        flow = self.ledger_rows.get(self._active_tree_row(self.ledger, self._flow_selection))
         if flow:
             tags = ", ".join(flow.get("tags", [])) or "No tags"
             # Keep selecting a multiline note from resizing the ledger and
             # moving the clicked bottom row out from under its cell editor.
             notes = flow.get("notes", "")
             detail = f"{flow['name']} · {flow['date'][:10]} · {tags}" + (f" · {notes}" if notes else "")
-            self.selection_detail.set(detail.replace("\n", " · "))
+            prefix = f"{len(selection)} selected · " if len(selection) > 1 else ""
+            self.selection_detail.set(prefix + detail.replace("\n", " · "))
 
     def sort_ledger(self, key):
+        before = self._ledger_sort_state()
         self.sort_reverse = not self.sort_reverse if self.sort_column == key else False
         self.sort_column = key
         self.refresh_ledger()
         if hasattr(self, "view_history"):
-            self.view_history.record("sort", "Sort ledger")
+            self.view_history.record("sort", "Sort ledger", before=before)
+
+    def _ledger_sort_state(self):
+        return self.sort_column, self.sort_reverse, tuple(self._ledger_order)
 
     @staticmethod
     def _flow_row_values(flow):
@@ -1476,6 +1552,19 @@ class FlowApp(tk.Tk):
                 format_display(flow["amount"], flow["units"]), flow["units"], flow["status"],
                 flow["category"], ", ".join(flow["tags"]),
                 flow["notes"].replace("\n", " · "))
+
+    def _ledger_sort_key(self, flow):
+        """Use the chosen heading first, then the standard field tie-breakers."""
+        values = flow_sort_key(flow)
+        if self.sort_column in FLOW_SORT_FIELDS:
+            index = FLOW_SORT_FIELDS.index(self.sort_column)
+            return (values[index], *values[:index], *values[index + 1:])
+        primary = flow.get(self.sort_column, "")
+        if isinstance(primary, str):
+            primary = primary.casefold()
+        elif isinstance(primary, list):
+            primary = tuple(value.casefold() for value in primary)
+        return (primary, *values)
 
     def _restore_draft_row(self):
         """Put the saved row back when its shared draft is discarded."""
@@ -1520,6 +1609,7 @@ class FlowApp(tk.Tk):
             return
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
+        active = self._active_tree_row(self.ledger, self._flow_selection)
         query = self.search_var.get().strip().casefold()
         try:
             query_quantity = parse_quantity(query)
@@ -1544,6 +1634,9 @@ class FlowApp(tk.Tk):
             self.status_message.set(str(exc))
             return
         flows = self.repo.list_flows()
+        known = set(self._ledger_order)
+        self._ledger_order.extend(flow["flow_id"] for flow in flows if flow["flow_id"] not in known)
+        order = {fid: index for index, fid in enumerate(self._ledger_order)}
         def matches(flow):
             haystack = " ".join(str(flow.get(key, "")) for key in ("date", "name", "from_account", "to_account", "category", "tags", "notes", "amount", "units")).casefold()
             haystack += " " + format_quantity(flow["amount"]) + " " + format_quantity(flow["amount"]).replace(",", "")
@@ -1558,10 +1651,17 @@ class FlowApp(tk.Tk):
                     and (not date_start or normalize_date(flow["date"]) >= date_start)
                     and (not date_end or normalize_date(flow["date"]) <= date_end)
                     and (not statuses or flow["status"] in statuses))
+        flows.sort(key=lambda flow: order[flow["flow_id"]])
+        flows.sort(key=self._ledger_sort_key)
+        if self.sort_reverse:
+            # Reverse the chosen column only; secondary keys stay ascending.
+            flows.sort(key=lambda flow: self._ledger_sort_key(flow)[0], reverse=True)
+        live = {flow["flow_id"] for flow in flows}
+        reordered = iter(flow["flow_id"] for flow in flows)
+        # Retain deleted IDs' slots for undo, while each new sort preserves
+        # the existing visible order among equal keys.
+        self._ledger_order = [next(reordered) if fid in live else fid for fid in self._ledger_order]
         flows = [flow for flow in flows if matches(flow)]
-        flows.sort(key=lambda flow: (normalize_date(flow["date"]) if self.sort_column == "date"
-                                    else parse_quantity(flow["amount"]) if self.sort_column == "amount"
-                                    else flow.get(self.sort_column, "")), reverse=self.sort_reverse)
         self.ledger.delete(*self.ledger.get_children())
         self.ledger_rows = {}
         for index, flow in enumerate(flows):
@@ -1571,7 +1671,8 @@ class FlowApp(tk.Tk):
             tags = ("odd" if index % 2 else "even", flow["status"])
             self.ledger.insert("", "end", iid=fid, values=values, tags=tags)
         selected = [fid for fid in selection if fid in self.ledger_rows]
-        self._set_flow_selection(selected[0] if selected else None)
+        active = active if active in selected else selected[0] if selected else None
+        self._set_flow_selection(active, selection=selected)
         self._sync_flow_draft()
         self.metric_vars[2].set(str(len(flows)))
         self.date_filter_label.configure(text=(self.filter_start.get() or "Any Start") + " → " + (self.filter_end.get() or "Any End") if date_start or date_end else "All Dates")
@@ -1750,7 +1851,7 @@ class FlowApp(tk.Tk):
         self.account_as_of_picker.entry.bind("<FocusOut>", self._apply_account_as_of, add="+")
         specs = [("name", "Account", 24), ("units", "Units", 10), ("balance", "Starting Balance", 18), ("anchor", "Starting Date", 18),
                  ("confirmed", "Confirmed", 18), ("pending", "Including Pending", 18)]
-        self.accounts_tree = ttk.Treeview(card, columns=[s[0] for s in specs], show="headings", selectmode="browse")
+        self.accounts_tree = ttk.Treeview(card, columns=[s[0] for s in specs], show="headings", selectmode="extended")
         for key, label, weight in specs:
             self.accounts_tree.heading(key, text=label, anchor="e" if key in {"balance", "confirmed", "pending"} else "w",
                                        command=lambda k=key: self.sort_accounts(k))
@@ -1774,6 +1875,7 @@ class FlowApp(tk.Tk):
             click=self.sort_accounts)
         self.account_rows = {}
         self.account_tooltip = TreeTooltip(self.accounts_tree, lambda row: "Starting balance immediately before " + self._account_record(row)["opening_at"] if self._account_record(row) else None)
+        enable_multi_selection(self.accounts_tree)
         self.account_as_of_error = tk.StringVar(self)
         self.account_as_of_error_label = ttk.Label(card, textvariable=self.account_as_of_error,
             style="CardMuted.TLabel", foreground="#9b3434", wraplength=900)
@@ -1907,7 +2009,8 @@ class FlowApp(tk.Tk):
         self.account_as_of_error.set("")
         self.account_as_of_error_label.grid_remove()
         self.account_tooltip.hide()
-        selected = self._account_selection
+        selection = self.accounts_tree.selection()
+        selected = self._active_tree_row(self.accounts_tree, self._account_selection)
         self.accounts_tree.delete(*self.accounts_tree.get_children())
         self.account_rows = {}
         accounts = self.repo.list_accounts(referenced_only=True)
@@ -1927,8 +2030,11 @@ class FlowApp(tk.Tk):
             self.accounts_tree.insert("", "end", iid=key, values=(account["name"], account["units"], quantity(opening, account["units"]), account["opening_at"][:10], quantity(confirmed, account["units"]), quantity(pending, account["units"])), tags=("odd" if index % 2 else "even",))
         if self.account_editing and not self.accounts_tree.exists(self.account_editing):
             self.new_account(focus=False, confirm=False)
+            selection = tuple(key for key in selection if self.accounts_tree.exists(key))
+            if selection:
+                self._load_account(self._account_record(selection[0]), selection=selection)
         else:
-            self._set_account_selection(selected)
+            self._set_account_selection(selected, selection=selection)
             self._sync_account_draft()
         self.account_summary.set(f"{len({a['name'] for a in accounts})} accounts · {len(accounts)} balances")
 
@@ -1936,29 +2042,33 @@ class FlowApp(tk.Tk):
         if self._loading or self._committing:
             return
         selection = self.accounts_tree.selection()
-        name = selection[0] if selection else None
+        name = self._active_tree_row(self.accounts_tree, self._account_selection)
         if name == self._account_selection:
+            self._account_selected_ids = selection
             return
         before = self._unadded_draft("account")
         if not self._finish_existing("account"):
-            self._set_account_selection(self._account_selection)
+            self._set_account_selection(self._account_selection, selection=self._account_selected_ids)
             return
         self.account_cell_editor.close(commit=False)
         self._restore_account_draft_row()
         self._close_popups()
         account = self._account_record(name)
         if account:
-            self._load_account(account)
+            self._load_account(account, selection=selection)
         else:
             self.new_account(focus=False, confirm=False)
         self._record_discarded_draft("account", before)
 
-    def _load_account(self, account):
+    def _load_account(self, account, *, selection=None):
         self._loading = True
         try:
             name = account["name"]
             key = self._account_key(account)
-            self._set_account_selection(key)
+            if selection is None:
+                selected = self.accounts_tree.selection()
+                selection = selected if key in selected else (key,)
+            self._set_account_selection(key, selection=selection)
             self.account_editing = key
             self.account_vars["name"].set(name)
             self.account_vars["units"].set(account["units"])
@@ -2073,6 +2183,7 @@ class FlowApp(tk.Tk):
         self.chart_accounts.bind("<MouseWheel>", scroll_accounts)
         self.chart_accounts.bind("<Button-4>", lambda event: scroll_accounts(event, -1))
         self.chart_accounts.bind("<Button-5>", lambda event: scroll_accounts(event, 1))
+        enable_multi_selection(self.chart_accounts)
         account_buttons = ttk.Frame(controls, style="Card.TFrame")
         account_buttons.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         ttk.Button(account_buttons, text="All", width=5, style="Small.TButton", command=lambda: self._select_graph_accounts(True)).pack(side="left", padx=5)
@@ -2742,6 +2853,7 @@ class FlowApp(tk.Tk):
         ttk.Label(dialog, text="  ·  ".join(f"{count} {state.lower()}" for state, count in counts.items()), style="Muted.TLabel").grid(row=1, column=0, sticky="w", padx=22, pady=(0, 16))
         columns = ("row", "state", "name", "from", "to", "amount", "units", "message")
         tree = ttk.Treeview(dialog, columns=columns, show="headings")
+        enable_multi_selection(tree)
         for key, width in [("row", 45), ("state", 85), ("name", 145), ("from", 110), ("to", 110), ("amount", 90), ("units", 75), ("message", 250)]:
             tree.heading(key, text=key.upper())
             tree.column(key, width=width, stretch=key == "message")
@@ -2823,6 +2935,7 @@ class FlowApp(tk.Tk):
         dialog.rowconfigure(2, weight=1)
         ttk.Label(dialog, text="Change history" + (" · " + flow["name"] if flow else ""), font=(FONT, 18, "bold")).grid(row=0, column=0, sticky="w", padx=20, pady=20)
         tree = ttk.Treeview(dialog, columns=("time", "entity", "action", "key"), show="headings")
+        enable_multi_selection(tree)
         for key, width in [("time", 180), ("entity", 110), ("action", 100), ("key", 500)]:
             tree.heading(key, text=key.upper())
             tree.column(key, width=width)
@@ -2834,7 +2947,7 @@ class FlowApp(tk.Tk):
         def select(event=None):
             if not tree.selection():
                 return
-            record = rows[int(tree.selection()[0])]
+            record = rows[int(self._active_tree_row(tree))]
             parts = []
             for key, title in [("before_json", "BEFORE"), ("after_json", "AFTER")]:
                 value = record.get(key)
@@ -2869,6 +2982,7 @@ class FlowApp(tk.Tk):
         ttk.Label(dialog, text="Category totals", font=(FONT, 20, "bold")).grid(row=0, column=0, sticky="w", padx=22, pady=(20, 8))
         ttk.Label(dialog, text="Signed totals · Current ledger filter", style="Muted.TLabel", wraplength=800).grid(row=1, column=0, sticky="w", padx=22, pady=(0, 18))
         tree = ttk.Treeview(dialog, columns=("category", "status", "amount", "units", "count"), show="headings")
+        enable_multi_selection(tree)
         for key, title, width in [("category", "Category", 230), ("status", "Status", 140), ("amount", "Net Amount", 190), ("units", "Units", 100), ("count", "Flows", 90)]:
             tree.heading(key, text=title)
             tree.column(key, width=width, anchor="e" if key in {"amount", "count"} else "w")

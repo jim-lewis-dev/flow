@@ -39,6 +39,10 @@ GUI amounts and starting balances accept `+`, `-`, `*`, `/`, parentheses, and un
 
 Dates are local wall-clock times. Months and days need no leading zero. A date without a time denotes midnight; an entered time can include seconds. Graph date entries keep text unchanged while you type and format it on Enter or when you leave the field. There is no separate flag indicating whether a time was typed. A flow ID is generated when a record is created and remains stable through editing; copying a flow creates a new ID.
 
+Multiple selected flow rows can be copied, pasted, or deleted together. Each pasted row receives a fresh ID; the whole paste or deletion is one transaction and one session undo action. Editing the top form or an inline cell changes only the active row. Equal full sort keys retain their current view order; exact copies are placed after their sources within that order for the session. No ordering field is added to records. Editing a sort value follows the moved row; editing a filter value can hide the row, with feedback while its saved record remains available.
+
+The default ledger order is Date/Time (newest first), then From, To, Amount, Units, Status, Category, and Name (ascending). Amounts compare as exact decimals; account, category, and name text is case-insensitive, while unit labels retain case. Status order is Complete, Pending, Planned, Canceled. A chosen column becomes primary, followed by the other fields in that same sequence; reversing affects only the primary column. The repository API uses the same keys with chronological ascending dates.
+
 ## Balance calculation
 
 For a flow of quantity `q` and unit `u`:
