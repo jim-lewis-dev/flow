@@ -24,8 +24,9 @@ class AccountEditor(LedgerEditor):
         return self.app.account_editing
 
     def _select_draft(self, row):
-        if self.tree.selection() != (row,):
+        if row not in self.tree.selection():
             self.tree.selection_set(row)
+        self.tree.focus(row)
         self.app._select_account()
 
     @property

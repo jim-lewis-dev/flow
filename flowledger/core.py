@@ -23,6 +23,8 @@ from typing import Any, Iterable, Iterator
 import uuid
 
 STATUSES = ("Complete", "Pending", "Planned", "Canceled")
+FLOW_SORT_FIELDS = ("date", "from_account", "to_account", "amount", "units",
+                    "status", "category", "name")
 DEFAULT_ANCHOR = "2026-10-01 00:00:00"
 SCHEMA_VERSION = 6
 APPLICATION_ID = 1179406167
@@ -190,6 +192,20 @@ def normalize_flow_date(value: Any) -> str:
     has_time = isinstance(value, datetime) or (
         isinstance(value, str) and bool(re.search(r"[ T]", value.strip())))
     return when if has_time else when[:10]
+
+
+def flow_sort_key(flow: dict) -> tuple:
+    """Order saved flows by their contents, with exact decimal quantities.
+
+    Date-only values compare as midnight. Account, category and name text is
+    case-insensitive; units retain their case-sensitive identity. Statuses use
+    their normal Complete/Pending/Planned/Canceled order. Identical keys keep
+    their input order; flow IDs, notes and tags do not affect placement.
+    """
+    return (normalize_date(flow["date"]), _key(flow["from_account"]),
+            _key(flow["to_account"]), parse_quantity(flow["amount"]),
+            flow["units"], STATUSES.index(flow["status"]),
+            _key(flow["category"]), _key(flow["name"]))
 
 
 def _json(value: Any) -> str | None:
@@ -534,7 +550,7 @@ class Repository:
 
     def list_names(self) -> list[str]:
         names = {}
-        for row in self.conn.execute("SELECT name FROM flows ORDER BY datetime(date),flow_id"):
+        for row in self.conn.execute("SELECT name FROM flows ORDER BY datetime(date),rowid"):
             names.setdefault(_key(row[0]), row[0])
         return sorted(names.values(), key=str.casefold)
 
@@ -638,7 +654,14 @@ class Repository:
         return records
 
     def list_flows(self) -> list[dict]:
-        return self._records(self.conn.execute(self._FLOW_QUERY + " ORDER BY datetime(f.date),f.flow_id"))
+        """List flows chronologically, breaking ties by their visible contents.
+
+        Read insertion order first so fully identical keys remain stable.
+        Python sorting preserves arbitrary decimal precision without a SQL
+        float conversion, and identities never determine record placement.
+        """
+        records = self._records(self.conn.execute(self._FLOW_QUERY + " ORDER BY f.rowid"))
+        return sorted(records, key=flow_sort_key)
 
     def get_flow(self, flow_id: str) -> dict | None:
         rows = self._records(self.conn.execute(self._FLOW_QUERY + " WHERE f.flow_id=?", (flow_id,)))

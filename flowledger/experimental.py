@@ -20,6 +20,7 @@ from .core import (decimal_sum, format_quantity, ledger_balance_at,
                    normalize_date, parse_quantity)
 from .flow_motion import flow_direction, grouped_events, pulse_radius, select_events
 from .graphing import normalize_graph_date
+from .table_selection import enable_multi_selection
 
 
 BG = "#f2f5f2"
@@ -241,6 +242,7 @@ class ExperimentalView(ttk.Frame):
         self.flow_list.configure(yscrollcommand=flow_scroll.set)
         self.flow_list.bind("<Double-1>", self._open_detail)
         self.flow_list.bind("<Return>", self._open_detail)
+        enable_multi_selection(self.flow_list)
 
     def get_state(self) -> dict:
         """Return view-only settings for the app's session undo/redo."""
@@ -659,6 +661,7 @@ class ExperimentalView(ttk.Frame):
             self._refresh_hover_pointer()
 
     def _fill_details(self) -> None:
+        selected, focused = self.flow_list.selection(), self.flow_list.focus()
         self.flow_list.delete(*self.flow_list.get_children())
         if 0 <= self._index < len(self._groups):
             for flow in self._groups[self._index][1]:
@@ -666,6 +669,9 @@ class ExperimentalView(ttk.Frame):
                     flow["from_account"], flow["to_account"],
                     f"{format_quantity(flow['amount'])} {flow['units']}",
                     flow["status"], flow["name"]))
+        selected = [fid for fid in selected if self.flow_list.exists(fid)]
+        self.flow_list.selection_set(selected)
+        self.flow_list.focus(focused if focused in selected else selected[0] if selected else "")
 
     def _update_progress(self) -> None:
         total = len(self._groups)
@@ -989,4 +995,5 @@ class ExperimentalView(ttk.Frame):
     def _open_detail(self, event=None) -> None:
         chosen = self.flow_list.selection()
         if chosen:
-            self.on_select_flow(chosen[0])
+            focused = self.flow_list.focus()
+            self.on_select_flow(focused if focused in chosen else chosen[0])
