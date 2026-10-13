@@ -33,7 +33,9 @@ A saved flow has the ten user-facing fields plus its internal ID:
 }
 ```
 
-Account names are identities, matched after trimming whitespace and case folding. Unit names are trimmed but retain case: `mW` and `MW` differ. Amount must be a positive, finite decimal; a starting balance can be negative or unknown (`null`). Decimal strings avoid binary float rounding and preserve arbitrary supported precision. Read-only displays show USD to two places and other units to four by default; calculations and record values remain exact.
+Account names are identities, matched after trimming whitespace and case folding. Unit names are trimmed but retain case: `mW` and `MW` differ. Amount must be a finite decimal and may be positive, zero, or negative; a starting balance can also be unknown (`null`). Decimal strings avoid binary float rounding and preserve arbitrary supported precision. Read-only displays show USD to two places and other units to four by default; balance calculations and record values remain exact.
+
+GUI amounts and starting balances accept `+`, `-`, `*`, `/`, parentheses, and unary signs without a leading `=`. Expressions resolve on Enter, leaving the field, or adding the record; only the computed decimal is stored. Intermediate arithmetic uses exact fractions. Terminating results are exact; repeating final results round half-even to at least 50 significant digits, increased to the total number of digits in the entered literals when larger. CSV/JSON and the repository API still require decimal values rather than expressions.
 
 Dates are local wall-clock times. Months and days need no leading zero. A date without a time denotes midnight; an entered time can include seconds. Graph date entries keep text unchanged while you type and format it on Enter or when you leave the field. There is no separate flag indicating whether a time was typed. A flow ID is generated when a record is created and remains stable through editing; copying a flow creates a new ID.
 
@@ -48,6 +50,8 @@ For a flow of quantity `q` and unit `u`:
 | Every other unit | `0` |
 
 Within a unit, the sum across all accounts is unchanged by a transfer. No conversion or addition across units occurs. The starting balance is the confirmed value *immediately before flows at its timestamp*. Earlier completed activity is already reflected in that anchor. If you edit completed history from before the anchor, revisit the anchor as needed.
+
+A negative `q` reverses the effect while preserving the recorded account names: `A → B: -5 kg` adds 5 kg to A and removes 5 kg from B. Zero changes no balances and retains the flow's date, status, and notes. From and To remain required, distinct accounts. Category totals sum signed amounts within each category/status/unit group.
 
 Confirmed includes Complete flows. Including Pending also includes Pending; Including Planned adds Planned. Canceled contributes nothing. Graphs create separate plots for different units, and a combined line sums selected accounts only within one unit. An unknown starting balance prevents a trustworthy line for that pair; it is not silently treated as zero.
 
@@ -73,4 +77,4 @@ Account lists, learned suggestions, and ledger filters use current saved flow re
 
 CSV/JSON import requires units. The preview distinguishes new records, duplicates, conflicts, similar records, and invalid rows; approved entries commit atomically. Data export contains flows; use database backup to preserve anchors and audit as well. Old schema files are migrated when opened; the legacy migrations that convert cents to quantities retain a one-time copy of the old database.
 
-The Experimental tab reads matching saved flows and animates them without changing the database. Its draggable layout lasts only for the current session. Account hover balances come from all eligible saved flows at the selected time; its displayed In/Out totals use only flows selected for the animation.
+The Experimental tab reads matching saved flows and animates them without changing the database. Its draggable layout lasts only for the current session. Negative pulses move in the reverse direction and use absolute magnitude for sizing; zero events use stationary hollow markers. Account hover balances come from all eligible saved flows at the selected time; its displayed In/Out totals use only flows selected for the animation, with actual transfer direction and nonnegative magnitudes.

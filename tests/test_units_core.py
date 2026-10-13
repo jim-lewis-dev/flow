@@ -21,15 +21,17 @@ class QuantityTests(unittest.TestCase):
                     "1234567890123456789012345678901234567890.0123456789"}
         for text, canonical in examples.items():
             with self.subTest(text=text):
-                value = parse_quantity(text, allow_negative=True)
+                value = parse_quantity(text)
                 self.assertEqual(quantity_text(value), canonical)
                 self.assertEqual(parse_quantity(format_quantity(value), True), value)
         self.assertEqual(format_quantity("1234567.0005"), "1,234,567.0005")
 
     def test_quantity_parser_rejects_ambiguous_or_lossy_inputs(self):
-        for value in (True, 1.25, None, {}, "", "$12.00", "1e4", "NaN", "Infinity", "1,2", ".", "1.", "-1"):
+        for value in (True, 1.25, None, {}, "", "$12.00", "1e4", "NaN", "Infinity", "1,2", ".", "1."):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_quantity(value)
+        with self.assertRaisesRegex(ValueError, "Quantity cannot be negative"):
+            parse_quantity("-1", allow_negative=False)
         for value in (Decimal("NaN"), Decimal("Infinity")):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_quantity(value)

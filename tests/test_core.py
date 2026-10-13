@@ -137,7 +137,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(self.repo.history(), before_history)
 
     def test_invalid_flow_fields_cannot_mutate_database(self):
-        for changes in ({"amount":"0"}, {"amount_cents":1.2}, {"amount_cents":True},
+        for changes in ({"amount":"NaN"}, {"amount":1.25}, {"amount_cents":1.2}, {"amount_cents":True},
                         {"status":"done"}, {"date":"tomorrow"}, {"tags":"trip"},
                         {"flow_id":"not-a-uuid"}, {"category":None},
                         {"scenario":"Baseline"}, {"time_specified":False}, {"invented":True}):
@@ -262,7 +262,7 @@ class CalculationTests(unittest.TestCase):
         flows = []
         for _ in range(100):
             source, dest = rng.sample(["A", "B", "C"], 2)
-            flows.append(self.record(f"2026-10-0{rng.randrange(1,8)} 12:00:00", rng.randrange(1,1000),
+            flows.append(self.record(f"2026-10-0{rng.randrange(1,8)} 12:00:00", rng.randrange(-1000,1001),
                                      source, dest, rng.choice(("Complete","Pending","Planned","Canceled"))))
         statuses = ("Complete", "Pending", "Planned")
         result = timeline(accounts, flows, "2026-10-01", "2026-10-08", statuses)

@@ -54,7 +54,7 @@ class ExchangeTests(unittest.TestCase):
     def test_malformed_amounts_dates_tags_and_status(self):
         changes = [
             {"amount": "NaN"}, {"amount": "Infinity"},
-            {"amount": "0"}, {"amount": "-3.00"}, {"amount": True}, {"amount": 12.34},
+            {"amount": "-Infinity"}, {"amount": True}, {"amount": 12.34},
             {"amount": "1e4"},
             {"date": "2026-02-30"}, {"date": "2026-10-02 25:00"},
             {"date": "2026-10-02T12:00:00Z"}, {"date": "2026-10-02 12:00:00.5"},

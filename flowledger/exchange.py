@@ -5,8 +5,8 @@ The canonical export has the ten flow fields plus ``flow_id``: ``date``,
 ``units``, ``status``, ``category``, ``tags`` (a string array), and ``notes``.
 Dates retain optional time: a date alone stays a date alone; an entered time
 is normalized to seconds. ``from`` and ``to`` are accepted import aliases.
-Units are required, case-sensitive labels; quantities are not limited to
-currency precision. CSV tags may use ``|``.
+Units are required, case-sensitive labels; quantities may be zero or signed
+and are not limited to currency precision. CSV tags may use ``|``.
 
 Preview performs no writes. Repeated IDs with identical content are skipped;
 conflicting IDs abort the batch; equal content with a new or missing ID needs
@@ -151,8 +151,6 @@ def _canonical(row: Any, accounts: dict[str, str],
     if "amount" not in row or row["amount"] in (None, ""):
         raise ValueError("amount is required.")
     amount = parse_quantity(row["amount"])
-    if amount <= 0:
-        raise ValueError("amount must be greater than zero.")
     status = _text(row.get("status", "Complete"), "status") or "Complete"
     if status == "Void":
         status = "Canceled"  # Files exported before the status rename.

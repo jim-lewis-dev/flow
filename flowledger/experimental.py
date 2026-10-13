@@ -18,7 +18,7 @@ from typing import Callable
 from .calendar_widget import CalendarEntry
 from .core import (decimal_sum, format_quantity, ledger_balance_at,
                    normalize_date, parse_quantity)
-from .flow_motion import grouped_events, pulse_radius, select_events
+from .flow_motion import flow_direction, grouped_events, pulse_radius, select_events
 from .graphing import normalize_graph_date
 
 
@@ -403,8 +403,9 @@ class ExperimentalView(ttk.Frame):
             for account in self.repo.list_accounts()
         }
         self._hover_node_cache.clear()
-        self._directed_pairs = {(flow["from_account"], flow["to_account"]) for flow in chosen}
-        self._max_amount = max((parse_quantity(flow["amount"]) for flow in chosen), default=1)
+        self._directed_pairs = {flow_direction(flow) for flow in chosen}
+        self._max_amount = max((parse_quantity(flow["amount"], allow_negative=True).copy_abs()
+                                for flow in chosen), default=Decimal(0))
         self._invalid_message = ""
         self._index = (next((i for i, (at, _) in enumerate(groups) if at == previous_at), -1)
                        if not reset_index else -1)
@@ -572,6 +573,8 @@ class ExperimentalView(ttk.Frame):
             canvas.create_text(legend_x + 16, 23, text=status, anchor="w",
                                fill=MUTED, font=self._canvas_font(9))
             legend_x += 26 + len(status) * 7
+        transfer_pairs = {flow_direction(flow) for flow in self._events
+                          if parse_quantity(flow["amount"], allow_negative=True)}
         for source, target in sorted(self._directed_pairs):
             if source == target:
                 x, y = self._xy(source)
@@ -582,12 +585,14 @@ class ExperimentalView(ttk.Frame):
                 end_angle = math.radians(242 + 316)
                 end_x = cx + radius * math.cos(end_angle)
                 end_y = cy - radius * math.sin(end_angle)
-                canvas.create_line(end_x - 4, end_y - 13, end_x, end_y,
-                                   fill="#b3c8bd", width=2, arrow="last",
-                                   arrowshape=(9, 11, 4), tags=("edge",))
+                if (source, target) in transfer_pairs:
+                    canvas.create_line(end_x - 4, end_y - 13, end_x, end_y,
+                                       fill="#b3c8bd", width=2, arrow="last",
+                                       arrowshape=(9, 11, 4), tags=("edge",))
                 continue
             segment = self._segment(source, target, self._directed_pairs)
-            canvas.create_line(*segment, fill="#b3c8bd", width=2, arrow="last",
+            canvas.create_line(*segment, fill="#b3c8bd", width=2,
+                               arrow="last" if (source, target) in transfer_pairs else "",
                                arrowshape=(9, 11, 4), tags=("edge",))
         for name in names:
             x, y = self._xy(name)
@@ -613,29 +618,33 @@ class ExperimentalView(ttk.Frame):
         if not (0 <= self._index < len(self._groups)):
             return
         flows = self._groups[self._index][1]
-        counts = Counter((flow["from_account"], flow["to_account"]) for flow in flows)
+        counts = Counter(flow_direction(flow) for flow in flows)
         ordinal = Counter()
         for flow in flows:
-            key = (flow["from_account"], flow["to_account"])
+            quantity = parse_quantity(flow["amount"], allow_negative=True)
+            key = flow_direction(flow)
             number = ordinal[key]
             ordinal[key] += 1
             # Parallel lanes keep simultaneous flows on one route distinct.
             spread = max(-90, min(90, (number - (counts[key] - 1) / 2) * 48))
+            # A zero flow marks its timestamp without depicting a transfer.
+            progress = self._progress if quantity else 0.5
             if key[0] == key[1]:
                 node_x, node_y = self._xy(key[0])
-                theta = math.radians(242 + 316 * self._progress)
+                theta = math.radians(242 + 316 * progress)
                 radius = max(20, 45 + spread * 0.3)
                 x = node_x + 48 + radius * math.cos(theta)
                 y = node_y - 42 - radius * math.sin(theta)
             else:
                 x1, y1, x2, y2 = self._segment(*key, self._directed_pairs)
                 distance = max(1, math.hypot(x2 - x1, y2 - y1))
-                x = x1 + (x2 - x1) * self._progress - (y2 - y1) / distance * spread
-                y = y1 + (y2 - y1) * self._progress + (x2 - x1) / distance * spread
+                x = x1 + (x2 - x1) * progress - (y2 - y1) / distance * spread
+                y = y1 + (y2 - y1) * progress + (x2 - x1) / distance * spread
             radius = pulse_radius(flow["amount"], self._max_amount)
             color = FLOW_COLORS[flow["status"]]
             oval = canvas.create_oval(x - radius, y - radius, x + radius, y + radius,
-                                      fill=color, outline="white", width=2,
+                                      fill=color if quantity else BG,
+                                      outline="white" if quantity else color, width=2,
                                       tags=("moving_flow",))
             self._pulse_items[oval] = flow
             if len(flows) <= 8:
@@ -860,10 +869,13 @@ class ExperimentalView(ttk.Frame):
         else:
             shown = self._events
             scope = "Shown in selected period"
-        incoming = decimal_sum(parse_quantity(flow["amount"]) for flow in shown
-                               if flow["to_account"].casefold() == name.casefold())
-        outgoing = decimal_sum(parse_quantity(flow["amount"]) for flow in shown
-                               if flow["from_account"].casefold() == name.casefold())
+        movements = [(flow_direction(flow),
+                      parse_quantity(flow["amount"], allow_negative=True).copy_abs())
+                     for flow in shown]
+        incoming = decimal_sum(quantity for (_, target), quantity in movements
+                               if target.casefold() == name.casefold())
+        outgoing = decimal_sum(quantity for (source, _), quantity in movements
+                               if source.casefold() == name.casefold())
         lines.append(f"{scope}: In {format_quantity(incoming)} {unit}"
                      f" · Out {format_quantity(outgoing)} {unit}")
         result = "\n".join(lines)

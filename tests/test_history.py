@@ -228,7 +228,7 @@ class SessionHistoryTests(unittest.TestCase):
         self.add()
         self.history.undo()
         with self.assertRaises(ValueError):
-            self.add(amount="-1")
+            self.add(amount="NaN")
         self.assertTrue(self.history.can_redo)
         self.history.perform("Add Account", lambda: self.repo.save_account("Checking"))
         self.assertFalse(self.history.can_redo)

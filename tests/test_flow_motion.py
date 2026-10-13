@@ -3,7 +3,7 @@ from copy import deepcopy
 from decimal import Decimal
 import unittest
 
-from flowledger.flow_motion import grouped_events, pulse_radius, select_events
+from flowledger.flow_motion import flow_direction, grouped_events, pulse_radius, select_events
 
 
 def flow(flow_id: str, when: str, amount: str = "1", units: str = "USD",
@@ -61,6 +61,19 @@ class EventSelectionTests(unittest.TestCase):
                           ("2026-10-02 00:00:01", ["later"])])
         self.assertEqual(records, original)
 
+    def test_signed_and_zero_events_preserve_records_and_timestamp_groups(self):
+        records = [flow("negative", "2026-10-02", "-3.5"),
+                   flow("zero", "2026-10-03", "0"),
+                   flow("positive", "2026-10-02", "2")]
+        original = deepcopy(records)
+        selected = select_events(records, "2026-10-02", "2026-10-03", "USD", "Complete")
+        self.assertEqual([row["flow_id"] for row in selected], ["negative", "positive", "zero"])
+        self.assertEqual([len(rows) for _, rows in grouped_events(selected)], [2, 1])
+        self.assertEqual(flow_direction(records[0]), ("Store", "Checking"))
+        self.assertEqual(flow_direction(records[1]), ("Checking", "Store"))
+        self.assertEqual(flow_direction(records[2]), ("Checking", "Store"))
+        self.assertEqual(records, original)
+
 
 class PulseTests(unittest.TestCase):
     def test_scaled_fraction_and_huge_exact_amounts_are_bounded(self):
@@ -74,9 +87,19 @@ class PulseTests(unittest.TestCase):
         self.assertTrue(5 <= pulse_radius(small, huge) < 17)
         self.assertEqual(pulse_radius(huge, huge), 17)
 
-    def test_invalid_or_nonpositive_quantities_rejected(self):
-        for amount, maximum in (("0", "10"), ("1", "0"), ("-1", "10"),
-                                ("x", "10"), ("1", "NaN")):
+    def test_size_uses_exact_magnitude_and_handles_zero_only_ranges(self):
+        for amount, maximum in (("1", "10"), (".000001", ".001"),
+                                (Decimal("1e1000"), Decimal("1e10000"))):
+            positive = pulse_radius(amount, maximum)
+            self.assertEqual(pulse_radius(-Decimal(amount), maximum), positive)
+            self.assertEqual(pulse_radius(amount, -Decimal(maximum)), positive)
+        self.assertEqual(pulse_radius("0", "0"), 5)
+        self.assertEqual(pulse_radius("-0", "10"), 5)
+        self.assertEqual(pulse_radius("-10", "10"), 17)
+
+    def test_invalid_or_nonfinite_quantities_rejected(self):
+        for amount, maximum in (("x", "10"), ("1", "NaN"),
+                                (Decimal("Infinity"), "10"), ("1", Decimal("-Infinity"))):
             with self.subTest(amount=amount, maximum=maximum), self.assertRaises(ValueError):
                 pulse_radius(amount, maximum)
 
