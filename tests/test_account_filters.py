@@ -118,7 +118,7 @@ class AccountFilterTests(unittest.TestCase):
         self.assertEqual(set(self.app.ledger_filters["To"].values), expected_to)
         self.assertEqual(self.names(), set())
 
-    def test_correcting_last_endpoint_reference_preserves_filter_and_undo(self):
+    def test_correcting_last_endpoint_reference_prunes_filter_and_undo_restores_records(self):
         flow = self.flows["Lunch"]
         self.app.ledger.selection_set(flow["flow_id"])
         self.pump()
@@ -128,15 +128,18 @@ class AccountFilterTests(unittest.TestCase):
         self.pump()
         choice = self.app.ledger_filters["From"]
         self.assertNotIn("Checking", choice.values)
-        self.assertEqual(choice.get(), ("Checking",))
-        self.assertIn("Checking", choice._available_values())
-        self.assertEqual(self.names(), set())
+        self.assertEqual(choice.get(), ())
+        self.assertNotIn("Checking", choice._available_values())
+        self.assertEqual(len(self.names()), 5)
         self.shortcut("z")
         self.assertIn("Checking", choice.values)
-        self.assertEqual(self.names(), {"Lunch"})
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(choice.get(), ())
+        self.assertEqual(len(self.names()), 5)
         self.shortcut("y")
         self.assertNotIn("Checking", choice.values)
-        self.assertEqual(self.names(), set())
+        self.assertEqual(choice.get(), ())
+        self.assertEqual(len(self.names()), 5)
 
     def test_each_endpoint_popup_supports_multiselect_undo_and_search(self):
         database = "\n".join(self.repo.conn.iterdump())
@@ -207,7 +210,8 @@ class AccountFilterTests(unittest.TestCase):
                 search = self.app.search_entry
                 self.assertGreaterEqual(search.winfo_width(), 100)
                 self.assertLessEqual(search.winfo_width(), 240)
-                controls = [search, *(choice.button for choice in self.app.ledger_filters.values()), dates]
+                controls = [search, *(choice.button for choice in self.app.ledger_filters.values()),
+                            dates, self.app.reset_filters_button]
                 right = primary.winfo_rootx() + primary.winfo_width()
                 for previous, widget in zip(controls, controls[1:]):
                     self.assertGreaterEqual(widget.winfo_rootx(), previous.winfo_rootx() + previous.winfo_width())

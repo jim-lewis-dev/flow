@@ -254,7 +254,8 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.replace_cell("AmEx", "anchor", "2026-10-01T00:00:00")
         self.assertTrue(self.app.show_view("flows"))
         self.settle()
-        self.assert_new_form()
+        self.assert_closed()
+        self.assertEqual(self.app.account_editing, account_key("AmEx"))
         self.assertEqual(self.repo.get_account("AmEx"), original)
 
     def test_equivalent_time_is_clean_but_invalid_date_or_time_keeps_editing(self):
@@ -478,11 +479,13 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.replace_cell("Checking", "balance", "250.00")
         self.assertTrue(self.app.show_view("flows"))
         self.settle()
-        self.assert_new_form()
+        self.assert_closed()
+        self.assertEqual(self.app.account_editing, account_key("Checking"))
         self.assertEqual(self.repo.get_account("Checking"), {**original, 'opening_amount': '250'})
         self.assertTrue(self.app.show_view("accounts"))
         self.settle()
-        self.assert_new_form()
+        self.assert_closed()
+        self.assertEqual(self.app.account_editing, account_key("Checking"))
         self.assertEqual(self.app.accounts_tree.set(account_key("Checking"), "balance"), '250.00')
 
     def test_resize_repositions_editor_and_scrolling_finishes_it(self):

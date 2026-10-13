@@ -35,7 +35,7 @@ A saved flow has the ten user-facing fields plus its internal ID:
 
 Account names are identities, matched after trimming whitespace and case folding. Unit names are trimmed but retain case: `mW` and `MW` differ. Amount must be a positive, finite decimal; a starting balance can be negative or unknown (`null`). Decimal strings avoid binary float rounding and preserve arbitrary supported precision. Read-only displays show USD to two places and other units to four by default; calculations and record values remain exact.
 
-Dates are local wall-clock times. A date without a time denotes midnight; an entered time can include seconds. There is no separate flag indicating whether a time was typed. A flow ID is generated when a record is created and remains stable through editing; copying a flow creates a new ID.
+Dates are local wall-clock times. Months and days need no leading zero. A date without a time denotes midnight; an entered time can include seconds. Graph date entries keep text unchanged while you type and format it on Enter or when you leave the field. There is no separate flag indicating whether a time was typed. A flow ID is generated when a record is created and remains stable through editing; copying a flow creates a new ID.
 
 ## Balance calculation
 
@@ -50,6 +50,8 @@ For a flow of quantity `q` and unit `u`:
 Within a unit, the sum across all accounts is unchanged by a transfer. No conversion or addition across units occurs. The starting balance is the confirmed value *immediately before flows at its timestamp*. Earlier completed activity is already reflected in that anchor. If you edit completed history from before the anchor, revisit the anchor as needed.
 
 Confirmed includes Complete flows. Including Pending also includes Pending; Including Planned adds Planned. Canceled contributes nothing. Graphs create separate plots for different units, and a combined line sums selected accounts only within one unit. An unknown starting balance prevents a trustworthy line for that pair; it is not silently treated as zero.
+
+Accounts calculates both displayed balances at its **As of** date/time. **Now** or a blank value uses the current time. An explicit future timestamp includes eligible flows through that instant. This is a session view setting, not a field in an account or flow record.
 
 ## SQLite
 
@@ -66,6 +68,8 @@ The current schema has seven persistent tables; [`schema.sql`](../flowledger/sch
 | `audit` | Before/after record of saved changes. |
 
 `Repository.save_flow` validates and writes a flow, its endpoint/unit entries, tags, and audit entry in one SQLite transaction. Failed writes roll back together. Session undo/redo can restore record and view changes but is not a permanent history of UI actions. The audit table preserves saved record changes.
+
+Account lists, learned suggestions, and ledger filters use current saved flow references, including Canceled flows. The entry form also offers the default Uncategorized category and all valid statuses. Removing the last reference removes that choice from the lists and clears its filter selection. Stored names and starting balances remain available internally for undo or later reuse.
 
 CSV/JSON import requires units. The preview distinguishes new records, duplicates, conflicts, similar records, and invalid rows; approved entries commit atomically. Data export contains flows; use database backup to preserve anchors and audit as well. Old schema files are migrated when opened; the legacy migrations that convert cents to quantities retain a one-time copy of the old database.
 

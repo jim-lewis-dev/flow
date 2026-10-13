@@ -188,15 +188,67 @@ class ViewHistoryTests(unittest.TestCase):
 
     def test_noop_and_filter_vocab_refresh_do_not_clear_redo(self):
         choice = self.app.ledger_filters["Category"]
-        choice.set_selected(["Missing category"], notify=True)
-        choice.set_values(["Dining"])
+        choice.set_selected(["Boat"], notify=True)
         self.shortcut("<Control-z>")
+        choice.set_values(["Dining"])
         choice.set_selected([], notify=True)
         self.app.refresh_all()
         self.assertTrue(self.app.history.can_redo)
         self.shortcut("<Control-y>")
-        self.assertEqual(choice.get(), ("Missing category",))
-        self.assertEqual(len(self.app.ledger_rows), 0)
+        self.assertEqual(choice.get(), ("Boat",))
+        self.assertEqual(set(self.app.ledger_rows), {self.second["flow_id"]})
+
+    def test_redo_filter_cannot_restore_a_choice_removed_from_records(self):
+        choice = self.app.ledger_filters["Category"]
+        choice.set_selected(["Boat"], notify=True)
+        self.shortcut("<Control-z>")
+        changed = dict(self.second, category="Dining")
+        self.repo.save_flow(changed)
+        self.app.refresh_all()
+        self.assertNotIn("Boat", choice.values)
+        self.assertTrue(self.app.history.can_redo)
+        database = "\n".join(self.repo.conn.iterdump())
+        self.shortcut("<Control-y>")
+        self.assertEqual(choice.get(), ())
+        self.assertEqual(len(self.app.ledger_rows), 2)
+        self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
+
+    def test_reset_restores_all_filter_settings_in_one_undo_step(self):
+        self.app.search_var.set("Repair")
+        for key, values in (("From", ["Checking"]), ("To", ["Shop"]),
+                            ("Status", ["Pending"]), ("Category", ["Boat"]),
+                            ("Tag", ["Boat"]), ("Units", ["USD"])):
+            choice = self.app.ledger_filters[key]
+            choice.set_selected(values, notify=True)
+            choice.query_variable.set(values[0][:2])
+        self.app._put_date_filters(("2026-10-03", "2026-10-03"))
+        self.app.view_history.record("dates", "Ledger dates")
+        before = self.app._ledger_filter_state()
+        database = "\n".join(self.repo.conn.iterdump())
+        self.app.reset_filters_button.invoke()
+        self.pump()
+        self.assertEqual(self.app.history.undo_label, "Reset filters")
+        self.assertEqual(self.app.search_var.get(), "")
+        self.assertEqual((self.app.filter_start.get(), self.app.filter_end.get()), ("", ""))
+        for choice in self.app.ledger_filters.values():
+            self.assertEqual(choice.get(), ())
+            self.assertEqual(choice.query_variable.get(), "")
+        self.assertEqual(len(self.app.ledger_rows), 2)
+        self.shortcut("<Control-z>")
+        self.assertEqual(self.app._ledger_filter_state(), before)
+        self.assertEqual(set(self.app.ledger_rows), {self.second["flow_id"]})
+        self.shortcut("<Control-y>")
+        self.assertEqual(len(self.app.ledger_rows), 2)
+        self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
+
+    def test_reset_defaults_is_a_noop_and_preserves_redo(self):
+        self.app.ledger_filters["Category"].set_selected(["Boat"], notify=True)
+        self.shortcut("<Control-z>")
+        self.app.reset_filters_button.invoke()
+        self.pump()
+        self.assertTrue(self.app.history.can_redo)
+        self.shortcut("<Control-y>")
+        self.assertEqual(self.app.ledger_filters["Category"].get(), ("Boat",))
 
     def test_a_new_filter_change_discards_redo(self):
         choice = self.app.ledger_filters["Status"]
@@ -277,18 +329,47 @@ class ViewHistoryTests(unittest.TestCase):
         self.assertEqual(self.app.editing_id, self.first["flow_id"])
         self.assertEqual(len(self.repo.list_flows()), 2)
 
-    def test_page_change_discard_is_reversible_without_undoing_navigation(self):
+    def test_page_change_preserves_draft_without_adding_an_undo_action(self):
         self.type_field("name", "Unadded draft")
         before = self.app._flow_snapshot()
         self.app.show_view("charts")
         self.pump()
+        self.assertEqual(self.app._flow_snapshot(), before)
         self.shortcut("<Control-z>")
         self.assertEqual(self.app.current_view, "charts")
+        self.assertEqual(self.app.form_vars["name"].get(), "")
+        self.shortcut("<Control-y>")
         self.assertEqual(self.app._flow_snapshot(), before)
         self.app.show_view("flows")
         self.pump()
         self.assertEqual(self.app._flow_snapshot(), before)
         self.assertEqual(len(self.repo.list_flows()), 2)
+
+    def test_incomplete_flow_and_account_forms_survive_all_other_tabs(self):
+        saved = "\n".join(self.repo.conn.iterdump())
+        for key, value in {"date": "2026-10-28 9:30", "name": "Payment draft",
+                           "from_account": "Checking", "to_account": "Card",
+                           "amount": ".", "units": "USD", "status": "Pending",
+                           "category": "Transfer", "tags": "Bills, October"}.items():
+            self.app.form_vars[key].set(value)
+        self.app.notes_text.insert("1.0", "Still entering\nKeep both lines")
+        self.pump()
+        flow = self.app._flow_snapshot()
+        self.app.show_view("accounts")
+        self.pump()
+        for key, value in {"name": "New account", "units": "kg",
+                           "opening": "-", "date": "2026-10-01"}.items():
+            self.app.account_vars[key].set(value)
+        account = self.app._account_snapshot()
+        for page in ("charts", "data", "experimental", "flows", "accounts", "flows"):
+            with self.subTest(page=page):
+                self.app.nav_buttons[page].invoke()
+                self.pump()
+                self.assertEqual(self.app._flow_snapshot(), flow)
+                self.assertEqual(self.app._account_snapshot(), account)
+                self.assertIsNone(self.app.editing_id)
+                self.assertIsNone(self.app.account_editing)
+                self.assertEqual("\n".join(self.repo.conn.iterdump()), saved)
 
     def test_ordinary_filter_reopen_resets_query_but_undo_closed_search_restores_it(self):
         choice = self.app.ledger_filters["Category"]

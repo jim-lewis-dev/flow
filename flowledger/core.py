@@ -511,16 +511,25 @@ class Repository:
                 self._audit("account", f"{canonical} [{units}]", "update" if before else "create", before, after)
             return after
 
-    def list_units(self) -> list[str]:
-        """Saved case-sensitive units, including starting balances without flows."""
+    def list_units(self, *, referenced_only: bool = False) -> list[str]:
+        """Saved case-sensitive units; optionally only units used by flows."""
+        if referenced_only:
+            return [row[0] for row in self.conn.execute(
+                "SELECT DISTINCT units FROM flows ORDER BY units")]
         return [row[0] for row in self.conn.execute(
             "SELECT units FROM flows UNION SELECT units FROM account_balances ORDER BY units")]
 
-    def list_categories(self) -> list[str]:
-        return [row[0] for row in self.conn.execute("SELECT name FROM categories ORDER BY category_key")]
+    def list_categories(self, *, referenced_only: bool = False) -> list[str]:
+        query = "SELECT name FROM categories"
+        if referenced_only:
+            query += " WHERE category_key IN (SELECT category_key FROM flows)"
+        return [row[0] for row in self.conn.execute(query + " ORDER BY category_key")]
 
-    def list_tags(self) -> list[str]:
-        return [row[0] for row in self.conn.execute("SELECT name FROM tags ORDER BY tag_key")]
+    def list_tags(self, *, referenced_only: bool = False) -> list[str]:
+        query = "SELECT name FROM tags"
+        if referenced_only:
+            query += " WHERE tag_key IN (SELECT tag_key FROM flow_tags)"
+        return [row[0] for row in self.conn.execute(query + " ORDER BY tag_key")]
 
     def list_names(self) -> list[str]:
         names = {}

@@ -61,6 +61,87 @@ class GraphUiTests(unittest.TestCase):
     def line(self, name="Checking"):
         return next(line for line in self.app.chart_series if line.get_label() == name)
 
+    def test_account_unit_selection_uses_plain_control_and_shift_gestures(self):
+        choices = self.app.chart_accounts
+        self.assertGreaterEqual(choices.size(), 4)
+        choices.focus_force()
+        self.pump()
+        click_time = 1000
+
+        def click(index, modifier=""):
+            nonlocal click_time
+            x, y, width, height = choices.bbox(index)
+            click_time += 1000
+            for event, offset in (("ButtonPress", 0), ("ButtonRelease", 40)):
+                choices.event_generate(f"<{modifier}{event}-1>",
+                    x=x + min(width // 2, 20), y=y + height // 2,
+                    time=click_time + offset)
+            self.pump()
+
+        click(1)
+        self.assertEqual(choices.curselection(), (1,))
+        click(3, "Control-")
+        self.assertEqual(choices.curselection(), (1, 3))
+        click(3, "Control-")
+        self.assertEqual(choices.curselection(), (1,))
+        click(1)
+        click(3, "Shift-")
+        self.assertEqual(choices.curselection(), (1, 2, 3))
+        click(1)
+        for sequence, expected in (("<Shift-Down>", (1, 2)),
+                                   ("<Shift-Down>", (1, 2, 3)),
+                                   ("<Shift-Up>", (1, 2))):
+            choices.event_generate(sequence)
+            self.pump()
+            self.assertEqual(choices.curselection(), expected)
+        selected = tuple(self.app.chart_account_pairs[index] for index in (1, 2))
+        self.assertEqual(self.app._graph_controls()[0], selected)
+        self.app.undo()
+        self.pump()
+        self.assertEqual(choices.curselection(), (1, 2, 3))
+        self.app.redo()
+        self.pump()
+        self.assertEqual(choices.curselection(), (1, 2))
+
+    def test_only_account_list_scrolls_and_controls_fit_the_minimum_window(self):
+        for index in range(60):
+            name = f"Account {index:02}"
+            self.repo.save_account(name, "0", "2026-10-01")
+            self.repo.save_flow(dict(units="USD", date="2026-10-01",
+                from_account="Checking", to_account=name, amount="1", status="Canceled"))
+        self.app.refresh_all()
+        self.app.attributes("-fullscreen", False)
+        self.app.geometry("1120x700+0+0")
+        self.pump()
+        choices = self.app.chart_accounts
+        controls = choices.master.master
+        self.assertEqual(controls.master.winfo_class(), "TFrame")
+        self.assertEqual(len(controls.master.winfo_children()), 1)
+        export = next(widget for widget in controls.winfo_children()
+                      if widget.winfo_class() == "TButton" and
+                      widget.cget("text") == "Export Graph…")
+        self.assertLessEqual(export.winfo_y() + export.winfo_height(), controls.winfo_height())
+        self.assertGreater(choices.winfo_height(), 40)
+        selected = choices.curselection()
+        panel_position = controls.winfo_rooty()
+        limits = self.app.axes.get_xlim(), self.app.axes.get_ylim()
+        choices.yview_moveto(0)
+        for sequence, options, direction in (("<Button-5>", {}, 1),
+                ("<Button-4>", {}, -1), ("<MouseWheel>", {"delta": -120}, 1),
+                ("<MouseWheel>", {"delta": 120}, -1),
+                ("<MouseWheel>", {"delta": -1}, 1)):
+            with self.subTest(event=sequence, options=options):
+                before = choices.yview()[0]
+                choices.event_generate(sequence, x=20, y=20, **options)
+                self.pump()
+                self.assertGreater((choices.yview()[0] - before) * direction, 0)
+                self.assertEqual(choices.curselection(), selected)
+                self.assertEqual(controls.winfo_rooty(), panel_position)
+                self.assertEqual((self.app.axes.get_xlim(), self.app.axes.get_ylim()), limits)
+        controls.event_generate("<MouseWheel>", x=20, y=20, delta=-120)
+        self.pump()
+        self.assertEqual(controls.winfo_rooty(), panel_position)
+
     def hover(self, at, amount):
         from matplotlib.backend_bases import MouseEvent
         from matplotlib.dates import date2num
@@ -109,21 +190,119 @@ class GraphUiTests(unittest.TestCase):
         self.assertFalse(self.app.chart_series)
         self.assertTrue(any("Combined balance is unknown" in text.get_text() for text in self.app.axes.texts))
 
-    def test_unpadded_dates_normalize_and_through_keeps_whole_day(self):
+    def test_unpadded_dates_stay_raw_until_finished_and_through_keeps_whole_day(self):
         self.repo.save_flow(dict(units="USD", date="2026-10-03 23:59:59", from_account="Checking", to_account="Shop",
                                  amount="0.01", status="Complete", name="Late"))
         self.app.chart_start.set("2026-10-1")
         self.app.chart_end.set("2026-10-3")
         self.select("Checking")
+        self.assertEqual(self.app.chart_start.get(), "2026-10-1")
+        self.assertEqual(self.app.chart_end.get(), "2026-10-3")
+        self.assertEqual(self.app.chart_series[self.line()][-1], ("2026-10-03 23:59:59", Decimal("987.99")))
+        self.app.chart_start_picker.entry.focus_force()
+        self.pump()
+        self.app.chart_start_picker.entry.event_generate("<Return>")
+        self.pump()
         self.assertEqual(self.app.chart_start.get(), "2026-10-01")
+        self.assertEqual(self.app.chart_end.get(), "2026-10-3")
+        self.app.chart_end_picker.entry.focus_force()
+        self.pump()
+        self.app.chart_basis_widget.focus_force()
+        self.pump()
         self.assertEqual(self.app.chart_end.get(), "2026-10-03")
         self.assertEqual(self.app.chart_series[self.line()][-1], ("2026-10-03 23:59:59", Decimal("987.99")))
+        for variable, picker, raw, finished in (
+                (self.app.chart_start, self.app.chart_start_picker, "2026-10-1", "2026-10-01"),
+                (self.app.chart_end, self.app.chart_end_picker, "2026-10-3", "2026-10-03")):
+            with self.subTest(formatting_only_blur=raw):
+                entry = picker.entry
+                entry.focus_force()
+                self.pump()
+                entry.delete(0, "end")
+                entry.insert("end", raw)
+                self.app.after(180, self.app.quit)
+                self.app.mainloop()
+                self.pump()
+                self.assertEqual(variable.get(), raw)
+                axes = self.app.chart_axes["USD"]
+                low, high = axes.get_xlim()
+                axes.set_xlim(low + (high - low) / 4, high - (high - low) / 4)
+                axes.set_ylim(980, 990)
+                self.pump()
+                limits = axes.get_xlim(), axes.get_ylim()
+                self.app.chart_basis_widget.focus_force()
+                self.pump()
+                self.assertEqual(variable.get(), finished)
+                self.assertIs(self.app.chart_axes["USD"], axes)
+                current_axes = self.app.chart_axes["USD"]
+                self.assertEqual((current_axes.get_xlim(), current_axes.get_ylim()), limits)
+
+    def test_slow_date_and_time_typing_keeps_text_caret_and_one_undo_step(self):
+        for key, variable, picker in (
+                ("start", self.app.chart_start, self.app.chart_start_picker),
+                ("end", self.app.chart_end, self.app.chart_end_picker)):
+            with self.subTest(field=key):
+                if self.app._chart_redraw_pending is not None:
+                    self.app.after_cancel(self.app._chart_redraw_pending)
+                    self.app._chart_redraw_pending = None
+                self.app._chart_auto_dates = False
+                with self.app.view_history.suspended():
+                    self.app.chart_start.set("2026-10-01")
+                    self.app.chart_end.set("2027-01-01")
+                    self.app.draw_chart(remember=False)
+                self.app.view_history.remember("graph")
+                before = self.app._graph_controls()
+                entry = picker.entry
+                entry.focus_force()
+                self.pump()
+                entry.delete(0, "end")
+                typed = ""
+                for addition in ("2026", "-1", "2-3", "0", " 9", ":5", ":7"):
+                    typed += addition
+                    entry.insert("end", addition)
+                    self.app.after(180, self.app.quit)
+                    self.app.mainloop()
+                    self.pump()
+                    self.assertIs(self.app.focus_get(), entry)
+                    self.assertEqual(variable.get(), typed)
+                    self.assertEqual(entry.index("insert"), len(typed))
+                    self.assertIsNone(self.app._chart_redraw_pending)
+                rows = self.app.chart_series[self.line()]
+                self.assertEqual(rows[0 if key == "start" else -1][0],
+                                 "2026-12-30 09:05:07")
+                entry.event_generate("<Return>")
+                self.pump()
+                self.assertEqual(variable.get(), "2026-12-30 09:05:07")
+                finished = self.app._graph_controls()
+                self.app.undo()
+                self.pump()
+                self.assertEqual(self.app._graph_controls(), before)
+                self.assertTrue(self.app.history.can_redo)
+                entry.event_generate("<Return>")
+                self.pump()
+                self.assertEqual(self.app._graph_controls(), before)
+                self.assertTrue(self.app.history.can_redo)
+                self.app.redo()
+                self.pump()
+                self.assertEqual(self.app._graph_controls(), finished)
+                axes = self.app.chart_axes["USD"]
+                low, high = axes.get_xlim()
+                axes.set_xlim(low + (high - low) / 4, high - (high - low) / 4)
+                axes.set_ylim(980, 990)
+                limits = axes.get_xlim(), axes.get_ylim()
+                self.app.chart_basis_widget.focus_force()
+                self.pump()
+                self.assertIs(self.app.chart_axes["USD"], axes)
+                current_axes = self.app.chart_axes["USD"]
+                self.assertEqual((current_axes.get_xlim(), current_axes.get_ylim()), limits)
 
     def test_invalid_input_clears_old_plot_tooltip_and_inspection(self):
         self.hover("2026-10-02", 988)
         self.app.chart_start.set("2026-2-31")
         self.app.draw_chart()
         self.pump()
+        self.app._finish_graph_date("start")
+        self.assertEqual(self.app.chart_start.get(), "2026-2-31")
         self.assertIn("From:", self.app.chart_message.get())
         self.assertIn("2026-2-31", self.app.chart_message.get())
         self.assertEqual(self.app.chart_series, {})

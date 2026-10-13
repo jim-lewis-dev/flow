@@ -40,6 +40,8 @@ A flow has a date/time, name, **from**, **to**, amount, units, status, category,
 
 An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. Click a column heading to sort balances, and click again to reverse the order. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
 
+**As of** sets the date/time for both displayed balance columns. It defaults to **Now**; a blank value also uses the current time. Enter a future date to inspect future flows, including pending transfers. Date-only means midnight.
+
 | Balance basis | Included flows |
 | --- | --- |
 | Confirmed | Complete |
@@ -50,11 +52,11 @@ An account can hold multiple units. Set a separate starting balance and date/tim
 
 ## Work with flows
 
-- Type into the top form, then choose **Add Flow**. From, To, Units, Category, and Tags can learn new values as you enter them. The date defaults to today; the time is optional.
+- Type into the top form, then choose **Add Flow**. From, To, Units, Category, and Tags accept new values; suggestions come from saved flows. The date defaults to today; the time is optional. Unadded entries remain populated when you switch tabs.
 - Click a ledger row and edit its fields above, or double-click a cell to edit in place. Completed valid changes to an existing flow save automatically. **Delete** removes a selected row; **Ctrl+Z** and **Ctrl+Y** undo and redo changes in the current session.
-- Search the ledger and combine checkbox filters for From, To, Units, Status, Categories, and Tags. Filter selections do not change saved records or balances.
-- In **Graphs**, select account/unit pairs and a balance basis. Plot each pair or combine selected accounts *within the same unit*. Dates fit the selected records, and values get 10% vertical breathing room. Hover for exact values, scroll to zoom in or out, and use **Fit Dates** after a manual range. The graph refreshes as its controls change.
-- **Experimental** animates the currently filtered flows on a draggable account map. Step through timestamps, play/pause, or change speed from 0 to 5. Hover a node for its balance and a moving flow for its record details. This tab does not write data.
+- Search finds account names in either From or To. Combine checkbox filters for From, To, Units, Status, Categories, and Tags; **Reset** clears the search, selections, and date limits in one undoable step. Choices disappear when their last saved reference is removed. Filters do not change saved records or balances.
+- In **Graphs**, click an account/unit pair to select it, Ctrl-click to add or remove selections, and use Shift-click or Shift-arrow for ranges. Scroll over the list to browse it. Plot each pair or combine selected accounts *within the same unit*. Dates fit the selected records, and values get 10% vertical breathing room. Hover for exact values, scroll over the plot to zoom, and use **Fit Dates** after a manual range. The graph refreshes as its controls change.
+- **Experimental** animates the currently filtered flows on a draggable account map. Step through timestamps, play/pause, or change speed from 0 to 5. Hover a node for its balance and a moving flow for its record details. Controls refresh automatically. Scroll to pan, Ctrl-scroll to zoom, and double-click empty space to fit the map. This tab does not write data.
 - The **Data** tab imports and exports flows as CSV or JSON and offers database backup and restore. An import preview catches duplicates and conflicts before changes are saved. [Example import files](examples/README.md) show the supported fields.
 
 To see the Python repository API, run `python3 -m examples.two_units`; it creates two independent resources in a temporary database.

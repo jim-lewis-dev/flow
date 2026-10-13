@@ -73,22 +73,41 @@ class CheckFilterTests(unittest.TestCase):
         self.assertTrue(self.filter._choice_variables["Boat"].get())
         self.assertEqual(popup.geometry(), geometry)
 
-    def test_refresh_keeps_missing_selected_values_until_explicit_clear(self):
-        self.filter.set_selected(["Dining", "Dining"])
-        self.filter.set_values(["Boat", "Boat", "Books"])
-        self.assertEqual(self.filter.get(), ("Dining",))
-        self.assertEqual(self.filter.values, ["Boat", "Books"])
-        self.open()
-        self.assertEqual(list(self.filter.checkbuttons), ["Boat", "Books", "Dining"])
-        self.assertTrue(self.filter._choice_variables["Dining"].get())
-        self.filter.set_values(["Music"])
+    def test_refresh_prunes_missing_selections_and_open_popup_silently(self):
+        self.filter.set_selected(["Dining", "Boat", "Dining"])
+        popup = self.open()
+        self.filter.checkbuttons["Dining"].focus_set()
         self.root.update()
-        self.assertEqual(list(self.filter.checkbuttons), ["Music", "Dining"])
+        self.assertTrue(self.filter.set_values(["Boat", "Boat", "Books"]))
+        self.root.update()
+        self.assertIs(self.filter.popup, popup)
+        self.assertEqual(self.filter.get(), ("Boat",))
+        self.assertEqual(self.filter.values, ["Boat", "Books"])
+        self.assertEqual(list(self.filter.checkbuttons), ["Boat", "Books"])
+        self.assertTrue(self.filter._choice_variables["Boat"].get())
+        self.assertIs(self.root.focus_get(), self.filter.search_entry)
+        self.assertEqual(self.filter.tooltip_text(), "Boat")
+        self.assertFalse(self.filter.set_selected(["Dining", "Boat"]))
+        self.assertFalse(self.filter.set_values(["Boat", "Books"]))
         self.assertEqual(self.changes, [])
-        self.filter.all_button.invoke()
+        self.assertTrue(self.filter.set_values(["Music"]))
         self.root.update()
         self.assertEqual(list(self.filter.checkbuttons), ["Music"])
         self.assertEqual(self.filter.get(), ())
+        self.assertEqual(self.filter.button.cget("text"), "Categories: All ▾")
+        self.assertTrue(self.filter._all_variable.get())
+        self.assertFalse(self.filter.set_selected(["Dining"], notify=True))
+        self.assertEqual(self.changes, [])
+
+    def test_case_insensitive_names_keep_the_current_database_spelling(self):
+        self.filter.set_values(["Dining", "dining", "BOAT"])
+        self.assertEqual(self.filter.values, ["Dining", "BOAT"])
+        self.filter.set_selected(["dining", "boat", "Dining", "Missing"])
+        self.assertEqual(self.filter.get(), ("Dining", "BOAT"))
+        self.assertTrue(self.filter.set_values(["DINING", "Boat"]))
+        self.assertEqual(self.filter.get(), ("DINING", "Boat"))
+        self.assertEqual(self.filter.tooltip_text(), "DINING\nBoat")
+        self.assertEqual(self.changes, [])
 
     def test_programmatic_selection_is_silent_unless_requested(self):
         self.filter.set_selected(["Boat"])
@@ -96,7 +115,9 @@ class CheckFilterTests(unittest.TestCase):
         self.assertEqual(self.filter.button.cget("text"), "Categories: Boat ▾")
         self.filter.set_selected(["Boat"], notify=True)
         self.assertEqual(self.changes, [])
-        self.filter.set_selected(["A category whose full name is much longer than the button"], notify=True)
+        long_name = "A category whose full name is much longer than the button"
+        self.filter.set_values([*self.filter.values, long_name])
+        self.filter.set_selected([long_name], notify=True)
         self.assertEqual(len(self.changes), 1)
         self.assertLessEqual(len(self.filter.button.cget("text")), 27)
         self.assertIn("…", self.filter.button.cget("text"))
@@ -241,6 +262,7 @@ class CheckFilterTests(unittest.TestCase):
 
     def test_hover_lists_all_choices_and_updates_with_restored_selection(self):
         names = ("Boat", "Dining", "A category whose full name is longer than the button")
+        self.filter.set_values(names)
         self.filter.set_selected(names)
         self.assertEqual(self.filter.tooltip_text(), "\n".join(names))
         maps = []
@@ -265,7 +287,11 @@ class CheckFilterTests(unittest.TestCase):
         self.filter.set_selected(names)
         self.root.update()
         self.assertEqual(self.filter._tooltip_label.cget("text"), "\n".join(names))
-        self.filter.set_selected(())
+        self.assertTrue(self.filter.set_values(("Dining",)))
+        self.root.update()
+        self.assertIs(self.filter._tooltip_popup, popup)
+        self.assertEqual(self.filter._tooltip_label.cget("text"), "Dining")
+        self.assertTrue(self.filter.set_values(()))
         self.root.update()
         self.assertEqual(self.filter._tooltip_label.cget("text"), "All")
         self.assertEqual(self.changes, [])
@@ -294,7 +320,8 @@ class CheckFilterTests(unittest.TestCase):
 
     def test_units_keep_case_sensitive_choices_and_full_tooltip_names(self):
         from flowledger.filters import CheckFilter
-        units = CheckFilter(self.root, "Units", values=("mW", "MW", "mW"))
+        units = CheckFilter(self.root, "Units", values=("mW", "MW", "mW"),
+                            case_sensitive=True)
         units.pack()
         self.root.update()
         self.assertEqual(units.button.cget("text"), "Units: All ▾")
@@ -307,6 +334,12 @@ class CheckFilterTests(unittest.TestCase):
         units.checkbuttons["MW"].invoke()
         self.assertEqual(units.get(), ("mW", "MW"))
         self.assertEqual(units.tooltip_text(), "mW\nMW")
+        self.assertFalse(units.set_selected(("mW", "MW", "mw")))
+        self.assertTrue(units.set_values(("MW",)))
+        self.root.update()
+        self.assertEqual(units.get(), ("MW",))
+        self.assertEqual(list(units.checkbuttons), ["MW"])
+        self.assertFalse(units.set_selected(("mW", "MW")))
 
     def test_empty_captions_are_consistent_and_custom_all_label_is_retained(self):
         from flowledger.filters import CheckFilter

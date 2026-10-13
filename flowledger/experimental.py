@@ -36,6 +36,10 @@ BASIS = {
     "Including Planned": ("Complete", "Pending", "Planned"),
 }
 MAX_SPEED = 5
+MIN_ZOOM = 0.25
+MAX_ZOOM = 4.0
+MAP_HINT = ("Drag nodes · Drag background or scroll to pan · Ctrl-scroll to zoom"
+            " · Double-click background to fit · Click pulses to edit")
 
 
 class ExperimentalView(ttk.Frame):
@@ -63,7 +67,7 @@ class ExperimentalView(ttk.Frame):
         self.speed_label_var = tk.StringVar(self, "1×")
         self.progress_var = tk.StringVar(self, "No flows selected")
         self.message_var = tk.StringVar(self, "")
-        self.hover_var = tk.StringVar(self, "Drag accounts to arrange the map · Click a pulse to open its flow")
+        self.hover_var = tk.StringVar(self, MAP_HINT)
         self._initialized_dates = False
         self._all_visible: list[dict] = []
         self._events: list[dict] = []
@@ -80,6 +84,8 @@ class ExperimentalView(ttk.Frame):
         self._positions: dict[str, tuple[float, float]] = {}
         self._drag_name: str | None = None
         self._drag_before: dict | None = None
+        self._pan_before: dict | None = None
+        self._ignore_pointer_up = False
         self._node_items: dict[int, str] = {}
         self._pulse_items: dict[int, dict] = {}
         self._balance_flows: list[dict] = []
@@ -93,9 +99,15 @@ class ExperimentalView(ttk.Frame):
         self._hover_pointer = (0, 0)
         self._scene_width = 1000
         self._scene_height = 510
+        self._zoom = 1.0
         self._history_state: dict | None = None
         self._speed_drag_before: dict | None = None
+        self._setting_dates = False
+        self._date_after_id: str | None = None
+        self._date_before: dict | None = None
         self._build()
+        for variable in (self.from_var, self.through_var):
+            variable.trace_add("write", self._date_changed)
 
     def _build(self):
         self.columnconfigure(0, weight=1)
@@ -108,15 +120,17 @@ class ExperimentalView(ttk.Frame):
         ttk.Label(controls, text="Account Flow Map", style="Section.TLabel").grid(
             row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
         ttk.Label(controls, text="Uses current Flow Ledger filters", style="CardMuted.TLabel").grid(
-            row=0, column=3, columnspan=4, sticky="e", pady=(0, 8))
+            row=0, column=3, columnspan=3, sticky="e", pady=(0, 8))
         labels = (("FROM", 0), ("THROUGH", 1), ("UNITS", 2),
                   ("STATUS BASIS", 3), ("SPEED", 4))
         for title, column in labels:
             ttk.Label(controls, text=title, style="Field.TLabel").grid(
                 row=1, column=column, sticky="w", padx=(0, 12))
-        self.from_entry = CalendarEntry(controls, variable=self.from_var, width=14)
+        self.from_entry = CalendarEntry(controls, variable=self.from_var, width=14,
+                                        on_select=self.update)
         self.from_entry.grid(row=2, column=0, sticky="ew", padx=(0, 12))
-        self.through_entry = CalendarEntry(controls, variable=self.through_var, width=14)
+        self.through_entry = CalendarEntry(controls, variable=self.through_var, width=14,
+                                           on_select=self.update)
         self.through_entry.grid(row=2, column=1, sticky="ew", padx=(0, 12))
         self.units_combo = ttk.Combobox(controls, textvariable=self.units_var,
                                         state="readonly", width=12)
@@ -134,9 +148,6 @@ class ExperimentalView(ttk.Frame):
         self.speed_scale.grid(row=2, column=4, sticky="ew", padx=(0, 3))
         ttk.Label(controls, textvariable=self.speed_label_var,
                   style="Card.TLabel", width=3).grid(row=2, column=5, sticky="w", padx=(0, 12))
-        self.update_button = ttk.Button(controls, text="Update", style="Primary.TButton",
-                                        command=self.update)
-        self.update_button.grid(row=2, column=6, sticky="ew")
         self.units_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose unit"))
         self.basis_combo.bind("<<ComboboxSelected>>", lambda event: self._control_changed("Choose status basis"))
         self.speed_scale.bind("<ButtonPress-1>", self._speed_change_started)
@@ -178,8 +189,10 @@ class ExperimentalView(ttk.Frame):
         self.canvas = tk.Canvas(scene, bg=CARD, highlightthickness=0, relief="flat",
                                 xscrollincrement=1, yscrollincrement=1)
         self.canvas.grid(row=0, column=0, sticky="nsew")
-        xbar = ttk.Scrollbar(scene, orient="horizontal", command=self.canvas.xview)
-        ybar = ttk.Scrollbar(scene, orient="vertical", command=self.canvas.yview)
+        xbar = ttk.Scrollbar(scene, orient="horizontal",
+                             command=lambda *args: self._scroll_view("x", *args))
+        ybar = ttk.Scrollbar(scene, orient="vertical",
+                             command=lambda *args: self._scroll_view("y", *args))
         self.xbar, self.ybar = xbar, ybar
         xbar.grid(row=1, column=0, sticky="ew")
         ybar.grid(row=0, column=1, sticky="ns")
@@ -188,8 +201,25 @@ class ExperimentalView(ttk.Frame):
         self.canvas.bind("<ButtonPress-1>", self._pointer_down)
         self.canvas.bind("<B1-Motion>", self._pointer_drag)
         self.canvas.bind("<ButtonRelease-1>", self._pointer_up)
+        self.canvas.bind("<Double-Button-1>", self._fit_from_pointer)
         self.canvas.bind("<Motion>", self._pointer_hover)
         self.canvas.bind("<Leave>", lambda event: self.hide_hover())
+        for sequence in ("<MouseWheel>", "<Shift-MouseWheel>", "<Control-MouseWheel>"):
+            self.canvas.bind(sequence, self._scroll_canvas)
+        for button in (4, 5):
+            for prefix in ("", "Shift-", "Control-"):
+                self.canvas.bind(f"<{prefix}Button-{button}>",
+                                 lambda event, number=button:
+                                     self._scroll_canvas(event, button=number))
+        # Some Tk builds accept native horizontal wheel buttons; others only
+        # expose Shift plus the vertical wheel.
+        for button in (6, 7):
+            try:
+                self.canvas.bind(f"<Button-{button}>",
+                                 lambda event, number=button:
+                                     self._scroll_canvas(event, button=number))
+            except tk.TclError:
+                pass
 
         detail = ttk.Frame(self, style="Card.TFrame", padding=(12, 7))
         detail.grid(row=3, column=0, sticky="ew", pady=(8, 0))
@@ -219,24 +249,44 @@ class ExperimentalView(ttk.Frame):
             "units": self.units_var.get(), "basis": self.basis_var.get(),
             "speed": self.speed_var.get(), "index": self._index,
             "positions": {name: [x, y] for name, (x, y) in self._positions.items()},
+            "zoom": self._zoom,
+            "viewport": [self.canvas.canvasx(0) / self._zoom,
+                         self.canvas.canvasy(0) / self._zoom],
         }
 
     def put_state(self, state: dict) -> None:
+        self._cancel_date_update()
+        current = self.get_state()
+        camera_only = all(current[key] == state.get(key, current[key]) for key in
+                          ("from", "through", "units", "basis", "speed", "positions"))
+        if camera_only:
+            # Playback can advance between a wheel gesture and Undo. Restoring
+            # the camera must leave that live timestamp and pulse position alone.
+            self.hide_hover()
+            self._zoom = max(MIN_ZOOM, min(MAX_ZOOM, float(state.get("zoom", 1))))
+            self._draw_scene(viewport=state.get("viewport", (0, 0)))
+            self._history_state = self.get_state()
+            return
         self.pause()
-        self.from_var.set(state.get("from", ""))
-        self.through_var.set(state.get("through", ""))
+        self._setting_dates = True
+        try:
+            self.from_var.set(state.get("from", ""))
+            self.through_var.set(state.get("through", ""))
+        finally:
+            self._setting_dates = False
         self.units_var.set(state.get("units", ""))
         self.basis_var.set(state.get("basis", "Confirmed"))
         self.speed_var.set(max(0, min(MAX_SPEED, int(state.get("speed", 1)))))
         self.speed_label_var.set(f"{self.speed_var.get()}×")
         self._positions = {name: (float(pos[0]), float(pos[1]))
                            for name, pos in state.get("positions", {}).items()}
+        self._zoom = max(MIN_ZOOM, min(MAX_ZOOM, float(state.get("zoom", 1))))
         self._initialized_dates = True
         self._load_data(reset_index=True)
         self._index = min(max(-1, int(state.get("index", -1))), len(self._groups) - 1)
         self._progress = 0.55 if self._index >= 0 else 0.0
         self._stepped = self._index >= 0
-        self._draw_scene()
+        self._draw_scene(viewport=state.get("viewport", (0, 0)))
         self._update_progress()
         self._history_state = self.get_state()
 
@@ -248,20 +298,39 @@ class ExperimentalView(ttk.Frame):
 
     def refresh(self) -> None:
         """Re-read current ledger filter results; preserve the current timestamp."""
+        if self._date_after_id is not None:
+            self.update()
         self.pause()
         self._load_data(reset_index=False)
         self._history_state = self.get_state()
 
     def update(self) -> None:
-        """Apply typed dates; invalid input clears stale animation and shows why."""
-        before = self._history_state or self.get_state()
-        if self._load_data(reset_index=True):
-            self._notify(before, "Update flow map")
+        """Apply dates immediately; invalid input clears stale animation."""
+        before = self._date_before or self._history_state or self.get_state()
+        self._cancel_date_update()
+        self._load_data(reset_index=True)
+        self._notify(before, "Change flow map dates")
+
+    def _cancel_date_update(self) -> None:
+        if self._date_after_id is not None:
+            self.after_cancel(self._date_after_id)
+            self._date_after_id = None
+        self._date_before = None
+
+    def _date_changed(self, *args) -> None:
+        if self._setting_dates:
+            return
+        if self._date_before is None:
+            self._date_before = self._history_state or self.get_state()
+        if self._date_after_id is not None:
+            self.after_cancel(self._date_after_id)
+        self._date_after_id = self.after(250, self.update)
 
     def _control_changed(self, label: str) -> None:
-        before = self._history_state or self.get_state()
-        if self._load_data(reset_index=True):
-            self._notify(before, label)
+        before = self._date_before or self._history_state or self.get_state()
+        self._cancel_date_update()
+        self._load_data(reset_index=True)
+        self._notify(before, label)
 
     def _speed_change_started(self, event=None) -> None:
         if self._speed_drag_before is None:
@@ -288,8 +357,12 @@ class ExperimentalView(ttk.Frame):
         visible = [dict(flow) for flow in self.get_flows()]
         if not self._initialized_dates:
             days = sorted(flow["date"][:10] for flow in visible)
-            self.from_var.set(days[0] if days else date.today().isoformat())
-            self.through_var.set(days[-1] if days else date.today().isoformat())
+            self._setting_dates = True
+            try:
+                self.from_var.set(days[0] if days else date.today().isoformat())
+                self.through_var.set(days[-1] if days else date.today().isoformat())
+            finally:
+                self._setting_dates = False
             self._initialized_dates = True
         units = sorted({flow["units"] for flow in visible})
         self.units_combo.configure(values=units)
@@ -344,8 +417,10 @@ class ExperimentalView(ttk.Frame):
         return True
 
     def _scene_dimensions(self, number: int) -> tuple[int, int]:
-        width = max(700, self.canvas.winfo_width() - 4)
-        height = max(280, self.canvas.winfo_height() - 4)
+        # Use the containing frame so showing a scrollbar does not change the
+        # map's world geometry underneath an anchored zoom or node drag.
+        width = max(700, self.canvas.master.winfo_width() - 4)
+        height = max(280, self.canvas.master.winfo_height() - 4)
         # Expand a scrollable drawing surface instead of hiding crowded nodes.
         radius = max(0, number - 1) * 112 / (2 * math.pi) + 110
         side = int(2 * radius)
@@ -378,6 +453,68 @@ class ExperimentalView(ttk.Frame):
     def _canvas_resized(self, event=None) -> None:
         self._draw_scene()
 
+    def _scroll_canvas(self, event, *, button: int | None = None) -> str:
+        """Pan with the wheel, or zoom about the pointer with Ctrl held."""
+        self.hide_hover()
+        before = self.get_state()
+        horizontal = button in (6, 7) or bool(getattr(event, "state", 0) & 1)
+        if button in (4, 5, 6, 7):
+            distance = -40 if button in (4, 6) else 40
+        else:
+            delta = getattr(event, "delta", 0)
+            if not delta:
+                return "break"
+            # Windows uses 120 per notch; macOS uses small trackpad deltas.
+            system = self.tk.call("tk", "windowingsystem")
+            divisor = 120 if system == "win32" or abs(delta) >= 120 else 1
+            distance = -round(delta * 40 / divisor)
+        if getattr(event, "state", 0) & 4:
+            self._zoom_at(1.2 ** (-distance / 40), event.x, event.y)
+            self._notify(before, "Zoom flow map")
+            return "break"
+        if horizontal:
+            self.canvas.xview_scroll(distance, "units")
+        else:
+            self.canvas.yview_scroll(distance, "units")
+        self._notify(before, "Pan flow map")
+        return "break"
+
+    def _scroll_view(self, axis: str, *args) -> None:
+        before = self.get_state()
+        self.hide_hover()
+        (self.canvas.xview if axis == "x" else self.canvas.yview)(*args)
+        self._notify(before, "Pan flow map")
+
+    def _zoom_at(self, factor: float, x: int, y: int) -> None:
+        zoom = max(MIN_ZOOM, min(MAX_ZOOM, self._zoom * factor))
+        if math.isclose(zoom, self._zoom):
+            return
+        world_x = self.canvas.canvasx(x) / self._zoom
+        world_y = self.canvas.canvasy(y) / self._zoom
+        self._zoom = zoom
+        self._draw_scene(viewport=(world_x - x / zoom, world_y - y / zoom))
+
+    def _fit_from_pointer(self, event) -> str | None:
+        if self._item_at(event) is not None:
+            return None
+        before = self.get_state()
+        self.hide_hover()
+        self._pan_before = None
+        self._ignore_pointer_up = True
+        self.canvas.configure(cursor="")
+        self._zoom = max(MIN_ZOOM, min(MAX_ZOOM,
+            self.canvas.winfo_width() / self._scene_width,
+            self.canvas.winfo_height() / self._scene_height))
+        self._draw_scene(viewport=(
+            (self._scene_width - self.canvas.winfo_width() / self._zoom) / 2,
+            (self._scene_height - self.canvas.winfo_height() / self._zoom) / 2))
+        self._notify(before, "Fit flow map")
+        return "break"
+
+    def _canvas_font(self, size: int, *, bold: bool = False) -> tuple:
+        font = (FONT, max(6, round(size * self._zoom)))
+        return font + ("bold",) if bold else font
+
     def _segment(self, source: str, target: str, directed_pairs: set) -> tuple[float, ...]:
         x1, y1 = self._xy(source)
         x2, y2 = self._xy(target)
@@ -395,8 +532,11 @@ class ExperimentalView(ttk.Frame):
         x, y = self._positions[name]
         return x * self._scene_width, y * self._scene_height
 
-    def _draw_scene(self) -> None:
+    def _draw_scene(self, *, viewport=None) -> None:
         canvas = self.canvas
+        if viewport is None:
+            viewport = (canvas.canvasx(0) / self._zoom,
+                        canvas.canvasy(0) / self._zoom)
         canvas.delete("all")
         self._node_items.clear()
         self._pulse_items.clear()
@@ -404,16 +544,24 @@ class ExperimentalView(ttk.Frame):
                         for name in (flow["from_account"], flow["to_account"])},
                        key=lambda s: (s.casefold(), s))
         self._scene_width, self._scene_height = self._scene_dimensions(len(names))
-        canvas.configure(scrollregion=(0, 0, self._scene_width, self._scene_height))
+        width, height = self._scene_width * self._zoom, self._scene_height * self._zoom
+        left, top = viewport[0] * self._zoom, viewport[1] * self._zoom
+        region = (min(0, left), min(0, top),
+                  max(width, left + canvas.winfo_width()),
+                  max(height, top + canvas.winfo_height()))
+        canvas.configure(scrollregion=region)
+        canvas.xview_moveto((left - region[0]) / (region[2] - region[0]))
+        canvas.yview_moveto((top - region[1]) / (region[3] - region[1]))
         # Scrollbars are useful for crowded maps, not for a two-account line.
-        for bar, needed in ((self.xbar, self._scene_width > canvas.winfo_width()),
-                            (self.ybar, self._scene_height > canvas.winfo_height())):
+        for bar, needed in ((self.xbar, width > canvas.winfo_width()),
+                            (self.ybar, height > canvas.winfo_height())):
             (bar.grid if needed else bar.grid_remove)()
         if not names:
             canvas.create_text(self._scene_width / 2, self._scene_height / 2,
                                text=(self._invalid_message or
                                      "No flows match this period, unit, and status basis."),
-                               fill=MUTED, font=(FONT, 11))
+                               fill=MUTED, font=self._canvas_font(11))
+            canvas.scale("all", 0, 0, self._zoom, self._zoom)
             self._fill_details()
             return
         self._auto_layout(names)
@@ -422,7 +570,7 @@ class ExperimentalView(ttk.Frame):
             canvas.create_oval(legend_x, 18, legend_x + 10, 28,
                                fill=FLOW_COLORS[status], outline="")
             canvas.create_text(legend_x + 16, 23, text=status, anchor="w",
-                               fill=MUTED, font=(FONT, 9))
+                               fill=MUTED, font=self._canvas_font(9))
             legend_x += 26 + len(status) * 7
         for source, target in sorted(self._directed_pairs):
             if source == target:
@@ -448,12 +596,13 @@ class ExperimentalView(ttk.Frame):
                                       tags=("node",))
             self._node_items[node] = name
             icon = canvas.create_text(x, y, text=name[:1].upper(), fill=INK,
-                                      font=(FONT, 15, "bold"), tags=("node",))
+                                      font=self._canvas_font(15, bold=True), tags=("node",))
             self._node_items[icon] = name
-            label = canvas.create_text(x, y + 43, text=name, width=140,
-                                       fill=INK, font=(FONT, 9, "bold"),
+            label = canvas.create_text(x, y + 43, text=name, width=140 * self._zoom,
+                                       fill=INK, font=self._canvas_font(9, bold=True),
                                        justify="center", tags=("node",))
             self._node_items[label] = name
+        canvas.scale("all", 0, 0, self._zoom, self._zoom)
         self._render_pulses()
         self._fill_details()
 
@@ -492,9 +641,10 @@ class ExperimentalView(ttk.Frame):
             if len(flows) <= 8:
                 label = canvas.create_text(x, y - radius - 10,
                                            text=f"{format_quantity(flow['amount'])} {flow['units']}",
-                                           fill=INK, font=(FONT, 9, "bold"),
+                                           fill=INK, font=self._canvas_font(9, bold=True),
                                            tags=("moving_flow",))
                 self._pulse_items[label] = flow
+        canvas.scale("moving_flow", 0, 0, self._zoom, self._zoom)
         canvas.tag_raise("node")
         if self._hover_target is not None:
             self._refresh_hover_pointer()
@@ -622,6 +772,7 @@ class ExperimentalView(ttk.Frame):
         self._history_state = self.get_state()
 
     def close(self) -> None:
+        self._cancel_date_update()
         self.pause()
         self.hide_hover(destroy=True)
         self.from_entry.close_popup()
@@ -645,19 +796,29 @@ class ExperimentalView(ttk.Frame):
             self._drag_name = name
             self._drag_before = self.get_state()
             self.canvas.configure(cursor="fleur")
+        elif item is None:
+            self._pan_before = self.get_state()
+            self.canvas.scan_mark(event.x, event.y)
+            self.canvas.configure(cursor="fleur")
 
     def _pointer_drag(self, event) -> None:
         if self._drag_name is None:
+            if self._pan_before is not None:
+                self.hide_hover()
+                self.canvas.scan_dragto(event.x, event.y, gain=1)
             return
         self.hide_hover()
-        x = self.canvas.canvasx(event.x)
-        y = self.canvas.canvasy(event.y)
+        x = self.canvas.canvasx(event.x) / self._zoom
+        y = self.canvas.canvasy(event.y) / self._zoom
         self._positions[self._drag_name] = (
             min(0.94, max(0.06, x / self._scene_width)),
             min(0.91, max(0.06, y / self._scene_height)))
         self._draw_scene()
 
     def _pointer_up(self, event) -> None:
+        if self._ignore_pointer_up:
+            self._ignore_pointer_up = False
+            return
         if self._drag_name is not None:
             name = self._drag_name
             before = self._drag_before
@@ -665,6 +826,11 @@ class ExperimentalView(ttk.Frame):
             self._drag_before = None
             self.canvas.configure(cursor="")
             self._notify(before, f"Move {name} in flow map")
+            return
+        if self._pan_before is not None:
+            before, self._pan_before = self._pan_before, None
+            self.canvas.configure(cursor="")
+            self._notify(before, "Pan flow map")
             return
         flow = self._pulse_items.get(self._item_at(event))
         if flow is not None:
@@ -761,7 +927,7 @@ class ExperimentalView(ttk.Frame):
                 self._hover_popup.withdraw()
         self._hover_target = None
         self._hover_text = ""
-        self.hover_var.set("Drag accounts to arrange the map · Click a pulse to open its flow")
+        self.hover_var.set(MAP_HINT)
 
     def _update_hover_at(self, x: int, y: int, root_x: int, root_y: int) -> None:
         if self._drag_name is not None:

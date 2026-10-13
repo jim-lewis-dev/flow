@@ -1,4 +1,4 @@
-"""A small calendar for the graph's date range. No additional dependencies."""
+"""Editable date/time entry with a small calendar. No additional dependencies."""
 from __future__ import annotations
 
 import calendar
@@ -13,7 +13,7 @@ class CalendarEntry(ttk.Frame):
 
     Text is left untouched until a day is chosen. An invalid or empty value
     opens the current month, so merely inspecting the calendar never changes
-    the user's input. The graph validates manually typed values on Update.
+    the user's input. Each view validates manually typed values.
     """
 
     def __init__(self, master, variable=None, *, textvariable=None, width=12,

@@ -10,18 +10,19 @@ class CheckFilter(ttk.Frame):
     """A compact button that opens a searchable, multiple-choice filter.
 
     Choices are ORed by the caller. An empty selection imposes no restriction.
-    Searching and refreshing available values preserve every selected value,
-    including values absent from the refreshed vocabulary. Only an explicit
-    checkbox change or ``set_selected`` changes the active selection.
+    Searching preserves selected values. Refreshing choices removes selections
+    that no longer exist; restoring a selection cannot create a new choice.
     """
 
     def __init__(self, master, label: str, values: Iterable[str] = (),
                  on_change: Callable[[], None] | None = None,
-                 all_label: str | None = None, **kwargs):
+                 all_label: str | None = None, case_sensitive: bool = False,
+                 **kwargs):
         super().__init__(master, **kwargs)
         self.label = label
         self.all_label = all_label
-        self.values = list(dict.fromkeys(str(value) for value in values))
+        self.case_sensitive = case_sensitive
+        self.values = self._canonical_values(values)
         self.on_change = on_change
         self._selected: tuple[str, ...] = ()
         self.popup = None
@@ -69,14 +70,30 @@ class CheckFilter(ttk.Frame):
         """Return every selected value, without shortening long names."""
         return "\n".join(self._selected) if self._selected else "All"
 
-    def set_selected(self, values: Iterable[str], notify: bool = False):
-        selected = tuple(dict.fromkeys(str(value) for value in values))
+    def _key(self, value: str) -> str:
+        return value if self.case_sensitive else value.casefold()
+
+    def _canonical_values(self, values: Iterable[str]) -> list[str]:
+        """Keep one database spelling for each distinct choice."""
+        canonical = {}
+        for value in values:
+            value = str(value)
+            canonical.setdefault(self._key(value), value)
+        return list(canonical.values())
+
+    def _valid_selection(self, values: Iterable[str]) -> tuple[str, ...]:
+        available = {self._key(value): value for value in self.values}
+        return tuple(dict.fromkeys(available[self._key(str(value))]
+                     for value in values if self._key(str(value)) in available))
+
+    def set_selected(self, values: Iterable[str], notify: bool = False) -> bool:
+        """Select existing choices, returning whether the selection changed."""
+        selected = self._valid_selection(values)
         changed = selected != self._selected
         self._selected = selected
         self._update_caption()
         if self.popup is not None:
-            # Rebuilding is needed only when a new selected value is not in
-            # the current vocabulary. A checkbox click keeps its own focus.
+            # A checkbox click keeps its own focus unless choices changed.
             candidates = self._available_values()
             query = self.search_variable.get().strip().casefold()
             visible = [value for value in candidates if query in value.casefold()]
@@ -86,12 +103,22 @@ class CheckFilter(ttk.Frame):
                 self._sync_checks()
         if changed and notify and self.on_change is not None:
             self.on_change()
+        return changed
 
-    def set_values(self, values: Iterable[str]):
-        """Refresh choices without silently changing the active filter."""
-        self.values = list(dict.fromkeys(str(value) for value in values))
+    def set_values(self, values: Iterable[str]) -> bool:
+        """Refresh choices and silently prune obsolete selected values.
+
+        Return whether the selection changed so callers can synchronize view
+        state without producing an extra user action or recursive callback.
+        """
+        self.values = self._canonical_values(values)
+        selected = self._valid_selection(self._selected)
+        changed = selected != self._selected
+        self._selected = selected
+        self._update_caption()
         if self.popup is not None:
             self._populate(preserve_scroll=True)
+        return changed
 
     def state(self, statespec=None):
         result = super().state(statespec)
@@ -165,7 +192,7 @@ class CheckFilter(ttk.Frame):
         self.close_popup()
 
     def _available_values(self):
-        return list(dict.fromkeys([*self.values, *self._selected]))
+        return self.values
 
     def _enabled(self):
         return not (self.instate(("disabled",)) or self.button.instate(("disabled",)))
