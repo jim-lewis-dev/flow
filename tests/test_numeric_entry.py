@@ -22,6 +22,10 @@ class NumericEntryTests(unittest.TestCase):
             "1 - 1": "0",
             "-0": "0",
             "  +12.3400  ": "12.34",
+            "=1.23 + 4.56": "5.79",
+            "  = (2 + 3) * 4": "20",
+            "=-.5": "-0.5",
+            "=0": "0",
         }
         for text, expected in examples.items():
             with self.subTest(text=text):
@@ -47,6 +51,7 @@ class NumericEntryTests(unittest.TestCase):
             context.traps[Inexact] = True
             context.traps[Rounded] = True
             self.assertEqual(quantity_text(evaluate_quantity("1 / 3")), "0." + "3" * 50)
+            self.assertEqual(evaluate_quantity("=1 / 3"), evaluate_quantity("1 / 3"))
             self.assertEqual(quantity_text(evaluate_quantity("2 / 3")), "0." + "6" * 49 + "7")
             self.assertEqual(quantity_text(evaluate_quantity("-1 / 3")), "-0." + "3" * 50)
             precise_one = "1." + "0" * 60
@@ -59,7 +64,7 @@ class NumericEntryTests(unittest.TestCase):
         self.assertEqual(evaluate_quantity("9007199254740993 - 9007199254740992"), Decimal(1))
 
     def test_invalid_math_and_code_are_rejected_without_evaluation(self):
-        invalid = ("", " ", "=1+2", "1e3", "NaN", "Infinity", "$1", "1,2 + 3",
+        invalid = ("", " ", "=", "= ", "==1+2", "1=2", "=(1=2)", "1e3", "NaN", "Infinity", "$1", "1,2 + 3",
                    "1,,000", "1.", ".", "1 +", "()", "(1 + 2", "1 + 2)", "1 2",
                    "2(3)", "(2)(3)", "1 // 2", "2 ** 3", "2 % 1", "x + 1",
                    "abs(-1)", "__import__('os').system('echo bad')", "[1][0]", True, 1.0, None)
@@ -71,7 +76,7 @@ class NumericEntryTests(unittest.TestCase):
                 evaluate_quantity(text)
 
     def test_entry_calculations_do_not_change_the_record_parser(self):
-        for text in ("1 + 2", "3 / 4", "(5)"):
+        for text in ("1 + 2", "3 / 4", "(5)", "=1+2", "=5"):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 parse_quantity(text)
         self.assertEqual(evaluate_quantity("3 / 4"), Decimal("0.75"))

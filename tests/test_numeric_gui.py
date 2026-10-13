@@ -102,7 +102,8 @@ class NumericEntryGuiTests(unittest.TestCase):
         entry = self.app.form_widgets["amount"]
         expressions = (("1.23 + 4.56", "5.79"), ("2 - 7", "-5"),
                        (".25 * 4", "1"), ("7 / 2", "3.5"),
-                       ("-(2 + 3) * +4 / 2", "-10"), ("5-5", "0"))
+                       ("-(2 + 3) * +4 / 2", "-10"), ("5-5", "0"),
+                       ("  =1.23 + 4.56", "5.79"), ("=-(2 + 3) * 2", "-10"))
         for expression, result in expressions:
             with self.subTest(expression=expression):
                 self.replace(entry, expression)
@@ -164,6 +165,14 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.app.redo()
         self.pump()
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount"], "0")
+        self.assertTrue(self.app.ledger_editor.open(flow["flow_id"], "amount"))
+        self.pump()
+        entry = self.app.ledger_editor.input
+        self.replace(entry, "=3 * -2")
+        self.assertEqual(self.app.form_vars["amount"].get(), "=3 * -2")
+        self.finish(entry)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "amount": "-6"})
+        self.assertEqual(self.app.form_vars["amount"].get(), "-6")
 
     def test_account_top_and_inline_expressions_save_and_blank_stays_unknown(self):
         self.seed()
@@ -187,6 +196,13 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.finish(entry)
         self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "-20")
         self.assertEqual(self.app.account_vars["opening"].get(), "-20")
+        self.assertTrue(self.app.account_cell_editor.open(key, "balance"))
+        self.pump()
+        entry = self.app.account_cell_editor.input
+        self.replace(entry, "=10 / 2 - 10")
+        self.finish(entry)
+        self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "-5")
+        self.assertEqual(self.app.account_vars["opening"].get(), "-5")
         self.replace(self.app.account_widgets["opening"], "")
         self.finish(self.app.account_widgets["opening"])
         self.assertIsNone(self.repo.get_account("Checking")["opening_amount"])
