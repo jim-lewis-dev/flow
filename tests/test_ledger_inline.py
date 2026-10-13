@@ -453,17 +453,22 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.form_vars["category"].get(), "Boat")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
 
-    def test_view_change_finishes_existing_cell_without_reopening_editor(self):
+    def test_view_change_keeps_existing_form_without_reopening_editor(self):
         flow = self.seed()
         entry = self.replace_cell(flow, "to_account", "Saved endpoint")
         self.assertTrue(self.app.show_view("accounts"))
         self.settle()
         self.assertFalse(entry.winfo_exists())
-        self.assert_new_form()
+        self.assert_closed()
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertEqual(self.app.form_vars["to_account"].get(), "Saved endpoint")
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["to_account"], "Saved endpoint")
         self.app.show_view("flows")
         self.settle()
-        self.assert_new_form()
+        self.assert_closed()
+        self.assertEqual(self.app.editing_id, flow["flow_id"])
+        self.assertEqual(self.app.ledger.selection(), (flow["flow_id"],))
+        self.assertEqual(self.app.form_vars["to_account"].get(), "Saved endpoint")
 
     def test_multiline_notes_selection_does_not_resize_or_hide_the_bottom_cell(self):
         original_notes = "First line\nSecond line\nThird line\nFourth line"

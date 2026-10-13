@@ -366,11 +366,13 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 1)
         self.assertEqual(len(self.app.ledger.get_children()), 0)
         self.app.search_var.set("")
+        pending = self.seed_flow(status="Pending", name="Awaiting confirmation")
         self.app.ledger_filters["Status"].set_selected(("Pending",))
         self.app.refresh_ledger()
         self.enter(from_account="Checking", to_account="Shop", amount="8.25")
-        self.assertEqual(len(self.repo.list_flows()), 2)
-        self.assertEqual(len(self.app.ledger.get_children()), 0)
+        self.assertEqual(len(self.repo.list_flows()), 3)
+        self.assertEqual(self.app.ledger_filters["Status"].get(), ("Pending",))
+        self.assertEqual(self.app.ledger.get_children(), (pending["flow_id"],))
 
     def test_unknown_opening_remains_unknown_in_explicit_combined_graph(self):
         self.app.new_account()

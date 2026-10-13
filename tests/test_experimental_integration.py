@@ -69,6 +69,11 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.app.update()
         self.assertEqual(self.callback_errors, [], "Tk callback errors must surface")
 
+    def apply_typed_dates(self):
+        self.app.after(300, self.app.quit)
+        self.app.mainloop()
+        self.pump()
+
     def saved_state(self):
         return tuple(self.repo.list_flows()), tuple(self.repo.conn.iterdump())
 
@@ -144,8 +149,7 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         view.from_entry.entry.insert(0, "2026-10-03 08:00:00")
         view.through_entry.entry.delete(0, "end")
         view.through_entry.entry.insert(0, "2026-10-03 08:00:00")
-        view.update_button.invoke()
-        self.pump()
+        self.apply_typed_dates()
         self.assertEqual(self.visible_names(), ["Planned"])
 
     def test_filter_change_while_map_visible_refreshes_and_detail_opens_ledger(self):
@@ -168,35 +172,264 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.editing_id, flow_id)
         self.assertEqual(saved, self.saved_state())
 
-    def test_empty_range_error_keeps_prior_map_and_resizes(self):
+    def test_typed_date_ranges_refresh_errors_clear_and_map_resizes(self):
         view = self.app.experimental
         before = self.saved_state()
         view.from_entry.entry.delete(0, "end")
         view.from_entry.entry.insert(0, "2026-10-09")
         view.through_entry.entry.delete(0, "end")
         view.through_entry.entry.insert(0, "2026-10-09")
-        view.update_button.invoke()
-        self.pump()
+        self.apply_typed_dates()
         self.assertEqual(self.visible_names(), [])
         self.assertIn("No flows", view.canvas.itemcget(view.canvas.find_all()[0], "text"))
         view.from_entry.entry.delete(0, "end")
         view.from_entry.entry.insert(0, "2026-10-20")
-        view.update_button.invoke()
-        self.pump()
+        self.apply_typed_dates()
         self.assertIn("before", view.message_var.get())
         self.assertEqual(self.visible_names(), [])
         view.from_entry.entry.delete(0, "end")
         view.from_entry.entry.insert(0, "2026-10-02")
         view.through_entry.entry.delete(0, "end")
         view.through_entry.entry.insert(0, "2026-10-03")
-        view.update_button.invoke()
-        self.pump()
+        self.apply_typed_dates()
         self.app.geometry("1280x700+0+0")
         self.pump()
         self.assertGreater(view.canvas.winfo_width(), 600)
         self.assertGreaterEqual(view.canvas.winfo_height(), 250)
         self.assertTrue(view.canvas.find_withtag("node"))
         self.assertEqual(before, self.saved_state())
+
+    def test_date_typing_and_calendar_selection_refresh_and_undo_without_button(self):
+        view = self.app.experimental
+        saved = self.saved_state()
+        self.select_basis(2)
+        original = view.get_state()
+        before_history = len(self.app.history._undo)
+        self.assertFalse(hasattr(view, "update_button"))
+        view.from_entry.entry.delete(0, "end")
+        view.from_entry.entry.insert(0, "2026-10-03")
+        self.apply_typed_dates()
+        self.assertEqual(self.visible_names(), ["Planned"])
+        self.assertEqual(len(self.app.history._undo), before_history + 1)
+        self.assertIsNone(view._date_after_id)
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.get_state(), original)
+        self.assertIsNone(view._date_after_id)
+        self.app.redo()
+        self.pump()
+        self.assertEqual(self.visible_names(), ["Planned"])
+
+        view.from_entry.open_popup()
+        self.pump()
+        view.from_entry.day_buttons[2].invoke()
+        self.pump()
+        self.assertEqual(view.from_var.get(), "2026-10-02")
+        self.assertIn("Pending", self.visible_names())
+        self.assertIsNone(view._date_after_id)
+        after_calendar_history = len(self.app.history._undo)
+        self.apply_typed_dates()
+        self.assertEqual(len(self.app.history._undo), after_calendar_history)
+
+        view.from_var.set("bad date")
+        self.apply_typed_dates()
+        self.assertEqual(view.from_var.get(), "bad date")
+        self.assertTrue(view.message_var.get())
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.from_var.get(), "2026-10-02")
+        self.assertIn("Pending", self.visible_names())
+        self.assertEqual(saved, self.saved_state())
+
+    def test_canvas_scroll_moves_view_without_moving_accounts_or_writing_records(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        positions = dict(view._positions)
+        canvas.configure(scrollregion=(0, 0, 2400, 1800))
+        canvas.xview_moveto(0.25)
+        canvas.yview_moveto(0.25)
+        self.pump()
+        start_x, start_y = canvas.canvasx(0), canvas.canvasy(0)
+        canvas.event_generate("<Button-5>", x=60, y=60)
+        self.pump()
+        self.assertEqual(canvas.canvasx(0), start_x)
+        self.assertGreater(canvas.canvasy(0), start_y)
+        scrolled_y = canvas.canvasy(0)
+        canvas.event_generate("<Shift-Button-5>", x=60, y=60)
+        self.pump()
+        self.assertGreater(canvas.canvasx(0), start_x)
+        self.assertEqual(canvas.canvasy(0), scrolled_y)
+        canvas.event_generate("<MouseWheel>", delta=120, x=60, y=60)
+        self.pump()
+        self.assertLess(canvas.canvasy(0), scrolled_y)
+        self.assertEqual(view._positions, positions)
+        self.assertEqual(saved, self.saved_state())
+
+    def test_ctrl_wheel_anchors_zoom_and_history_preserves_playback(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        view.next_button.invoke()
+        self.pump()
+        positions = dict(view._positions)
+        x, y = canvas.winfo_width() // 2, canvas.winfo_height() // 2
+        before = view.get_state()
+        anchor = (canvas.canvasx(x) / view._zoom,
+                  canvas.canvasy(y) / view._zoom)
+        playback = (view._index, view._progress)
+        canvas.event_generate("<Control-Button-4>", x=x, y=y, state=4)
+        self.pump()
+        self.assertAlmostEqual(view._zoom, 1.2)
+        self.assertAlmostEqual(canvas.canvasx(x) / view._zoom, anchor[0], delta=2)
+        self.assertAlmostEqual(canvas.canvasy(y) / view._zoom, anchor[1], delta=2)
+        self.assertEqual((view._index, view._progress), playback)
+        self.assertEqual(view._positions, positions)
+        zoomed = view.get_state()
+        pulse = next(item for item in view._pulse_items if canvas.type(item) == "oval")
+        coordinates = canvas.coords(pulse)
+        px = round((coordinates[0] + coordinates[2]) / 2 - canvas.canvasx(0))
+        py = round((coordinates[1] + coordinates[3]) / 2 - canvas.canvasy(0))
+        self.assertEqual(view._item_at_position(px, py), pulse)
+        view._render_pulses()
+        recreated = next(item for item in view._pulse_items if canvas.type(item) == "oval")
+        self.assertEqual(canvas.coords(recreated), coordinates)
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.get_state(), before)
+        self.assertEqual((view._index, view._progress), playback)
+        self.app.redo()
+        self.pump()
+        self.assertEqual(view.get_state(), zoomed)
+        self.assertEqual((view._index, view._progress), playback)
+        canvas.event_generate("<Control-Button-5>", x=x, y=y, state=4)
+        self.pump()
+        self.assertAlmostEqual(view._zoom, 1.0)
+
+        # Playback may advance after the camera action enters history. Undo
+        # should restore the camera while keeping the current live step.
+        self.select_basis(2)
+        view.speed_scale.set(5)
+        self.pump()
+        view.play_button.invoke()
+        canvas.event_generate("<Control-Button-4>", x=x, y=y, state=4)
+        self.app.after(260, self.app.quit)
+        self.app.mainloop()
+        self.pump()
+        live_index, live_progress = view._index, view._progress
+        self.assertEqual(live_index, 1)
+        self.app.undo()
+        self.pump()
+        self.assertTrue(view._playing)
+        self.assertEqual(view._index, live_index)
+        self.assertGreaterEqual(view._progress, live_progress)
+        self.assertAlmostEqual(view._zoom, 1.0)
+        self.app.redo()
+        self.pump()
+        self.assertTrue(view._playing)
+        self.assertEqual(view._index, live_index)
+        self.assertAlmostEqual(view._zoom, 1.2)
+        self.assertEqual(saved, self.saved_state())
+
+    def test_background_pan_fit_and_redraw_keep_zoom_and_node_layout(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        positions = dict(view._positions)
+        x, y = canvas.winfo_width() // 2, canvas.winfo_height() // 2
+        for _ in range(4):
+            canvas.event_generate("<Control-Button-4>", x=x, y=y, state=4)
+            self.pump()
+        before_pan = view.get_state()
+        canvas.event_generate("<Button-5>", x=40, y=100, state=0)
+        self.pump()
+        panned = view.get_state()
+        self.assertGreater(panned["viewport"][1], before_pan["viewport"][1])
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.get_state(), before_pan)
+        self.app.redo()
+        self.pump()
+        self.assertEqual(view.get_state(), panned)
+        view._draw_scene()
+        self.pump()
+        self.assertEqual(view.get_state(), panned)
+
+        # Drag an empty region to move the camera, leaving node positions alone.
+        self.assertIsNone(view._item_at_position(20, 130))
+        canvas.event_generate("<ButtonPress-1>", x=20, y=130, time=1000)
+        canvas.event_generate("<B1-Motion>", x=10, y=100, time=1010)
+        canvas.event_generate("<ButtonRelease-1>", x=10, y=100, time=1020)
+        self.pump()
+        self.assertNotEqual(view.get_state()["viewport"], panned["viewport"])
+        self.assertEqual(view._positions, positions)
+        before_fit = view.get_state()
+        # Actual repeated clicks exercise the double-click binding.
+        for at in (2000, 2100):
+            canvas.event_generate("<ButtonPress-1>", x=15, y=130, time=at)
+            canvas.event_generate("<ButtonRelease-1>", x=15, y=130, time=at + 20)
+        self.pump()
+        self.assertLess(view._zoom, before_fit["zoom"])
+        self.assertEqual(view._positions, positions)
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.get_state(), before_fit)
+        self.assertEqual(saved, self.saved_state())
+
+    def test_camera_undo_dismisses_hover_before_playback_has_started(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        canvas.event_generate("<Control-Button-4>",
+                              x=canvas.winfo_width() // 2,
+                              y=canvas.winfo_height() // 2, state=4)
+        self.pump()
+        node = next(item for item, name in view._node_items.items()
+                    if name == "Checking" and canvas.type(item) == "oval")
+        x0, y0, x1, y1 = canvas.coords(node)
+        canvas.event_generate("<Motion>",
+            x=round((x0 + x1) / 2 - canvas.canvasx(0)),
+            y=round((y0 + y1) / 2 - canvas.canvasy(0)))
+        self.app.after(600, self.app.quit)
+        self.app.mainloop()
+        self.pump()
+        self.assertEqual(view._index, -1)
+        self.assertTrue(view._hover_popup.winfo_viewable())
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view._index, -1)
+        self.assertIsNone(view._hover_target)
+        self.assertIsNone(view._hover_after_id)
+        self.assertFalse(view._hover_popup.winfo_viewable())
+
+    def test_node_drag_uses_world_coordinates_after_zoom(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        canvas.event_generate("<Control-Button-4>",
+                              x=canvas.winfo_width() // 2,
+                              y=canvas.winfo_height() // 2, state=4)
+        self.pump()
+        node = next(item for item, name in view._node_items.items()
+                    if name == "Checking" and canvas.type(item) == "oval")
+        x0, y0, x1, y1 = canvas.coords(node)
+        x, y = round((x0 + x1) / 2 - canvas.canvasx(0)), round((y0 + y1) / 2 - canvas.canvasy(0))
+        before = view.get_state()
+        canvas.event_generate("<ButtonPress-1>", x=x, y=y)
+        canvas.event_generate("<B1-Motion>", x=x + 36, y=y + 24)
+        canvas.event_generate("<ButtonRelease-1>", x=x + 36, y=y + 24)
+        self.pump()
+        self.assertAlmostEqual(view._positions["Checking"][0],
+            before["positions"]["Checking"][0] + 36 / (view._scene_width * view._zoom), delta=.002)
+        self.assertAlmostEqual(view._positions["Checking"][1],
+            before["positions"]["Checking"][1] + 24 / (view._scene_height * view._zoom), delta=.002)
+        moved = view.get_state()
+        self.app.undo()
+        self.pump()
+        self.assertEqual(view.get_state(), before)
+        self.app.redo()
+        self.pump()
+        self.assertEqual(view.get_state(), moved)
+        self.assertEqual(saved, self.saved_state())
 
     def test_control_and_drag_undo_redo_change_only_session_view(self):
         view = self.app.experimental

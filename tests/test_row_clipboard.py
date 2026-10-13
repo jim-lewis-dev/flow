@@ -116,6 +116,11 @@ class RowClipboardTests(unittest.TestCase):
             self.assertEqual(copy,{**flow,"flow_id":copy["flow_id"]})
 
     def test_filters_survive_paste_and_hidden_copy_is_available_in_top_editor(self):
+        kilogram = self.repo.save_flow({
+            **{key: value for key, value in self.original.items() if key != "flow_id"},
+            "units": "kg", "name": "Weight transfer"})
+        self.app.refresh_all()
+        self.pump()
         self.select(self.original)
         self.key("<Control-c>")
         self.app.ledger_filters["Units"].set_selected(["kg"],notify=True)
@@ -124,7 +129,7 @@ class RowClipboardTests(unittest.TestCase):
         copy=self.repo.get_flow(self.app.editing_id)
         self.assertEqual(copy,{**self.original,"flow_id":copy["flow_id"]})
         self.assertEqual(self.app.ledger_filters["Units"].get(),("kg",))
-        self.assertEqual(self.app.ledger.get_children(),())
+        self.assertEqual(self.app.ledger.get_children(),(kilogram["flow_id"],))
         self.assertIn("Hidden by current filters",self.app.status_message.get())
         self.assertEqual(self.app.form_vars["name"].get(),"Café")
 

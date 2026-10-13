@@ -124,6 +124,7 @@ class ControlFixGuiTests(unittest.TestCase):
                 self.assertEqual(choice.button.cget("text"), f"{label}: All ▾")
                 self.assertEqual(choice.tooltip_text(), "All")
                 values = ("First selected long value", "Second selected value", "Third selected value")
+                choice.set_values(values)
                 choice.set_selected(values)
                 choice._show_tooltip()
                 self.pump()
@@ -326,15 +327,22 @@ class ControlFixGuiTests(unittest.TestCase):
         self.shortcut("<Control-z>")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
 
-    def test_delete_retains_unit_filter_selection_and_undo_returns_matching_row(self):
+    def test_delete_prunes_last_unit_filter_and_undo_restores_choice_and_row(self):
         flow = self.flows[0]
+        other_rows = {row["flow_id"] for row in self.flows[1:]}
         self.select_filter("Units", "kg")
         self.select(flow)
         self.shortcut("<Delete>", self.app.ledger)
-        self.assertEqual(self.app.ledger_filters["Units"].get(), ("kg",))
-        self.assertEqual(self.app.ledger_rows, {})
+        self.assertEqual(self.app.ledger_filters["Units"].get(), ())
+        self.assertNotIn("kg", self.app.ledger_filters["Units"].values)
+        self.assertEqual(set(self.app.ledger_rows), other_rows)
         self.shortcut("<Control-z>")
-        self.assertEqual(set(self.app.ledger_rows), {flow["flow_id"]})
-        self.assertEqual(self.app.ledger_filters["Units"].get(), ("kg",))
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(set(self.app.ledger_rows), other_rows | {flow["flow_id"]})
+        self.assertIn("kg", self.app.ledger_filters["Units"].values)
+        self.assertEqual(self.app.ledger_filters["Units"].get(), ())
         self.shortcut("<Control-y>")
-        self.assertEqual(self.app.ledger_rows, {})
+        self.assertIsNone(self.repo.get_flow(flow["flow_id"]))
+        self.assertEqual(self.app.ledger_filters["Units"].get(), ())
+        self.assertNotIn("kg", self.app.ledger_filters["Units"].values)
+        self.assertEqual(set(self.app.ledger_rows), other_rows)

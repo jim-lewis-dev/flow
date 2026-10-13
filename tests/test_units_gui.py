@@ -289,13 +289,16 @@ class UnitsGuiTests(unittest.TestCase):
         self.assertEqual(saved, dict(name="Checking", units="seconds", opening_amount="180.125", opening_at="2026-10-03 08:00:00"))
         self.assertEqual(self.repo.get_account("Checking", "USD")["opening_amount"], "100")
         self.assertEqual(self.repo.get_account("Checking", "kg")["opening_amount"], "1.5")
-        self.assertIn("seconds", self.app.form_widgets["units"].values)
+        self.assertNotIn("seconds", self.app.form_widgets["units"].values)
         self.assertEqual(self.app.accounts_tree.get_children(), ())
         self.app.undo()
         self.assertIsNone(self.repo.get_account("Checking", "seconds"))
         self.assertIsNotNone(self.repo.get_account("Checking", "USD"))
         self.app.redo()
         self.assertEqual(self.repo.get_account("Checking", "seconds"), saved)
+        self.assertNotIn("seconds", self.app.form_widgets["units"].values)
+        self.seed(units="seconds", date="2026-10-04", amount="10")
+        self.assertIn("seconds", self.app.form_widgets["units"].values)
 
     def test_category_report_keeps_same_category_and_status_separate_by_units(self):
         from tkinter import ttk
