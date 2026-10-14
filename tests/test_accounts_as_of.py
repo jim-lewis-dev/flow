@@ -74,7 +74,9 @@ class AccountAsOfTests(unittest.TestCase):
         self.settle()
 
     def test_future_pending_payment_affects_selected_instant_not_now(self):
-        self.assertEqual(self.app.account_as_of.get(), "Now")
+        self.assertEqual(self.app.account_as_of.get(), "2026-10-13 13:02:28")
+        self.assertEqual(self.app.account_as_of_picker.entry.xview(), (0.0, 1.0),
+                         "The entire selected date and time must be visible")
         self.assertEqual(self.balances("Checking"), ("1,000.00", "1,000.00"))
         self.assertEqual(self.balances("Amex"), ("-500.00", "-500.00"))
         self.as_of("2026-10-28")
@@ -93,17 +95,40 @@ class AccountAsOfTests(unittest.TestCase):
         self.assertEqual(self.balances("Checking"), ("975.00", "775.00"))
         self.assertEqual(self.balances("Amex"), ("-475.00", "-275.00"))
 
-    def test_now_and_blank_follow_clock_when_accounts_refresh(self):
+    def test_now_and_blank_resolve_to_visible_selected_instant_on_enter(self):
+        entry = self.app.account_as_of_picker.entry
         for value in ("Now", ""):
             with self.subTest(value=value):
                 self.clock.return_value = "2026-10-13 13:02:28"
-                self.as_of(value)
+                entry.focus_force()
+                self.pump()
+                entry.delete(0, "end")
+                entry.insert(0, value)
+                entry.event_generate("<Return>")
+                self.pump()
+                self.assertEqual(self.app.account_as_of.get(), "2026-10-13 13:02:28")
                 self.assertEqual(self.balances("Checking"), ("1,000.00", "1,000.00"))
                 self.clock.return_value = "2026-10-29 00:00:00"
                 self.app.refresh_accounts()
                 self.pump()
-                self.assertEqual(self.balances("Checking"), ("975.00", "775.00"))
-                self.assertEqual(self.app.account_as_of.get(), value)
+                self.assertEqual(self.balances("Checking"), ("1,000.00", "1,000.00"))
+                self.assertEqual(self.app.account_as_of.get(), "2026-10-13 13:02:28")
+
+    def test_blank_resolves_on_focus_out_and_undo_restores_prior_concrete_time(self):
+        self.as_of("2026-10-28 15:04:05")
+        entry = self.app.account_as_of_picker.entry
+        entry.focus_force()
+        self.pump()
+        entry.delete(0, "end")
+        self.clock.return_value = "2026-10-13 13:02:28"
+        self.app.accounts_tree.focus_force()
+        self.pump()
+        self.assertEqual(self.app.account_as_of.get(), "2026-10-13 13:02:28")
+        self.assertEqual(self.balances("Checking"), ("1,000.00", "1,000.00"))
+        self.app.accounts_tree.event_generate("<Control-z>")
+        self.pump()
+        self.assertEqual(self.app.account_as_of.get(), "2026-10-28 15:04:05")
+        self.assertEqual(self.balances("Checking"), ("975.00", "775.00"))
 
     def test_units_remain_independent_and_unknown_stays_unknown(self):
         self.as_of("2026-10-28")
@@ -120,7 +145,7 @@ class AccountAsOfTests(unittest.TestCase):
         self.pump()
         self.app.event_generate("<Control-z>")
         self.settle()
-        self.assertEqual(self.app.account_as_of.get(), "Now")
+        self.assertEqual(self.app.account_as_of.get(), "2026-10-13 13:02:28")
         self.assertEqual(self.balances("Checking"), ("1,000.00", "1,000.00"))
         self.app.event_generate("<Control-y>")
         self.settle()

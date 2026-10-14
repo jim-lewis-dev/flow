@@ -52,6 +52,58 @@ class CalendarEntryTests(unittest.TestCase):
         self.open("2025-2-1")
         self.assertEqual(set(self.calendar.day_buttons), set(range(1, 29)))
 
+    def test_calendar_square_fits_entry_without_growing_the_field(self):
+        from tkinter import ttk
+        from flowledger.calendar_widget import CalendarEntry
+        style = ttk.Style(self.root)
+        original_scaling = self.root.tk.call("tk", "scaling")
+        for theme, size, scaling in ((style.theme_use(), 10, 1.0),
+                                     ("clam", 11, 1.5), ("clam", 20, 2.0)):
+            with self.subTest(theme=theme, font_size=size, scaling=scaling):
+                self.root.tk.call("tk", "scaling", scaling)
+                style.theme_use(theme)
+                style.configure("TEntry", padding=(7, 6), font=("DejaVu Sans", size))
+                plain = ttk.Entry(self.root, width=17)
+                calendar = CalendarEntry(self.root, width=17)
+                plain.pack(anchor="w")
+                calendar.pack(anchor="w")
+                self.root.update()
+                self.assertEqual(calendar.winfo_reqwidth(), plain.winfo_reqwidth())
+                self.assertEqual(calendar.winfo_reqheight(), plain.winfo_reqheight())
+                self.assertEqual(calendar.button.winfo_width(), calendar.entry.winfo_height())
+                self.assertEqual(calendar.button.winfo_height(), calendar.entry.winfo_height())
+                self.assertEqual(calendar.button.winfo_x() + calendar.button.winfo_width(),
+                                 calendar.entry.winfo_width())
+                self.assertEqual(calendar.button.winfo_y(), calendar.entry.winfo_y())
+                icon = calendar._calendar_icon
+                self.assertGreaterEqual(icon.width(), calendar.entry.winfo_height() * 0.68)
+                self.assertEqual(icon.width(), icon.height())
+                self.assertTrue(str(calendar.button.cget("image")))
+                # The body and two binding rings are drawn pixels, rather than
+                # a font-dependent Unicode grid that can render as a tiny glyph.
+                self.assertFalse(icon.transparency_get(round(icon.width() * 0.30),
+                                                       round(icon.height() * 0.10)))
+                self.assertTrue(icon.transparency_get(0, 0))
+                plain.destroy()
+                calendar.destroy()
+        self.root.tk.call("tk", "scaling", original_scaling)
+
+    def test_calendar_square_tracks_expanded_height_and_theme_change(self):
+        from tkinter import ttk
+        self.calendar.pack_forget()
+        self.calendar.place(x=20, y=20, width=300, height=48)
+        self.root.update()
+        self.assertEqual((self.calendar.button.winfo_width(), self.calendar.button.winfo_height()),
+                         (48, 48))
+        self.assertEqual(self.calendar.entry.winfo_height(), 48)
+        self.assertEqual(self.calendar.button.winfo_x(), 252)
+        self.assertGreaterEqual(self.calendar._calendar_icon.width(), 32)
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        self.root.update()
+        self.assertEqual((self.calendar.button.winfo_width(), self.calendar.button.winfo_height()),
+                         (48, 48))
+
     def test_year_boundaries_and_calendar_limits(self):
         self.open("2026-12-31")
         self.calendar.next_button.invoke()

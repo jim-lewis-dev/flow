@@ -475,16 +475,20 @@ class FlowApp(tk.Tk):
 
     def _bind_form_edits(self):
         for key, widget in self.form_widgets.items():
-            self._bind_field(widget, "flow", key)
+            self._bind_field(self.flow_date_picker if key == "date" else widget, "flow", key)
         self._bind_field(self.notes_text, "flow", "notes")
         for key, widget in self.account_widgets.items():
             self._bind_field(widget, "account", key)
 
     def _bind_field(self, widget, kind, key):
-        entry = widget.entry if isinstance(widget, FilterCombo) else widget
+        entry = widget.entry if isinstance(widget, (FilterCombo, CalendarEntry)) else widget
         entry.bind("<FocusIn>", lambda event: self._begin_field(kind, key), add="+")
         entry.bind("<FocusOut>", lambda event: self._defer_field_finish(widget, kind, key), add="+")
         entry.bind("<Escape>", lambda event: self._escape_field(widget, kind, key), add="+")
+        if isinstance(widget, CalendarEntry):
+            widget.button.bind("<FocusIn>", lambda event: self._begin_field(kind, key), add="+")
+            widget.button.bind("<FocusOut>", lambda event: self._defer_field_finish(widget, kind, key), add="+")
+            widget.button.bind("<Escape>", lambda event: self._escape_field(widget, kind, key), add="+")
         if key != "notes" and not isinstance(widget, FilterCombo):
             entry.bind("<Return>", lambda event: self._field_enter(kind, key))
             entry.bind("<KP_Enter>", lambda event: self._field_enter(kind, key))
@@ -538,10 +542,10 @@ class FlowApp(tk.Tk):
             if self._loading or self._committing or identity != self._draft_identity(kind):
                 return
             focused = str(self.tk.call("focus"))
-            entry = widget.entry if isinstance(widget, FilterCombo) else widget
+            entry = widget.entry if isinstance(widget, (FilterCombo, CalendarEntry)) else widget
             if focused == str(entry) or focused.startswith(str(widget) + "."):
                 return
-            popup = widget.popup if isinstance(widget, FilterCombo) else None
+            popup = widget.popup if isinstance(widget, (FilterCombo, CalendarEntry)) else None
             if popup is not None and (focused == str(popup) or focused.startswith(str(popup) + ".")):
                 return
             if key == "notes" and getattr(self, "notes_dialog", None) is not None:
@@ -890,6 +894,9 @@ class FlowApp(tk.Tk):
             widget.entry.configure(width=1)
         elif kind == "choice":
             widget = ttk.Combobox(frame, textvariable=variable, values=values, state="readonly", width=1)
+        elif kind == "date":
+            widget = CalendarEntry(frame, variable=variable, width=1, style="Card.TFrame",
+                                   on_select=self._accept_flow_date)
         elif kind == "notes":
             widget = tk.Text(frame, height=1, width=1, wrap="word", font=(FONT, 10), bg="#fbfcfa", fg=INK,
                              relief="solid", borderwidth=1, highlightthickness=0, padx=7, pady=6)
@@ -924,6 +931,10 @@ class FlowApp(tk.Tk):
         except ValueError:
             return  # Leave invalid input for the ordinary visible validation.
         variables["date"].set(when)
+
+    def _accept_flow_date(self):
+        self._begin_field("flow", "date")
+        self._field_enter("flow", "date")
 
     @staticmethod
     def _scroll_notes(event, direction=None):
@@ -1025,7 +1036,7 @@ class FlowApp(tk.Tk):
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
         cells = []
-        for key, label, kind in (("date", "Date/Time", "entry"), ("name", "Name", "suggest"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
+        for key, label, kind in (("date", "Date/Time", "date"), ("name", "Name", "suggest"), ("from_account", "From", "suggest"), ("to_account", "To", "suggest"),
                                  ("amount", "Amount", "entry"), ("units", "Units", "suggest"), ("status", "Status", "choice"),
                                  ("category", "Category", "suggest"), ("tags", "Tags", "suggest"), ("notes", "Notes", "notes")):
             cell, heading, widget = self._entry_cell(form, label, self.form_vars.get(key), kind, STATUSES if key == "status" else ())
@@ -1037,7 +1048,11 @@ class FlowApp(tk.Tk):
                 self.notes_button = tk.Button(heading, text="Expand", command=self.edit_notes, font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0)
                 self.notes_button.pack(side="right")
             else:
-                self.form_widgets[key] = widget
+                if key == "date":
+                    self.flow_date_picker = widget
+                    self.form_widgets[key] = widget.entry
+                else:
+                    self.form_widgets[key] = widget
             if key in SUGGESTION_KINDS:
                 widget.on_remove = lambda value, field=key: self._remove_suggestion(field, value)
                 widget.on_accept = lambda field=key: self._accept_suggestion(field)
@@ -1841,10 +1856,10 @@ class FlowApp(tk.Tk):
         ttk.Label(top, text="Accounts", style="Section.TLabel").pack(side="left")
         self.account_summary = tk.StringVar(self)
         ttk.Label(top, textvariable=self.account_summary, style="CardMuted.TLabel").pack(side="left", padx=14)
-        self.account_as_of = tk.StringVar(self, "Now")
+        self.account_as_of = tk.StringVar(self, self._now())
         self._account_as_of_pending = None
         self.account_as_of_picker = CalendarEntry(top, variable=self.account_as_of,
-            width=20, on_select=self._apply_account_as_of, style="Card.TFrame")
+            width=28, on_select=self._apply_account_as_of, style="Card.TFrame")
         self.account_as_of_picker.pack(side="right")
         ttk.Label(top, text="As of", style="CardMuted.TLabel").pack(side="right", padx=(8, 6))
         self.account_as_of_picker.entry.bind("<Return>", self._apply_account_as_of)
@@ -1894,6 +1909,13 @@ class FlowApp(tk.Tk):
         if self._account_as_of_pending is not None:
             self.after_cancel(self._account_as_of_pending)
             self._account_as_of_pending = None
+        value = self.account_as_of.get().strip()
+        if (not value or value.casefold() == "now") and (
+                event is not None or self.focus_get() is not self.account_as_of_picker.entry):
+            # Resolve shorthand when committed, without rewriting an active
+            # entry while the user is clearing or typing it.
+            with self.view_history.suspended():
+                self.account_as_of.set(self._now())
         self.refresh_accounts()
         if hasattr(self, "view_history"):
             self.view_history.record("account_as_of", "Accounts As of", merge="typing")
