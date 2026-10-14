@@ -1,4 +1,4 @@
-"""Editable date/time entry with a small calendar. No additional dependencies."""
+"""Editable date/time entry with a calendar. No additional dependencies."""
 from __future__ import annotations
 
 import calendar
@@ -30,14 +30,25 @@ class CalendarEntry(ttk.Frame):
         self._cells = []
         self._heading = None
         self._focus_check_id = None
+        self._size_after_id = None
+        self._icon_size = None
+        self._calendar_icon = None
         self._year, self._month = date.today().year, date.today().month
         self._selected_date = None
         self._time_suffix = ""
+        # Measure the ordinary entry separately: reserving text space for the
+        # overlaid button must not widen the field or move neighboring fields.
+        self._measure_entry = ttk.Entry(self, width=width, takefocus=False)
+        self._entry_style = f"Calendar{id(self)}.TEntry"
+        self._style = ttk.Style(self)
         self.entry = ttk.Entry(self, textvariable=self.variable, width=width)
-        self.entry.pack(side="left", fill="x", expand=True)
-        self.button = ttk.Button(self, text="▦", width=2,
-                                 command=self._toggle_popup, style="Small.TButton")
-        self.button.pack(side="right")
+        self.entry.place(x=0, y=0, relwidth=1, relheight=1)
+        self.button = ttk.Button(self, width=0, command=self._toggle_popup,
+                                 style="Calendar.TButton")
+        self.button.place(relx=1, y=0, anchor="ne")
+        self.bind("<Configure>", self._layout_button)
+        self.bind("<<ThemeChanged>>", self._schedule_size)
+        self._measure_size()
         self.button.bind("<Return>", self._toggle_popup)
         self.button.bind("<Down>", self._open_from_key)
         self.entry.bind("<Alt-Down>", self._open_from_key)
@@ -51,6 +62,78 @@ class CalendarEntry(ttk.Frame):
             top._flow_calendar_click_binding = top.bind(
                 "<ButtonPress-1>",
                 lambda event: CalendarEntry._dismiss_outside(event, top), add="+")
+
+    def _schedule_size(self, event=None):
+        if self._size_after_id is None:
+            self._size_after_id = self.after_idle(self._measure_size)
+
+    def _measure_size(self):
+        self._size_after_id = None
+        width, height = self._measure_entry.winfo_reqwidth(), self._measure_entry.winfo_reqheight()
+        if (int(self.cget("width")), int(self.cget("height"))) != (width, height):
+            self.configure(width=width, height=height)
+        self._layout_button()
+
+    def _layout_button(self, event=None):
+        height = self.winfo_height()
+        if height <= 1:
+            height = self._measure_entry.winfo_reqheight()
+        def padding_values(style):
+            padding = self._style.lookup(style, "padding")
+            parts = padding if isinstance(padding, (tuple, list)) else self.tk.splitlist(str(padding))
+            return [self.winfo_pixels(value) for value in parts] if parts else [0]
+
+        if any(padding_values("Calendar.TButton")):
+            self._style.configure("Calendar.TButton", padding=0)
+        self.button.place_configure(width=height, height=height)
+        values = padding_values("TEntry")
+        if len(values) == 1:
+            left = top = right = bottom = values[0]
+        elif len(values) == 2:
+            left = right = values[0]
+            top = bottom = values[1]
+        elif len(values) == 3:
+            left, top, right = values
+            bottom = top
+        else:
+            left, top, right, bottom = values[:4]
+        reserved = (left, top, right + height, bottom)
+        # Style updates emit ThemeChanged; avoid an idle remeasurement loop.
+        if tuple(padding_values(self._entry_style)) != reserved:
+            self._style.configure(self._entry_style, padding=reserved)
+        if self.entry.cget("style") != self._entry_style:
+            self.entry.configure(style=self._entry_style)
+        size = max(12, round(height * 0.72))
+        color = self._style.lookup("TButton", "foreground") or "#244942"
+        if (size, color) != self._icon_size:
+            self._calendar_icon = self._draw_calendar(size, color)
+            self._icon_size = (size, color)
+            self.button.configure(image=self._calendar_icon)
+
+    def _draw_calendar(self, size, color):
+        """Draw a crisp calendar at the current display size, independent of fonts."""
+        icon = tk.PhotoImage(master=self, width=size, height=size)
+        stroke = max(1, round(size * 0.07))
+        margin = max(1, round(size * 0.10))
+        left, right = margin, size - margin
+        top, bottom = round(size * 0.23), size - margin
+
+        def rectangle(x0, y0, x1, y1):
+            icon.put(color, to=(x0, y0, x1, y1))
+
+        rectangle(left, top, right, top + stroke)
+        rectangle(left, bottom - stroke, right, bottom)
+        rectangle(left, top, left + stroke, bottom)
+        rectangle(right - stroke, top, right, bottom)
+        rectangle(left, round(size * 0.40), right, round(size * 0.40) + stroke)
+        for position in (0.30, 0.70):
+            x = round(size * position)
+            rectangle(x, margin, x + stroke, top + stroke)
+        for row in (0.55, 0.75):
+            for column in (0.28, 0.48, 0.68):
+                x, y = round(size * column), round(size * row)
+                rectangle(x, y, x + stroke, y + stroke)
+        return icon
 
     def state(self, statespec=None):
         result = super().state(statespec)
@@ -192,6 +275,9 @@ class CalendarEntry(ttk.Frame):
     def _choose_day(self, day):
         if not day or self.popup is None:
             return
+        history = getattr(self.winfo_toplevel(), "view_history", None)
+        if history is not None:
+            history.begin()  # A calendar choice is separate from prior typing.
         value = date(self._year, self._month, day).isoformat() + self._time_suffix
         self.variable.set(value)
         self.close_popup()
@@ -244,6 +330,9 @@ class CalendarEntry(ttk.Frame):
 
     def _destroyed(self, event):
         if event.widget is self:
+            if self._size_after_id is not None:
+                self.after_cancel(self._size_after_id)
+                self._size_after_id = None
             self.close_popup()
 
     def close_popup(self):

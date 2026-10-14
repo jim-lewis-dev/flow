@@ -42,7 +42,7 @@ Flow amounts can be zero or negative. Zero keeps a dated note without changing b
 
 An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. Click a column heading to sort balances, and click again to reverse the order. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
 
-**As of** sets the date/time for both displayed balance columns. It defaults to **Now**; a blank value also uses the current time. Enter a future date to inspect future flows, including pending transfers. Date-only means midnight.
+**As of** shows the date/time used for both displayed balance columns, initially the current timestamp. Enter a future date to inspect future flows, including pending transfers. Date-only means midnight. Clearing the field and pressing Enter selects the current timestamp.
 
 | Balance basis | Included flows |
 | --- | --- |
@@ -54,7 +54,7 @@ An account can hold multiple units. Set a separate starting balance and date/tim
 
 ## Work with flows
 
-- Type into the top form, then choose **Add Flow**. From, To, Units, Category, and Tags accept new values; suggestions come from saved flows. The date defaults to today; the time is optional. Unadded entries remain populated when you switch tabs.
+- Type into the top form, then choose **Add Flow**. From, To, Units, Category, and Tags accept new values; suggestions come from saved flows. The date defaults to today; the time is optional. Choosing a calendar day preserves the time. Unadded entries remain populated when you switch tabs.
 - Click a ledger row and edit its fields above, or double-click a cell to edit in place. Completed valid changes save automatically. **Ctrl-click** toggles rows; **Shift-click**, **Shift-arrow**, and **Shift-scroll** select ranges in row lists. The top form edits the active row only.
 - Flows sort by **Date/Time → From → To → Amount → Units → Status → Category → Name**. Dates start newest first; the remaining fields ascend. Click a heading to make it the primary sort, and click again to reverse that column.
 - **Ctrl+C / Ctrl+V** duplicates selected flows with fresh IDs. Copies appear beside their sources when sort values match; the view follows a row moved by an edit. **Delete** removes selected flows. A batch paste or deletion is one **Ctrl+Z / Ctrl+Y** undo/redo action in the current session.

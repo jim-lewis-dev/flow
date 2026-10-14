@@ -59,7 +59,7 @@ A negative `q` reverses the effect while preserving the recorded account names: 
 
 Confirmed includes Complete flows. Including Pending also includes Pending; Including Planned adds Planned. Canceled contributes nothing. Graphs create separate plots for different units, and a combined line sums selected accounts only within one unit. An unknown starting balance prevents a trustworthy line for that pair; it is not silently treated as zero.
 
-Accounts calculates both displayed balances at its **As of** date/time. **Now** or a blank value uses the current time. An explicit future timestamp includes eligible flows through that instant. This is a session view setting, not a field in an account or flow record.
+Accounts calculates both displayed balances at its **As of** date/time, initially the current timestamp. The displayed instant stays fixed until edited; a blank value or `Now` resolves to the current timestamp on Enter or when leaving the field. An explicit future timestamp includes eligible flows through that instant. This is a session view setting, not a field in an account or flow record.
 
 ## SQLite
 
