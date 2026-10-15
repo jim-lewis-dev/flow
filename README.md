@@ -12,10 +12,10 @@ On Ubuntu, install Python 3.10 or newer and the desktop dependencies:
 
 ```bash
 sudo apt install python3-tk python3-matplotlib
-./launch.sh --demo
+./Flow --demo
 ```
 
-The demo uses a separate database with illustrative `USD` and `kg` transfers. For your own records, run `./launch.sh`. If you use another Python installation, install `requirements.txt` into that environment and ensure its Tkinter module works.
+The demo uses a separate database with illustrative `USD` and `kg` transfers. For your own records, run `./Flow`. If you use another Python installation, install `requirements.txt` into that environment and ensure its Tkinter module works. Terminal Ctrl+C exits quietly; Ctrl+C in the ledger still copies rows.
 
 Flow saves personal records under `~/.local/share/flowledger/flow.sqlite3` by default; `--demo` uses `demo.sqlite3`. Set `XDG_DATA_HOME` to move this directory or pass `--db /path/to/file.sqlite3` to choose a database. The app is local; it does not sync between computers. **Esc** leaves fullscreen mode.
 
