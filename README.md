@@ -72,7 +72,7 @@ To see the Python repository API, run `python3 -m examples.two_units`; it create
 
 Flow uses Python, Tkinter, Matplotlib, and SQLite. Amounts are stored as decimal text and calculated with `Decimal`; plotted coordinates use floating point only for drawing. [The data model](docs/model.md) explains the tables, starting balance rule, and graph calculations. [`flowledger/schema.sql`](flowledger/schema.sql) contains the actual schema.
 
-Run the complete suite on a graphical desktop with `python3 -m unittest discover -s tests`. On a headless Linux machine, install `xvfb` and run:
+Run the complete suite on a graphical desktop with `python3 -m unittest discover -s tests`. On a headless Linux machine, install `xvfb` and `xauth`, then run:
 
 ```bash
 xvfb-run -a -s '-screen 0 1920x1200x24' python3 -m unittest discover -s tests
