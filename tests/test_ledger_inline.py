@@ -202,6 +202,28 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.app.ledger.selection(), (flow["flow_id"],))
         self.assert_closed()
 
+    def test_double_click_notes_selects_every_line_and_typing_replaces_it(self):
+        flow = self.seed(notes="First line\nSecond line\n")
+        self.click_cell(flow, "notes", twice=True)
+        self.settle()
+        cell = self.app.ledger_editor.input
+        cell.focus_force()
+        self.pump()
+        self.assertEqual(cell.get("sel.first", "sel.last"), flow["notes"])
+        cell.event_generate("<KeyPress>", keysym="x")
+        cell.event_generate("<KeyRelease>", keysym="x")
+        self.pump()
+        self.assertEqual(cell.get("1.0", "end-1c"), "x")
+        self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "x")
+        self.finish_cell()
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], "x")
+        self.app.ledger.event_generate("<Control-z>")
+        self.settle()
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], flow["notes"])
+        self.app.ledger.event_generate("<Control-y>")
+        self.settle()
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"], "x")
+
     def test_notes_cell_compact_and_expanded_views_share_content_immediately(self):
         flow = self.seed(notes="Initial\nSecond")
         cell = self.open_cell(flow, "notes")
@@ -537,6 +559,7 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assert_closed()
         cell = self.open_cell(flow, "notes")
         cell.mark_set("insert", "end-1c")
+        cell.tag_remove("sel", "1.0", "end")
         cell.focus_force()
         self.pump()
         cell.event_generate("<Return>")

@@ -26,6 +26,8 @@ from .calendar_widget import CalendarEntry
 from .graphing import graph_timeline, normalize_graph_date
 from .numeric_entry import evaluate_quantity
 from .widgets import FilterCombo, TreeTooltip
+from .selection_summary import format_selection_summary
+from .selection_tooltip import SelectionTooltip
 from .ledger_editor import LedgerEditor
 from .account_editor import AccountEditor
 from .history import SessionHistory
@@ -1144,7 +1146,8 @@ class FlowApp(tk.Tk):
         self.ledger.bind("<Control-v>", self.paste_flow)
         # Do not bind <<Paste>>: Tk also maps Ctrl+Y to it on X11,
         # which would intercept this application's Redo shortcut.
-        self.ledger_tooltip = TreeTooltip(self.ledger, self.flow_tooltip)
+        self.ledger_tooltip = SelectionTooltip(self.ledger, self.flow_tooltip,
+            lambda item: len(self.ledger.selection()) > 1 and item in self.ledger.selection())
         self.ledger_editor = LedgerEditor(self, _NotesPeer,
             font=FONT, background="#fbfcfa", foreground=INK)
         self.ledger_column_drag = ColumnDrag(self.ledger,
@@ -1179,6 +1182,10 @@ class FlowApp(tk.Tk):
         flow = self.ledger_rows.get(item)
         if not flow:
             return None
+        selected = self.ledger.selection()
+        if len(selected) > 1 and item in selected:
+            return format_selection_summary(self.ledger_rows[fid] for fid in selected
+                                            if fid in self.ledger_rows)
         when = flow["date"]
         return (f"{flow['name']}\n{when}\n{flow['from_account']} → {flow['to_account']} · {format_quantity(flow['amount'])} {flow['units']}"
                 f"\n{flow['status']} · {flow['category']}"

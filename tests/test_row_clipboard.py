@@ -163,6 +163,9 @@ class RowClipboardTests(unittest.TestCase):
         self.app.ledger_editor.open(self.original["flow_id"],"notes")
         self.pump()
         notes=self.app.ledger_editor.input
+        self.key("<Control-c>",notes)
+        self.assertEqual(self.app.clipboard_get(),self.original["notes"])
+        notes.tag_remove("sel","1.0","end")
         notes.tag_add("sel","1.0","1.end")
         self.key("<Control-c>",notes)
         self.assertEqual(self.app.clipboard_get(),"First")
