@@ -25,6 +25,9 @@ class LedgerEditor:
         self.widget = self.input = None
         self.field = self.flow_id = None
         self._focus_id = self._position_id = None
+        self._clicked_cell = None
+        if self.view_name == "flows":
+            self.tree.bind("<ButtonPress-1>", self._remember_click, add="+")
         self.tree.bind("<Double-1>", self._double_click)
         self.tree.bind("<F2>", self._keyboard_edit)
         self.tree.bind("<Configure>", self.queue_position, add="+")
@@ -34,15 +37,21 @@ class LedgerEditor:
                 focus_tree=self.widget is not None) else "break", add="+")
         app.bind("<Destroy>", self._destroyed, add="+")
 
+    def _remember_click(self, event):
+        self._clicked_cell = ((self.tree.identify_row(event.y), field_at(self.tree, event.x))
+                              if self.tree.identify_region(event.x, event.y) == "cell" else None)
+
     def _double_click(self, event):
-        if self.tree.identify_region(event.x, event.y) != "cell":
+        # Leaving the previous row may sort between the two mouse presses.
+        # Open the record clicked first, not its new neighbour at that pixel.
+        clicked = self._clicked_cell if hasattr(event, "time") else None
+        self._clicked_cell = None
+        if clicked is None and self.tree.identify_region(event.x, event.y) != "cell":
             if self.view_name == "flows":
                 return self.app._ledger_background_click(event)
             return
-        row = self.tree.identify_row(event.y)
-        column = self.tree.identify_column(event.x)
-        if row and column:
-            key = field_at(self.tree, event.x)
+        row, key = clicked or (self.tree.identify_row(event.y), field_at(self.tree, event.x))
+        if row and key:
             self.open(row, key)
             return "break"
 
@@ -174,6 +183,8 @@ class LedgerEditor:
             self.open(row, columns[index])
         else:
             self.tree.focus_set()
+            if self.record_kind == "flow":
+                self.app._queue_ledger_sort(finish_row=True)
         return "break"
 
     def _escape(self, event=None):
@@ -256,6 +267,8 @@ class LedgerEditor:
             widget.destroy()
         if focus_tree:
             self.tree.focus_set()
+        if self.record_kind == "flow":
+            self.app._queue_ledger_sort(finish_row=focus_tree)
         return True
 
     def _finish_field(self, field):
@@ -269,4 +282,9 @@ class LedgerEditor:
 
     def _destroyed(self, event):
         if event.widget is self.app:
+            if self.record_kind == "flow":
+                self.app._ledger_sort_pending = None
+                if self.app._ledger_sort_after is not None:
+                    self.app.after_cancel(self.app._ledger_sort_after)
+                    self.app._ledger_sort_after = None
             self.close(commit=False)
