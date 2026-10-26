@@ -115,7 +115,8 @@ class LedgerEditor:
                 self.input.selection_range(0, "end")
                 self.input.icursor("end")
             else:
-                self.input.mark_set("insert", self.app.notes_text.index("insert"))
+                self.input.tag_add("sel", "1.0", "end-1c")
+                self.input.mark_set("insert", "end-1c")
                 self.input.see("insert")
         return True
 
