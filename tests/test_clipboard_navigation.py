@@ -79,6 +79,8 @@ class ClipboardNavigationTests(unittest.TestCase):
         return copy_id
 
     def top_edit(self, field, value):
+        order = self.app.ledger.get_children()
+        identity = self.app.editing_id
         widget = self.app.form_widgets[field]
         entry = getattr(widget, "entry", widget)
         entry.focus_force()
@@ -86,6 +88,13 @@ class ClipboardNavigationTests(unittest.TestCase):
         entry.delete(0, "end")
         entry.insert(0, value)
         entry.event_generate("<Return>")
+        self.pump()
+        self.assertEqual(self.repo.get_flow(identity)[field], self.app.form_vars[field].get())
+        self.assertEqual(self.app.ledger.get_children(), order)
+        # A completed field saves immediately; leaving the row applies its
+        # new sort/filter position after the rest of its fields can be edited.
+        self.app._close_popups()
+        self.app.search_entry.focus_set()
         self.pump()
 
     def wheel(self, delta, repetitions=1):

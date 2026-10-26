@@ -96,6 +96,8 @@ class FlowApp(tk.Tk):
         self._flow_selected_ids = ()
         self._account_selected_ids = ()
         self._ledger_order = []
+        self._ledger_sort_pending = None
+        self._ledger_sort_after = None
         self._confirming = False
         self.form_vars = {k: tk.StringVar(self) for k in ("date", "name", "from_account", "to_account", "amount", "units", "status", "category", "tags")}
         self.form_widgets = {}
@@ -1138,6 +1140,7 @@ class FlowApp(tk.Tk):
         self.ledger.tag_configure("Planned", foreground="#396f9f")
         self.ledger.tag_configure("Canceled", foreground="#92a098")
         self.ledger.bind("<<TreeviewSelect>>", self._select_flow)
+        self.ledger.bind("<FocusOut>", lambda event: self._queue_ledger_sort(), add="+")
         self.ledger.bind("<Button-1>", self._ledger_background_click)
         self.ledger.bind("<Triple-1>", self._repeat_row_click)
         # Bind to the table only: Delete inside a form/cell/Notes edits text.
@@ -1284,6 +1287,8 @@ class FlowApp(tk.Tk):
 
     def _finish_existing(self, kind):
         """Save a valid completed field, retaining selection and showing errors inline."""
+        if kind == "flow":
+            self._queue_ledger_sort()
         if self._loading or self._committing or not self._draft_identity(kind):
             return True
         snapshot = self._flow_snapshot() if kind == "flow" else self._account_snapshot()
@@ -1328,12 +1333,13 @@ class FlowApp(tk.Tk):
                 self._active_edit = token[:3] + (self._field_value(kind, token[1]),)
                 self._active_edit_history = self.history.undo_token
             self._draft_redo = None
-            self.refresh_all()
             if kind == "flow":
-                if self.ledger.exists(result["flow_id"]):
-                    self.ledger.see(result["flow_id"])
-                else:
-                    message += " · Hidden by current filters"
+                # Persist each field now, but do not move or destroy the row's
+                # editor while Tab/click is transferring to its next field.
+                self._ledger_sort_pending = result["flow_id"]
+            self.refresh_all(preserve_ledger=kind == "flow")
+            if kind == "flow":
+                self._queue_ledger_sort()
             self.status_message.set(message)
             self._update_history_buttons()
             return True
@@ -1624,11 +1630,56 @@ class FlowApp(tk.Tk):
             self.notes_text.edit_modified(False)
             self._sync_flow_draft()
 
-    def refresh_ledger(self):
+    def _queue_ledger_sort(self, *, finish_row=False):
+        """Wait for focus to reach the next field before deciding the row is done."""
+        if finish_row and self._ledger_sort_after is not None:
+            self.after_cancel(self._ledger_sort_after)
+            self._ledger_sort_after = None
+        if self._ledger_sort_pending and self._ledger_sort_after is None:
+            self._ledger_sort_after = self.after_idle(
+                lambda: self._finish_ledger_sort(finish_row=finish_row))
+
+    def _flow_field_has_focus(self):
+        focused = str(self.tk.call("focus"))
+        widgets = [self.flow_date_picker, *self.form_widgets.values(), self.notes_text,
+                   self.ledger_editor.widget, getattr(self, "notes_dialog", None)]
+        for widget in widgets:
+            if widget is None:
+                continue
+            if focused == str(widget) or focused.startswith(str(widget) + "."):
+                return True
+            popup = getattr(widget, "popup", None)
+            if popup is not None and (not focused or focused == str(popup)
+                                      or focused.startswith(str(popup) + ".")):
+                return True
+        return False
+
+    def _finish_ledger_sort(self, *, finish_row=False):
+        self._ledger_sort_after = None
+        row = self._ledger_sort_pending
+        if not row or self.ledger_editor.widget is not None:
+            # A fast double-click may already have opened the next row before
+            # this idle callback runs. Its editor must remain usable too.
+            return
+        if row == self.editing_id and self.current_view == "flows":
+            if self._flow_snapshot() != self._clean_flow:
+                return  # Still editing this row, or correcting invalid input.
+            if not finish_row and (self._flow_field_has_focus() or
+                    (str(self.tk.call("focus")) == str(self.ledger) and self.ledger.focus() == row)):
+                return  # A first click on this row may be starting a double-click.
+        self.refresh_ledger()
+
+    def refresh_ledger(self, *, preserve_edit=False):
         if not hasattr(self, "ledger"):
             return
-        if not self.ledger_editor.close(commit=not self._committing):
+        if not preserve_edit and not self.ledger_editor.close(commit=not self._committing):
             return
+        pending = self._ledger_sort_pending
+        if not preserve_edit:
+            self._ledger_sort_pending = None
+            if self._ledger_sort_after is not None:
+                self.after_cancel(self._ledger_sort_after)
+                self._ledger_sort_after = None
         self.ledger_tooltip.hide()
         selection = self.ledger.selection()
         active = self._active_tree_row(self.ledger, self._flow_selection)
@@ -1673,28 +1724,44 @@ class FlowApp(tk.Tk):
                     and (not date_start or normalize_date(flow["date"]) >= date_start)
                     and (not date_end or normalize_date(flow["date"]) <= date_end)
                     and (not statuses or flow["status"] in statuses))
-        flows.sort(key=lambda flow: order[flow["flow_id"]])
-        flows.sort(key=self._ledger_sort_key)
-        if self.sort_reverse:
-            # Reverse the chosen column only; secondary keys stay ascending.
-            flows.sort(key=lambda flow: self._ledger_sort_key(flow)[0], reverse=True)
-        live = {flow["flow_id"] for flow in flows}
-        reordered = iter(flow["flow_id"] for flow in flows)
-        # Retain deleted IDs' slots for undo, while each new sort preserves
-        # the existing visible order among equal keys.
-        self._ledger_order = [next(reordered) if fid in live else fid for fid in self._ledger_order]
-        flows = [flow for flow in flows if matches(flow)]
-        self.ledger.delete(*self.ledger.get_children())
+        if preserve_edit:
+            # Refresh values and tooltip data in place. Apply sort/filter
+            # changes on row exit, so even a newly filtered-out row can finish.
+            saved = {flow["flow_id"]: flow for flow in flows}
+            flows = [saved[fid] for fid in self.ledger.get_children() if fid in saved]
+        else:
+            flows.sort(key=lambda flow: order[flow["flow_id"]])
+            flows.sort(key=self._ledger_sort_key)
+            if self.sort_reverse:
+                # Reverse the chosen column only; secondary keys stay ascending.
+                flows.sort(key=lambda flow: self._ledger_sort_key(flow)[0], reverse=True)
+            live = {flow["flow_id"] for flow in flows}
+            reordered = iter(flow["flow_id"] for flow in flows)
+            # Retain deleted IDs' slots for undo, while each new sort preserves
+            # the existing visible order among equal keys.
+            self._ledger_order = [next(reordered) if fid in live else fid for fid in self._ledger_order]
+            flows = [flow for flow in flows if matches(flow)]
+            self.ledger.delete(*self.ledger.get_children())
         self.ledger_rows = {}
         for index, flow in enumerate(flows):
             fid = flow["flow_id"]
             self.ledger_rows[fid] = flow
             values = self._flow_row_values(flow)
             tags = ("odd" if index % 2 else "even", flow["status"])
-            self.ledger.insert("", "end", iid=fid, values=values, tags=tags)
+            if preserve_edit:
+                self.ledger.item(fid, values=values, tags=tags)
+            else:
+                self.ledger.insert("", "end", iid=fid, values=values, tags=tags)
         selected = [fid for fid in selection if fid in self.ledger_rows]
         active = active if active in selected else selected[0] if selected else None
-        self._set_flow_selection(active, selection=selected)
+        if not preserve_edit:
+            self._set_flow_selection(active, selection=selected)
+            if active:
+                self.ledger.see(active)
+            elif pending and pending == self.editing_id and pending not in self.ledger_rows:
+                self.status_message.set("Updated flow · Hidden by current filters")
+        else:
+            self._show_selection()
         self._sync_flow_draft()
         self.metric_vars[2].set(str(len(flows)))
         self.date_filter_label.configure(text=(self.filter_start.get() or "Any Start") + " → " + (self.filter_end.get() or "Any End") if date_start or date_end else "All Dates")
@@ -1766,7 +1833,7 @@ class FlowApp(tk.Tk):
         self.account_widgets["units"].set_values(self.suggestion_preferences.visible("unit", self.repo.list_units(referenced_only=True)))
         self.ledger_editor.refresh_suggestions()
 
-    def refresh_all(self):
+    def refresh_all(self, *, preserve_ledger=False):
         self.refresh_suggestions()
         flows = self.repo.list_flows()
         pruned = []
@@ -1784,7 +1851,7 @@ class FlowApp(tk.Tk):
                 self.view_history.remember("filter:" + key)
             if pruned:
                 self.view_history.remember("ledger_filters")
-        self.refresh_ledger()
+        self.refresh_ledger(preserve_edit=preserve_ledger)
         self.refresh_accounts()
         self.refresh_chart_accounts()
         if hasattr(self, "db_path_label"):
