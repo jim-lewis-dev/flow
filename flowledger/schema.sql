@@ -1,11 +1,16 @@
--- Flowledger schema v7. Names identify accounts; units distinguish quantities.
+-- Flowledger schema v8. Names identify accounts; units distinguish quantities.
 -- Exact decimal text avoids rounding. Starting balances belong to account/unit pairs.
 PRAGMA application_id = 1179406167;
-PRAGMA user_version = 7;
+PRAGMA user_version = 8;
 
 CREATE TABLE accounts (
     account_key TEXT PRIMARY KEY,
     name TEXT NOT NULL
+);
+CREATE TABLE account_positions (
+    account_key TEXT PRIMARY KEY REFERENCES accounts(account_key) ON DELETE CASCADE,
+    x REAL NOT NULL,
+    y REAL NOT NULL
 );
 CREATE TABLE account_balances (
     account_key TEXT NOT NULL REFERENCES accounts(account_key),

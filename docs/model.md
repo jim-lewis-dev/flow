@@ -1,10 +1,10 @@
 # Data model
 
-Flow represents a transfer as one quantity moving from one named account to another. The same account may hold several units. There is one starting balance and timestamp for each account/unit pair; calculated balances are derived from those anchors and the flow ledger.
+Flow represents a transfer as one quantity moving from one named account to a destination account. The same account may hold several units. There is one starting balance and timestamp for each account/unit pair; calculated balances are derived from those anchors and the flow ledger.
 
 ## Records
 
-An account has a name, a unit, and an optional starting balance and time:
+An account/unit pair has a starting date/time and an optional starting balance:
 
 ```json
 {
@@ -32,6 +32,8 @@ A saved flow has the ten user-facing fields plus its internal ID:
   "notes": "Exact fractional quantity"
 }
 ```
+
+The entry form requires Date, From, To, Amount, and Units. Date defaults to today and Units to USD. Time, Name, Tags, and Notes may be omitted; a blank Name becomes `From -> To`. Status defaults to Complete and Category to Uncategorized. Suggestions reflect saved flows rather than unsaved typing.
 
 Account names are identities, matched after trimming whitespace and case folding. Unit names are trimmed but retain case: `mW` and `MW` differ. Amount must be a finite decimal and may be positive, zero, or negative; a starting balance can also be unknown (`null`). Decimal strings avoid binary float rounding and preserve arbitrary supported precision. Read-only displays show USD to two places and other units to four by default; balance calculations and record values remain exact.
 
@@ -63,7 +65,7 @@ Accounts calculates both displayed balances at its **As of** date/time, initiall
 
 ## SQLite
 
-The current schema has seven persistent tables; [`schema.sql`](../flowledger/schema.sql) defines their columns and constraints.
+The current schema has eight persistent tables; [`schema.sql`](../flowledger/schema.sql) defines their columns and constraints.
 
 | Table | Role |
 | --- | --- |
@@ -74,11 +76,12 @@ The current schema has seven persistent tables; [`schema.sql`](../flowledger/sch
 | `tags` | Reusable tag names. |
 | `flow_tags` | Ordered tag assignments. |
 | `audit` | Before/after record of saved changes. |
+| `account_positions` | Saved map coordinates, keyed by account identity. |
 
 `Repository.save_flow` validates and writes a flow, its endpoint/unit entries, tags, and audit entry in one SQLite transaction. Failed writes roll back together. Session undo/redo can restore record and view changes but is not a permanent history of UI actions. The audit table preserves saved record changes.
 
 Account lists, learned suggestions, and ledger filters use current saved flow references, including Canceled flows. The entry form also offers the default Uncategorized category and all valid statuses. Removing the last reference removes that choice from the lists and clears its filter selection. Stored names and starting balances remain available internally for undo or later reuse.
 
-CSV/JSON import requires units. The preview distinguishes new records, duplicates, conflicts, similar records, and invalid rows; approved entries commit atomically. Data export contains flows; use database backup to preserve anchors and audit as well. Old schema files are migrated when opened; the legacy migrations that convert cents to quantities retain a one-time copy of the old database.
+CSV/JSON import requires units. The preview distinguishes new records, duplicates, conflicts, similar records, and invalid rows; approved entries commit atomically. Data export contains flows; use database backup to preserve anchors, audit, and map positions as well. Old schema files are migrated when opened; the legacy migrations that convert cents to quantities retain a one-time copy of the old database.
 
-The Experimental tab reads matching saved flows and animates them without changing the database. Its draggable layout lasts only for the current session. Negative pulses move in the reverse direction and use absolute magnitude for sizing; zero events use stationary hollow markers. Account hover balances come from all eligible saved flows at the selected time; its displayed In/Out totals use only flows selected for the animation, with actual transfer direction and nonnegative magnitudes.
+The Experimental tab reads matching saved flows and animates them without changing flow records. Dropping a node saves the map positions in the same database; session undo/redo saves the restored layout too. Coordinates are normalized to the map dimensions and can extend outside the original canvas. Each account has one position shared across units. New accounts receive an automatic position; filtering never discards the stored arrangement. Zoom, playback, and filter settings remain session-only. Database backup and restore include the layout. Negative pulses move in the reverse direction and use absolute magnitude for sizing; zero events use stationary hollow markers. Account hover balances come from all eligible saved flows at the selected time; its displayed In/Out totals use only flows selected for the animation, with actual transfer direction and nonnegative magnitudes.

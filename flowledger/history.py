@@ -59,7 +59,7 @@ class SessionHistory:
 
     Database restore is a session boundary: call ``clear()`` after a successful
     restore. Call ``close()`` before closing the repository. UI draft text and
-    suggestion preferences outside SQLite are managed by the caller.
+    view actions are managed by the caller.
     """
 
     def __init__(self, repo):

@@ -103,7 +103,7 @@ class OptionalTimeTests(unittest.TestCase):
             audit = conn.execute('SELECT * FROM audit').fetchall()
         repo = Repository(path)
         try:
-            self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],7)
+            self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],8)
             self.assertEqual([row['date'] for row in repo.list_flows()],['2026-10-02','2026-10-02 12:34:56'])
             self.assertTrue(all(set(row)==FLOW_FIELDS for row in repo.list_flows()))
             self.assertEqual([tuple(row) for row in repo.conn.execute('SELECT * FROM audit')],audit)
@@ -119,13 +119,13 @@ class OptionalTimeTests(unittest.TestCase):
         reopened = Repository(path)
         self.assertIsNone(reopened.migration_backup_path)
         reopened.close()
-        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v7-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v8-*.bak'))),1)
 
     def test_failed_migration_keeps_legacy_data_and_pre_upgrade_snapshot(self):
         path = self.make_v1()
         real_validate = Repository._validate_database
         def reject_upgrade(conn, **kwargs):
-            if conn.execute('PRAGMA user_version').fetchone()[0] == 7:
+            if conn.execute('PRAGMA user_version').fetchone()[0] == 8:
                 raise ValueError('simulated migration validation failure')
             real_validate(conn, **kwargs)
         with patch.object(Repository,'_validate_database',side_effect=reject_upgrade):
@@ -134,7 +134,7 @@ class OptionalTimeTests(unittest.TestCase):
         with sqlite3.connect(path) as conn:
             self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0],1)
             self.assertEqual(conn.execute('SELECT count(*) FROM flows').fetchone()[0],2)
-        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v7-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('legacy.sqlite3.pre-v8-*.bak'))),1)
 
     def test_restore_v1_migrates_private_copy_and_keeps_source_unchanged(self):
         path = self.make_v1()
@@ -142,7 +142,7 @@ class OptionalTimeTests(unittest.TestCase):
         active = self.flow(name='Current data')
         self.repo.restore(path)
         self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),source_hash)
-        self.assertEqual(self.repo.conn.execute('PRAGMA user_version').fetchone()[0],7)
+        self.assertEqual(self.repo.conn.execute('PRAGMA user_version').fetchone()[0],8)
         self.assertEqual([row['date'] for row in self.repo.list_flows()],['2026-10-02','2026-10-02 12:34:56'])
         safety = list(self.root.glob('active.sqlite3.pre-restore-*.bak'))
         self.assertEqual(len(safety),1)

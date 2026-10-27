@@ -3088,6 +3088,7 @@ class FlowApp(tk.Tk):
             try:
                 self.repo.restore(path)
                 self.history.clear()
+                self.experimental.reload_positions()
                 self._update_history_buttons()
                 self.new_flow(focus=False, confirm=False)
                 self.new_account(focus=False, confirm=False)
