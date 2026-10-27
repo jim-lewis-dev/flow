@@ -177,8 +177,8 @@ class FlowApp(tk.Tk):
         style.map("TButton", background=[("active", "#d5e7db")])
         style.configure("Primary.TButton", background=TEAL, foreground="white", padding=(14, 7))
         style.map("Primary.TButton", background=[("active", "#116752")])
-        style.configure("AddFlow.TButton", background=TEAL, foreground="white", padding=(14, 7))
-        style.map("AddFlow.TButton", background=[("disabled", "#e6eee8"), ("active", "#116752")],
+        style.configure("AddFlow.Small.TButton", background=TEAL, foreground="white")
+        style.map("AddFlow.Small.TButton", background=[("disabled", "#e6eee8"), ("active", "#116752")],
                   foreground=[("disabled", MUTED)])
         style.configure("Small.TButton", padding=(7, 5))
         style.configure("TCheckbutton", background=BG, font=(FONT, 9))
@@ -1051,9 +1051,9 @@ class FlowApp(tk.Tk):
         self.form_title.pack(side="left")
         self.form_feedback = tk.StringVar(self)
         ttk.Label(header, textvariable=self.form_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
-        self.save_button = ttk.Button(header, text="Add Flow", style="AddFlow.TButton", command=self.save_flow)
+        self.save_button = ttk.Button(header, text="Add Flow", width=10, style="AddFlow.Small.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
-        self.new_flow_button = ttk.Button(header, text="Clear Flow", style="Small.TButton", command=self.new_flow)
+        self.new_flow_button = ttk.Button(header, text="Clear Flow", width=10, style="Small.TButton", command=self.new_flow)
         self.new_flow_button.pack(side="right")
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
