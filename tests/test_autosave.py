@@ -288,7 +288,7 @@ class AutosaveTests(unittest.TestCase):
         self.shortcut("<Control-z>")
         self.assertEqual(self.repo.get_flow(original["flow_id"])['amount'], '33')
 
-    def test_swapping_endpoints_can_move_between_fields_without_partial_write(self):
+    def test_swapping_endpoints_saves_each_valid_field_including_self_flow(self):
         flow = self.seed()
         self.select(flow)
         source = self.field("from_account", "Shop")
@@ -296,7 +296,7 @@ class AutosaveTests(unittest.TestCase):
         self.settle()
         target_widget = self.app.form_widgets["to_account"]
         self.assertIs(self.app.focus_get(), target_widget.entry)
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "from_account": "Shop"})
         self.assertTrue(self.app.form_feedback.get())
         target = target_widget.entry
         target.delete(0, "end")
@@ -306,6 +306,8 @@ class AutosaveTests(unittest.TestCase):
         changed = self.repo.get_flow(flow["flow_id"])
         self.assertEqual((changed["from_account"], changed["to_account"]), ("Shop", "Checking"))
         self.assertEqual(len(self.repo.list_flows()), 1)
+        self.shortcut("<Control-z>", self.app.ledger)
+        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "from_account": "Shop"})
         self.shortcut("<Control-z>", self.app.ledger)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
 
@@ -411,7 +413,7 @@ class AutosaveTests(unittest.TestCase):
         self.shortcut("<Control-s>", entry)
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
         self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
-        self.assertEqual(self.app.form_feedback.get(), "Use numbers, +, -, *, / and parentheses only.")
+        self.assertEqual(self.app.form_feedback.get(), "Amount: Use numbers, +, -, *, / and parentheses only.")
         self.assertNotEqual(self.app.status_message.get(), "Saved")
 
     def test_new_and_add_reset_undo_baseline_when_date_keeps_focus(self):

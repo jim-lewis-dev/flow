@@ -94,128 +94,39 @@ class GuiIntegrationTests(unittest.TestCase):
             if self.app.chart_account_pairs[index][0] in names:
                 self.app.chart_accounts.selection_set(index)
 
-    def remove_suggestion(self, field, value):
-        """Click a rendered suggestion's X, preserving the active form."""
-        combo = self.app.form_widgets[field]
-        combo.entry.focus_force()
-        self.pump()
+
+    def test_open_dropdown_refreshes_saved_choices_without_changing_draft(self):
+        flow = self.seed_flow(category="Boat", tags=["Trip"])
+        self.app.form_vars["category"].set("Unfinished category")
+        draft = self.app._flow_snapshot()
+        self.repo.save_flow({**flow, "category": "Repairs"})
+        saved = self.repo.list_flows()
+        combo = self.app.form_widgets["category"]
         combo.open_popup(show_all=True)
         self.pump()
-        index = combo.matches.index(value)
-        combo.listbox.see(index)
-        self.pump()
-        _, y, _, height = combo.listbox.bbox(index)
-        x = combo.remove_canvas.winfo_width() // 2
-        combo.remove_canvas.event_generate("<ButtonPress-1>", x=x, y=y + height // 2)
-        combo.remove_canvas.event_generate("<ButtonRelease-1>", x=x, y=y + height // 2)
-        self.pump()
-
-    def test_account_suggestion_x_preserves_new_draft_records_and_other_views(self):
-        flow = self.seed_flow(tags=["Trip"], notes="Existing notes")
-        self.select(flow)
-        self.app.repeat_selected()
-        self.app.form_vars["amount"].set("21.00")
-        self.app.notes_text.insert("end", " and an unsaved edit")
-        draft = self.app._flow_snapshot()
-        clean = self.app._clean_flow
-        database = "\n".join(self.repo.conn.iterdump())
-        ledger = tuple(self.app.ledger.get_children())
-        accounts = tuple((iid, self.app.accounts_tree.item(iid, "values"))
-                         for iid in self.app.accounts_tree.get_children())
-        chart_choices = self.app.chart_accounts.get(0, "end")
-        self.remove_suggestion("from_account", "Checking")
-        for field in ("from_account", "to_account"):
-            self.assertNotIn("Checking", self.app.form_widgets[field].values)
+        self.assertIn("Repairs", combo.values)
+        self.assertNotIn("Boat", combo.values)
+        self.assertFalse(getattr(combo, "remove_canvas", None))
         self.assertEqual(self.app._flow_snapshot(), draft)
-        self.assertEqual(self.app._clean_flow, clean)
-        self.assertIsNone(self.app.editing_id)
-        self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
-        self.assertEqual(tuple(self.app.ledger.get_children()), ledger)
-        self.assertEqual(tuple((iid, self.app.accounts_tree.item(iid, "values"))
-                               for iid in self.app.accounts_tree.get_children()), accounts)
-        self.assertEqual(self.app.chart_accounts.get(0, "end"), chart_choices)
-        self.assertIn("Checking · USD", chart_choices)
+        self.assertEqual(self.repo.list_flows(), saved)
 
-    def test_category_tag_and_name_x_leave_ledger_filters_and_records_intact(self):
-        flow = self.seed_flow(tags=["Trip"])
-        self.select(flow)
-        database = "\n".join(self.repo.conn.iterdump())
-        draft = self.app._flow_snapshot()
-        for field, value in (("category", "Dining"), ("tags", "Trip"), ("name", "Lunch")):
-            self.remove_suggestion(field, value)
-            self.assertNotIn(value, self.app.form_widgets[field].values)
-            self.assertEqual(self.app._flow_snapshot(), draft)
-        self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
-        self.assertIn("Dining", self.app.ledger_filters["Category"].values)
-        self.assertIn("Trip", self.app.ledger_filters["Tag"].values)
-        self.app.ledger_filters["Category"].set_selected(("Dining",))
-        self.app.ledger_filters["Tag"].set_selected(("Trip",))
-        self.app.refresh_ledger()
-        self.assertEqual(list(self.app.ledger_rows), [flow["flow_id"]])
-
-    def test_removed_suggestions_survive_save_refresh_and_reloaded_preferences(self):
-        from flowledger.suggestions import SuggestionPreferences
-        flow = self.seed_flow(tags=["Trip"])
-        self.select(flow)
-        removed = (("from_account", "Checking"), ("category", "Dining"),
-                   ("tags", "Trip"), ("name", "Lunch"))
-        for field, value in removed:
-            self.remove_suggestion(field, value)
-        self.enter(amount="21.00")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, 'amount': '21'})
-        self.app.suggestion_preferences = SuggestionPreferences(self.repo.path)
-        self.app.refresh_all()
-        self.pump()
-        for field, value in removed:
-            self.assertNotIn(value, self.app.form_widgets[field].values)
-        self.select(flow)
-        self.pump()
-        for field, value in removed:
-            self.assertNotIn(value, self.app.form_widgets[field].values)
-        self.assertEqual(self.app.form_vars["from_account"].get(), "Checking")
-
-    def test_exact_enter_restores_account_without_saving_a_flow(self):
+    def test_entering_new_suggestion_does_not_save_it_before_add(self):
         self.seed_flow()
-        self.remove_suggestion("to_account", "Checking")
-        database = "\n".join(self.repo.conn.iterdump())
         combo = self.app.form_widgets["from_account"]
         combo.entry.focus_force()
         self.pump()
         combo.entry.delete(0, "end")
-        combo.entry.insert(0, "Checking")
+        combo.entry.insert(0, "New source")
         combo.entry.event_generate("<Return>")
         self.pump()
-        for field in ("from_account", "to_account"):
-            self.assertIn("Checking", self.app.form_widgets[field].values)
-        self.assertEqual("\n".join(self.repo.conn.iterdump()), database)
-        self.assertIsNone(combo.popup)
-
-    def test_tag_enter_restores_only_last_csv_token(self):
-        self.seed_flow(tags=["Trip", "Boat, trailer"])
-        for value in ("Trip", "Boat, trailer"):
-            self.remove_suggestion("tags", value)
-        combo = self.app.form_widgets["tags"]
-        combo.entry.focus_force()
-        self.pump()
-        combo.entry.delete(0, "end")
-        combo.entry.insert(0, 'Trip, "Boat, trailer"')
-        combo.entry.event_generate("<Return>")
-        self.pump()
-        self.assertEqual(combo.get(), 'Trip, "Boat, trailer"')
-        self.assertIn("Boat, trailer", combo.values)
-        self.assertNotIn("Trip", combo.values)
+        self.assertEqual(combo.get(), "New source")
+        self.assertNotIn("New source", combo.values)
+        self.assertIsNone(self.repo.get_account("New source"))
         self.assertEqual(len(self.repo.list_flows()), 1)
+        self.enter(to_account="Shop", amount="3")
+        self.assertIn("New source", combo.values)
+        self.assertEqual(len(self.repo.list_flows()), 2)
 
-    def test_failed_suggestion_removal_keeps_row_and_draft(self):
-        self.seed_flow()
-        combo = self.app.form_widgets["category"]
-        self.app.form_vars["category"].set("Dining")
-        draft = self.app._flow_snapshot()
-        with patch.object(self.app.suggestion_preferences, "remove", side_effect=OSError("read only")):
-            self.remove_suggestion("category", "Dining")
-        self.assertIn("Dining", combo.values)
-        self.assertEqual(self.app._flow_snapshot(), draft)
-        self.assertIn("Could not remove suggestion", self.app.form_feedback.get())
 
     def test_defaults_new_vocabulary_and_dropdown_filtering(self):
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
@@ -265,7 +176,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_account("Brand new shop"))
         self.assertNotIn("New hobby", self.repo.list_categories())
         self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
-        self.assertEqual(self.app.form_feedback.get(), "Use numbers, +, -, *, / and parentheses only.")
+        self.assertEqual(self.app.form_feedback.get(), "Amount: Use numbers, +, -, *, / and parentheses only.")
 
     def test_multiselect_filters_use_any_value_within_each_field(self):
         dining = self.seed_flow(category="Dining", tags=["Trip"], amount="12")
@@ -495,20 +406,6 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(self.app.notes_text.get("1.0", "end-1c"), "")
         self.assertEqual(self.repo.list_flows(), [original])
 
-    def test_suggestion_x_can_be_undone_and_redone_without_changing_records(self):
-        original = self.seed_flow(category="Boat")
-        self.select(original)
-        self.remove_suggestion("category", "Boat")
-        self.assertNotIn("Boat", self.app.form_widgets["category"].values)
-        self.app.undo()
-        self.pump()
-        self.assertIn("Boat", self.app.form_widgets["category"].values)
-        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
-        self.app.redo()
-        self.pump()
-        self.assertNotIn("Boat", self.app.form_widgets["category"].values)
-        self.assertEqual(self.repo.get_flow(original["flow_id"]), original)
-        self.assertEqual(self.app.editing_id, original["flow_id"])
 
     def test_filter_dialog_undo_does_not_undo_an_unrelated_saved_record(self):
         import tkinter as tk
@@ -806,7 +703,6 @@ class GuiIntegrationTests(unittest.TestCase):
             self.app.mainloop()
             self.pump()
             self.assertIsNone(combo.popup)
-
 
 
 if __name__ == "__main__":

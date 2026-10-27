@@ -44,7 +44,7 @@ class CalendarEntry(ttk.Frame):
         self.entry = ttk.Entry(self, textvariable=self.variable, width=width)
         self.entry.place(x=0, y=0, relwidth=1, relheight=1)
         self.button = ttk.Button(self, width=0, command=self._toggle_popup,
-                                 style="Calendar.TButton")
+                                 style="Calendar.TButton", takefocus=False)
         self.button.place(relx=1, y=0, anchor="ne")
         self.bind("<Configure>", self._layout_button)
         self.bind("<<ThemeChanged>>", self._schedule_size)

@@ -46,7 +46,7 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_required_fields_and_invalid_rows_report_each_error(self):
-        rows = [None, ["not", "a row"], {}, self.row(from_account=""), self.row(to_account=" amex ")]
+        rows = [None, ["not", "a row"], {}, self.row(from_account=""), self.row(to_account="")]
         result = preview_import(self.repo, rows)
         self.assertEqual([item["state"] for item in result], ["Error"] * len(rows))
         self.assertEqual([item["row"] for item in result], list(range(1, len(rows) + 1)))

@@ -129,7 +129,7 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             with self.repo.atomic():
                 self.flow(destination="New Shop", category="New Category", tags=["New Tag"])
-                self.flow(source="checking", destination=" Checking ")
+                self.flow(source="checking", destination="")
         self.assertEqual(self.repo.list_flows(), [])
         self.assertIsNone(self.repo.get_account("New Shop"))
         self.assertNotIn("New Category", self.repo.list_categories())

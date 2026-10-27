@@ -28,20 +28,6 @@ class DropdownTests(unittest.TestCase):
         self.combo.entry.event_generate("<KeyRelease>", keysym="a")
         self.root.update()
 
-    def enable_removal(self, callback):
-        self.combo.close_popup()
-        self.combo.on_remove = callback
-        self.combo.open_popup(show_all=True)
-        self.root.update()
-
-    def click_remove(self, index):
-        _, y, _, height = self.combo.listbox.bbox(index)
-        canvas = self.combo.remove_canvas
-        x, y = canvas.winfo_width() // 2, y + height // 2
-        canvas.event_generate("<ButtonPress-1>", x=x, y=y)
-        canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
-        self.root.update()
-
     def test_focus_opens_typing_filters_and_keyboard_selects(self):
         self.assertIsNotNone(self.combo.popup)
         self.assertEqual(self.combo.matches, ["Dining", "Boat", "Groceries"])
@@ -87,143 +73,70 @@ class DropdownTests(unittest.TestCase):
         self.assertIsNone(self.combo.popup)
         self.assertEqual(self.callback_errors, [])
 
-    def test_remove_target_keeps_draft_focus_and_popup_without_accepting(self):
-        removed, accepted, maps = [], [], []
+    def test_open_refreshes_choices_without_accepting_or_changing_draft(self):
+        current = ["Boat", "Books"]
+        accepted = []
         self.combo.on_accept = lambda: accepted.append(True)
-        self.enable_removal(lambda value: removed.append(value) or True)
+        self.combo.on_open = lambda: self.combo.set_values(current)
         self.combo.set("Untouched draft")
         self.combo.entry.icursor(4)
-        popup = self.combo.popup
-        position = popup.winfo_rootx(), popup.winfo_rooty()
-        self.root.bind_all("<Map>", lambda event: maps.append(event.widget), add="+")
-        self.click_remove(1)
-        self.assertEqual(removed, ["Boat"])
-        self.assertEqual(accepted, [])
+        self.combo.close_popup()
+        self.combo.open_popup(show_all=True)
+        self.root.update()
+        self.assertEqual(self.combo.matches, ["Boat", "Books"])
         self.assertEqual(self.combo.get(), "Untouched draft")
         self.assertEqual(self.combo.entry.index("insert"), 4)
-        self.assertEqual(self.combo.values, ["Dining", "Groceries"])
-        self.assertEqual(self.combo.matches, ["Dining", "Groceries"])
-        self.assertIs(self.combo.popup, popup)
-        self.assertEqual((popup.winfo_rootx(), popup.winfo_rooty()), position)
-        self.assertEqual(maps, [])
-        self.assertIs(self.root.focus_get(), self.combo.entry)
-        # Normal navigation remains available after the X click.
-        self.combo.entry.event_generate("<Down>")
-        self.combo.entry.event_generate("<Return>")
+        self.assertEqual(accepted, [])
+        self.assertNotIn("removes", self.combo._hint.cget("text"))
+        self.assertFalse(hasattr(self.combo, "remove_canvas"))
+        current[:] = ["Dining"]
+        self.combo.close_popup()
+        self.combo.open_popup(show_all=True)
         self.root.update()
-        self.assertEqual(self.combo.get(), "Dining")
-        self.assertEqual(accepted, [True])
+        self.assertEqual(self.combo.matches, ["Dining"])
+        self.assertEqual(self.combo.get(), "Untouched draft")
 
-    def test_remove_filters_and_caller_refresh_preserve_filter_mode(self):
+    def test_live_refresh_preserves_filter_and_open_popup(self):
         self.combo.set_values(["Boat", "Books", "Dining"])
-        removed = []
-
-        def persist(value):
-            removed.append(value)
-            self.combo.set_values([item for item in self.combo.values if item != value])
-            return True
-
-        self.enable_removal(persist)
         self.type_value("bo")
-        self.assertEqual(self.combo.matches, ["Boat", "Books"])
-        self.click_remove(1)
-        self.assertEqual(removed, ["Books"])
-        self.assertEqual(self.combo.matches, ["Boat"])
-        self.assertEqual(self.combo.get(), "bo")
+        popup = self.combo.popup
         self.combo.set_values(["Boat", "Bow", "Dining"])
         self.root.update()
         self.assertEqual(self.combo.matches, ["Boat", "Bow"])
-
-    def test_remove_and_set_values_preserve_show_all_with_nonmatching_draft(self):
-        self.enable_removal(lambda value: True)
-        self.combo.set("unrelated")
-        self.combo.set_values(["Boat", "Books", "Dining"])
-        self.root.update()
-        self.assertEqual(self.combo.matches, ["Boat", "Books", "Dining"])
-        self.click_remove(0)
-        self.assertEqual(self.combo.matches, ["Books", "Dining"])
-        self.assertEqual(self.combo.get(), "unrelated")
-
-    def test_remove_after_scrolling_targets_visible_row_and_redraws_x(self):
-        self.combo.set_values([f"Account {index:02}" for index in range(100)])
-        removed = []
-        self.enable_removal(lambda value: removed.append(value) or True)
-        self.assertEqual(len(self.combo.matches), 80)
-        self.assertEqual(int(self.combo.listbox.cget("height")), 6)
-        self.combo.listbox.yview_scroll(23, "units")
-        self.root.update()
-        first = self.combo.listbox.nearest(0)
-        index = first + 2
-        value = self.combo.matches[index]
-        _, y, _, height = self.combo.listbox.bbox(index)
-        icon = self.combo.remove_canvas.find_withtag(f"remove_{index}")
-        self.assertEqual(len(icon), 1)
-        icon_x, icon_y = self.combo.remove_canvas.coords(icon[0])
-        self.assertEqual(icon_y, y + height / 2)
-        self.click_remove(index)
-        self.assertEqual(removed, [value])
-        self.assertNotIn(value, self.combo.values)
-        self.assertEqual(self.combo.listbox.nearest(0), first)
-        self.assertEqual(len(self.combo.matches), 80)
-        self.combo.remove_canvas.event_generate("<Button-5>", x=int(icon_x), y=10)
-        self.root.update()
-        self.assertEqual(self.combo.listbox.nearest(0), first + 1)
-        # A newly visible row still owns its matching X after gutter scrolling.
-        next_index = self.combo.listbox.nearest(0) + 1
-        next_value = self.combo.matches[next_index]
-        self.click_remove(next_index)
-        self.assertEqual(removed, [value, next_value])
-
-    def test_refused_remove_keeps_vocabulary_selection_and_draft(self):
-        removed = []
-        self.enable_removal(lambda value: removed.append(value) or False)
-        self.type_value("bo")
-        self.combo.entry.event_generate("<Down>")
-        popup = self.combo.popup
-        self.click_remove(0)
-        self.assertEqual(removed, ["Boat"])
-        self.assertEqual(self.combo.values, ["Dining", "Boat", "Groceries"])
-        self.assertEqual(self.combo.matches, ["Boat"])
-        self.assertEqual(self.combo.nav_index, 0)
         self.assertEqual(self.combo.get(), "bo")
         self.assertIs(self.combo.popup, popup)
         self.assertIs(self.root.focus_get(), self.combo.entry)
 
-    def test_no_remove_control_for_fixed_options_or_new_value_placeholder(self):
-        self.assertIsNone(self.combo.remove_canvas)
-        removed = []
-        self.enable_removal(lambda value: removed.append(value) or True)
-        self.type_value("A new account")
-        self.assertEqual(self.combo.matches, [])
-        self.assertEqual(self.combo.remove_canvas.find_all(), ())
-        self.click_remove(0)
-        self.assertEqual(removed, [])
-        self.assertEqual(self.combo.get(), "A new account")
-        self.assertIsNotNone(self.combo.popup)
+    def test_filter_open_refreshes_current_values_before_rendering(self):
+        from flowledger.filters import CheckFilter
 
-    def test_remove_release_on_different_row_does_not_delete(self):
-        removed = []
-        self.enable_removal(lambda value: removed.append(value) or True)
-        canvas = self.combo.remove_canvas
-        _, first_y, _, height = self.combo.listbox.bbox(0)
-        _, second_y, _, _ = self.combo.listbox.bbox(1)
-        canvas.event_generate("<ButtonPress-1>", x=14, y=first_y + height // 2)
-        canvas.event_generate("<ButtonRelease-1>", x=14, y=second_y + height // 2)
+        current = ["Boat"]
+        choice = CheckFilter(self.root, "Categories", values=["Old"])
+        choice.on_open = lambda: choice.set_values(current)
+        choice.pack(fill="x")
         self.root.update()
-        self.assertEqual(removed, [])
+        choice.open_popup()
+        self.root.update()
+        self.assertEqual(list(choice.checkbuttons), ["Boat"])
+        choice.close_popup()
+        current[:] = ["Dining"]
+        choice.open_popup()
+        self.root.update()
+        self.assertEqual(list(choice.checkbuttons), ["Dining"])
 
-    def test_remove_redraw_is_cancelled_on_close_and_destroy(self):
-        self.enable_removal(lambda value: True)
-        self.combo._queue_remove_redraw()
-        timer = self.combo._remove_redraw_id
-        self.assertIsNotNone(timer)
-        self.combo.close_popup()
-        self.assertNotIn(timer, self.root.tk.call("after", "info"))
+    def test_live_refresh_preserves_show_all_and_scroll(self):
+        choices = [f"Account {index:02}" for index in range(80)]
+        self.combo.set_values(choices)
+        self.combo.set("unrelated")
         self.combo.open_popup(show_all=True)
-        timer = self.combo._remove_redraw_id
-        self.combo.destroy()
+        self.combo.listbox.yview_scroll(23, "units")
         self.root.update()
-        self.assertNotIn(timer, self.root.tk.call("after", "info"))
+        first = self.combo.listbox.nearest(0)
+        self.combo.set_values(choices + ["New account"])
+        self.root.update()
+        self.assertEqual(self.combo.listbox.nearest(0), first)
+        self.assertEqual(self.combo.get(), "unrelated")
+        self.assertEqual(self.combo.matches, choices)
 
     def test_mouse_selects_existing_option(self):
         self.type_value("gro")

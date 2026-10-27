@@ -26,7 +26,7 @@ STATUSES = ("Complete", "Pending", "Planned", "Canceled")
 FLOW_SORT_FIELDS = ("date", "from_account", "to_account", "amount", "units",
                     "status", "category", "name")
 DEFAULT_ANCHOR = "2026-10-01 00:00:00"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 APPLICATION_ID = 1179406167
 MAX_CENTS = 2**63 - 1
 
@@ -252,7 +252,7 @@ class Repository:
                     self.backup(self.migration_backup_path)
                     self.migration_forecasts_path = self._save_legacy_forecasts(
                         self.conn, self.migration_backup_path + ".forecasts.json")
-                # v5 -> v6 only renames the status/constraint, in one transaction.
+                # Recent upgrades only replace flow constraints, in one transaction.
                 # Failure rolls back both schema and data; no retained copy.
                 self._migrate_legacy(self.conn)
             self._validate_database(self.conn)
@@ -265,7 +265,7 @@ class Repository:
         if conn.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
             raise ValueError("This is not a Flowledger database.")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4, 5)):
+        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4, 5, 6)):
             raise ValueError(f"Unsupported database version {version}; expected {SCHEMA_VERSION}.")
         required = {
             "accounts": {"account_key", "name"},
@@ -350,16 +350,16 @@ class Repository:
 
     @staticmethod
     def _migrate_legacy(conn: sqlite3.Connection) -> None:
-        """Upgrade v1-v5 atomically; convert legacy amounts and rename Void.
+        """Upgrade v1-v6 atomically; preserve values and permit same-account flows.
 
-        The caller preserves the complete original database before migration.
+        The caller preserves a recovery copy only for destructive pre-v5 migrations.
         Legacy optional-time flags become date precision. Version 1 did not
         distinguish entered midnight, so its midnight values become date-only.
         Forecast collections are kept in the original backup and recovery JSON,
         never mixed into ordinary flows. Accounts and audit history are retained.
         """
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, 2, 3, 4, 5):
+        if version not in (1, 2, 3, 4, 5, 6):
             raise ValueError(f"Cannot migrate database version {version}.")
         if conn.in_transaction:
             raise ValueError("Finish the current write before migrating.")
@@ -407,8 +407,8 @@ class Repository:
                 conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
                 conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
                 conn.execute("PRAGMA user_version = 5")
-            Repository._rename_canceled(conn)
-            conn.execute("PRAGMA user_version = 6")
+            Repository._upgrade_flow_constraints(conn)
+            conn.execute("PRAGMA user_version = 7")
             Repository._validate_database(conn)
             conn.execute("COMMIT")
         except BaseException:
@@ -419,21 +419,20 @@ class Repository:
             conn.execute(f"PRAGMA foreign_keys = {foreign_keys}")
 
     @staticmethod
-    def _rename_canceled(conn: sqlite3.Connection) -> None:
-        """Replace only the status constraint/value; the caller owns the transaction."""
-        conn.execute("CREATE TABLE flows_v6 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
+    def _upgrade_flow_constraints(conn: sqlite3.Connection) -> None:
+        """Rename old Void values and allow equal endpoints in the caller transaction."""
+        conn.execute("CREATE TABLE flows_v7 (flow_id TEXT PRIMARY KEY,date TEXT NOT NULL, "
                      "from_key TEXT NOT NULL,to_key TEXT NOT NULL, "
                      "amount TEXT NOT NULL CHECK(typeof(amount)='text' AND length(amount)>0), "
                      "units TEXT NOT NULL CHECK(typeof(units)='text' AND length(trim(units))>0), "
                      "status TEXT NOT NULL CHECK(status IN ('Complete','Pending','Planned','Canceled')), "
                      "name TEXT NOT NULL,notes TEXT NOT NULL DEFAULT '',category_key TEXT NOT NULL REFERENCES categories(category_key), "
-                     "CHECK(from_key<>to_key), "
                      "FOREIGN KEY(from_key,units) REFERENCES account_balances(account_key,units), "
                      "FOREIGN KEY(to_key,units) REFERENCES account_balances(account_key,units))")
-        conn.execute("INSERT INTO flows_v6 SELECT flow_id,date,from_key,to_key,amount,units,"
+        conn.execute("INSERT INTO flows_v7 SELECT flow_id,date,from_key,to_key,amount,units,"
                      "CASE status WHEN 'Void' THEN 'Canceled' ELSE status END,name,notes,category_key FROM flows")
         conn.execute("DROP TABLE flows")
-        conn.execute("ALTER TABLE flows_v6 RENAME TO flows")
+        conn.execute("ALTER TABLE flows_v7 RENAME TO flows")
         conn.execute("CREATE INDEX flows_date ON flows(datetime(date),flow_id)")
         conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
         conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
@@ -570,8 +569,6 @@ class Repository:
         when = normalize_flow_date(data.get("date", Date.today()))
         source = _name(data.get("from_account"), "From account")
         destination = _name(data.get("to_account"), "To account")
-        if _key(source) == _key(destination):
-            raise ValueError("From and To must be different accounts.")
         amount = parse_quantity(data.get("amount", ""))
         amount = quantity_text(amount)
         units = _name(data.get("units"), "Units")

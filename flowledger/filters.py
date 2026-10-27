@@ -16,6 +16,7 @@ class CheckFilter(ttk.Frame):
 
     def __init__(self, master, label: str, values: Iterable[str] = (),
                  on_change: Callable[[], None] | None = None,
+                 on_open: Callable[[], None] | None = None,
                  all_label: str | None = None, case_sensitive: bool = False,
                  **kwargs):
         super().__init__(master, **kwargs)
@@ -24,6 +25,7 @@ class CheckFilter(ttk.Frame):
         self.case_sensitive = case_sensitive
         self.values = self._canonical_values(values)
         self.on_change = on_change
+        self.on_open = on_open
         self._selected: tuple[str, ...] = ()
         self.popup = None
         self.search_entry = None
@@ -216,6 +218,8 @@ class CheckFilter(ttk.Frame):
         if self.popup is not None:
             self.search_entry.focus_set()
             return
+        if self.on_open is not None:
+            self.on_open()
         top = self.winfo_toplevel()
         for attribute in ("_flow_check_filter", "_flow_filter_combo", "_flow_calendar"):
             previous = getattr(top, attribute, None)

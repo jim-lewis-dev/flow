@@ -1,7 +1,7 @@
--- Flowledger schema v6. Names identify accounts; units distinguish quantities.
+-- Flowledger schema v7. Names identify accounts; units distinguish quantities.
 -- Exact decimal text avoids rounding. Starting balances belong to account/unit pairs.
 PRAGMA application_id = 1179406167;
-PRAGMA user_version = 6;
+PRAGMA user_version = 7;
 
 CREATE TABLE accounts (
     account_key TEXT PRIMARY KEY,
@@ -29,7 +29,6 @@ CREATE TABLE flows (
     name TEXT NOT NULL,
     notes TEXT NOT NULL DEFAULT '',
     category_key TEXT NOT NULL REFERENCES categories(category_key),
-    CHECK(from_key <> to_key),
     FOREIGN KEY(from_key, units) REFERENCES account_balances(account_key, units),
     FOREIGN KEY(to_key, units) REFERENCES account_balances(account_key, units)
 );

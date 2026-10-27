@@ -62,7 +62,7 @@ class CanceledDisplayTests(unittest.TestCase):
         self.assertEqual(saved["amount"], "0.125123456")
 
     def make_v5(self, path):
-        schema = Path("flowledger/schema.sql").read_text().replace("user_version = 6", "user_version = 5").replace("'Canceled'", "'Void'")
+        schema = Path("flowledger/schema.sql").read_text().replace("user_version = 7", "user_version = 5").replace("'Canceled'", "'Void'")
         with sqlite3.connect(path) as conn:
             conn.executescript(schema)
             conn.executemany("INSERT INTO accounts VALUES(?,?)", [("a","A"),("b","B")])
@@ -91,7 +91,7 @@ class CanceledDisplayTests(unittest.TestCase):
                 ("0.125123456","kg","2026-10-02 03:04:05","Notes\ncafé",["Boat"]))
             self.assertEqual(repo.get_account("A","kg")["opening_amount"], "10.123456789")
             self.assertEqual([tuple(row) for row in repo.conn.execute("SELECT * FROM audit")], audit)
-            self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0],6)
+            self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0],7)
             self.assertFalse(repo.conn.execute("PRAGMA foreign_key_check").fetchall())
             self.assertIsNone(repo.migration_backup_path)
             repo.close()
@@ -109,7 +109,7 @@ class CanceledDisplayTests(unittest.TestCase):
                 before=list(conn.iterdump())
             validate=Repository._validate_database
             def fail(conn, **kwargs):
-                if conn.execute("PRAGMA user_version").fetchone()[0]==6:
+                if conn.execute("PRAGMA user_version").fetchone()[0]==7:
                     raise ValueError("Migration test failure")
                 return validate(conn,**kwargs)
             with patch.object(Repository,"_validate_database",side_effect=fail):
@@ -134,6 +134,6 @@ class CanceledDisplayTests(unittest.TestCase):
                 repo=Repository(path)
                 self.assertEqual([tuple(row) for row in repo.conn.execute("SELECT * FROM flows")],before)
                 self.assertIsNone(repo.migration_backup_path)
-                self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0],6)
+                self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0],7)
                 repo.close()
                 self.assertEqual(list(Path(directory).iterdir()),[path])

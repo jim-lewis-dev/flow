@@ -146,8 +146,6 @@ def _canonical(row: Any, accounts: dict[str, str],
     destination = _text(row.get("to_account"), "to_account", required=True)
     source = accounts.get(_key(source), source)
     destination = accounts.get(_key(destination), destination)
-    if _key(source) == _key(destination):
-        raise ValueError("From and To must be different accounts.")
     if "amount" not in row or row["amount"] in (None, ""):
         raise ValueError("amount is required.")
     amount = parse_quantity(row["amount"])

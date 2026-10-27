@@ -226,7 +226,7 @@ class UnitMigrationTests(unittest.TestCase):
         self.assertEqual(repo.get_account("Cash")["opening_amount"], "-92233720368547758.07")
         self.assertIsNone(repo.get_account("Shop")["opening_amount"])
         self.assertEqual(json.loads(repo.history()[0]["after_json"]), {"amount_cents": 9223372036854775807})
-        self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 6)
+        self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 7)
         self.assertIsNone(repo.conn.execute("PRAGMA foreign_key_check").fetchone())
         self.assertEqual(self.snapshot(repo.migration_backup_path), original)
         backup = repo.migration_backup_path
@@ -235,21 +235,21 @@ class UnitMigrationTests(unittest.TestCase):
         self.addCleanup(reopened.close)
         self.assertIsNone(reopened.migration_backup_path)
         self.assertEqual(reopened.list_flows(), [saved])
-        self.assertEqual(list(self.root.glob("*.pre-v6-*.bak")), [Path(backup)])
+        self.assertEqual(list(self.root.glob("*.pre-v7-*.bak")), [Path(backup)])
 
     def test_failed_v4_migration_rolls_back_all_data_and_retains_original_backup(self):
         path = self.old_database()
         original = self.snapshot(path)
         validate = Repository._validate_database
         def fail_at_v5(conn, **kwargs):
-            if conn.execute("PRAGMA user_version").fetchone()[0] == 6:
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 7:
                 raise ValueError("deliberate upgrade failure")
             validate(conn, **kwargs)
         with patch.object(Repository, "_validate_database", side_effect=fail_at_v5):
             with self.assertRaisesRegex(ValueError, "deliberate"):
                 Repository(path)
         self.assertEqual(self.snapshot(path), original)
-        backups = list(self.root.glob("*.pre-v6-*.bak"))
+        backups = list(self.root.glob("*.pre-v7-*.bak"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(self.snapshot(backups[0]), original)
 

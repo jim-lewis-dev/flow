@@ -20,7 +20,6 @@ from .core import (STATUSES, ledger_balance_at, normalize_flow_date, parse_quant
                    format_quantity, quantity_text, decimal_sum, normalize_date,
                    FLOW_SORT_FIELDS, flow_sort_key)
 from .exchange import read_import, preview_import, commit_import, export_flows
-from .suggestions import SuggestionPreferences
 from .filters import CheckFilter
 from .calendar_widget import CalendarEntry
 from .graphing import graph_timeline, normalize_graph_date
@@ -47,6 +46,15 @@ FONT = "DejaVu Sans"
 PALETTE = ["#16836c", "#e7a13b", "#447cbb", "#b95d75", "#7865b8", "#59a6a1", "#aa783e", "#a970ba", "#508640", "#697897"]
 SUGGESTION_KINDS = {"from_account": "account", "to_account": "account",
                     "name": "name", "category": "category", "tags": "tag", "units": "unit"}
+REQUIRED_FLOW_FIELDS = (("date", "Date"), ("to_account", "To"),
+                        ("from_account", "From"), ("amount", "Amount"), ("units", "Units"))
+
+
+class FlowInputError(ValueError):
+    """A form error that can return focus to its input without losing the draft."""
+    def __init__(self, field, message):
+        super().__init__(message)
+        self.field = field
 
 
 class _NotesPeer(tk.Text):
@@ -78,8 +86,15 @@ class FlowApp(tk.Tk):
         self._active_edit = None
         self._active_edit_history = None
         self._draft_redo = None
+        self._flow_input_error = None
         self.demo = demo
-        self.suggestion_preferences = SuggestionPreferences(repo.path)
+        suggestion_cleanup_error = None
+        if repo.path != ":memory:":
+            legacy = Path(str(Path(repo.path).expanduser().resolve()) + ".suggestions.json")
+            try:
+                legacy.unlink(missing_ok=True)
+            except OSError as exc:
+                suggestion_cleanup_error = f"Could not remove obsolete suggestions file: {exc}"
         self.title(f"Flow {__version__}" + (" · Demo" if demo else ""))
         # Keep a modest restore size. The window manager chooses one monitor
         # for fullscreen, rather than sizing against a multi-monitor desktop.
@@ -137,8 +152,8 @@ class FlowApp(tk.Tk):
         self.refresh_all()
         self.show_view("flows")
         self._build_view_history()
-        if self.suggestion_preferences.load_error:
-            self._feedback(self.suggestion_preferences.load_error, True)
+        if suggestion_cleanup_error:
+            self._feedback(suggestion_cleanup_error, True)
 
     def _configure_styles(self):
         style = ttk.Style(self)
@@ -162,6 +177,9 @@ class FlowApp(tk.Tk):
         style.map("TButton", background=[("active", "#d5e7db")])
         style.configure("Primary.TButton", background=TEAL, foreground="white", padding=(14, 7))
         style.map("Primary.TButton", background=[("active", "#116752")])
+        style.configure("AddFlow.TButton", background=TEAL, foreground="white", padding=(14, 7))
+        style.map("AddFlow.TButton", background=[("disabled", "#e6eee8"), ("active", "#116752")],
+                  foreground=[("disabled", MUTED)])
         style.configure("Small.TButton", padding=(7, 5))
         style.configure("TCheckbutton", background=BG, font=(FONT, 9))
         style.configure("Card.TCheckbutton", background=CARD)
@@ -307,6 +325,7 @@ class FlowApp(tk.Tk):
         self._loading = True
         try:
             if kind == "flow":
+                self._flow_input_error = None
                 self.ledger_editor.close(commit=False)
                 self._restore_draft_row()
                 self.editing_id = identity
@@ -318,7 +337,7 @@ class FlowApp(tk.Tk):
                 self.notes_text.edit_modified(False)
                 self.form_title.configure(text=title)
                 self.save_button.configure(state="disabled" if identity else "normal")
-                self.form_feedback.set("Edits save automatically" if identity else "From, To, Amount, and Units required")
+                self._update_flow_hint()
                 self._set_flow_selection(identity)
             else:
                 self.account_cell_editor.close(commit=False)
@@ -331,7 +350,7 @@ class FlowApp(tk.Tk):
                 self.account_widgets["units"].entry.configure(state="disabled" if identity else "normal")
                 self.account_widgets["units"].arrow.configure(state="disabled" if identity else "normal")
                 self.account_save_button.configure(state="disabled" if identity else "normal")
-                self.account_feedback.set("Blank = unknown")
+                self.account_feedback.set("Blank starting balance = unknown")
                 self._set_account_selection(identity)
             setattr(self, "_clean_" + kind, clean)
             self._active_edit = None
@@ -582,20 +601,21 @@ class FlowApp(tk.Tk):
         try:
             value = quantity_text(evaluate_quantity(raw))
         except ValueError as exc:
+            message = ("Amount: " if kind == "flow" else "Starting Balance: ") + str(exc)
             if kind == "flow":
-                self._feedback(str(exc), True)
+                self._flow_error(FlowInputError("amount", message))
             else:
-                self.account_feedback.set(str(exc))
-                self.status_message.set(str(exc))
+                self.account_feedback.set(message)
+                self.status_message.set(message)
             return False
         try:
             parse_quantity(raw)
         except ValueError:
             variable.set(value)  # Replace calculations, preserving plain input formatting.
         if kind == "flow":
-            self.form_feedback.set("From, To, Amount, and Units required")
+            self._update_flow_hint()
         else:
-            self.account_feedback.set("Blank = unknown")
+            self.account_feedback.set("Blank starting balance = unknown")
         self.status_message.set("Ready")
         return True
 
@@ -620,9 +640,9 @@ class FlowApp(tk.Tk):
             self._reload_current(kind)
         self._draft_redo = None
         if kind == "flow":
-            self.form_feedback.set("Edits save automatically" if self.editing_id else "From, To, Amount, and Units required")
+            self._update_flow_hint()
         else:
-            self.account_feedback.set("Blank = unknown")
+            self.account_feedback.set("Blank starting balance = unknown")
 
     def _draft_is_dirty(self):
         token = self._active_edit
@@ -709,7 +729,6 @@ class FlowApp(tk.Tk):
         if not (self.history.can_redo if redo else self.history.can_undo):
             return "break"
         records = self.history.redo_affects_records if redo else self.history.undo_affects_records
-        action_label = self.history.redo_label if redo else self.history.undo_label
         self.view_history.begin()
         # Restoring a view must not reload or save a record's unfinished fields.
         self._committing = True
@@ -718,8 +737,6 @@ class FlowApp(tk.Tk):
                 self.ledger_editor.close(commit=False)
                 self.account_cell_editor.close(commit=False)
                 self._close_notes_editor(commit=False)
-                self._close_popups()
-            elif action_label in ("Remove suggestion", "Restore suggestion"):
                 self._close_popups()
             label = self.history.redo() if redo else self.history.undo()
             if label is not None:
@@ -934,7 +951,8 @@ class FlowApp(tk.Tk):
             when = normalize_flow_date(variables["date"].get().strip())
         except ValueError:
             return  # Leave invalid input for the ordinary visible validation.
-        variables["date"].set(when)
+        if variables["date"].get() != when:
+            variables["date"].set(when)
 
     def _accept_flow_date(self):
         self._begin_field("flow", "date")
@@ -1031,11 +1049,11 @@ class FlowApp(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.form_title = ttk.Label(header, text="New Flow", style="Section.TLabel")
         self.form_title.pack(side="left")
-        self.form_feedback = tk.StringVar(self, "From, To, Amount, and Units required")
+        self.form_feedback = tk.StringVar(self)
         ttk.Label(header, textvariable=self.form_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
-        self.save_button = ttk.Button(header, text="Add Flow", style="Primary.TButton", command=self.save_flow)
+        self.save_button = ttk.Button(header, text="Add Flow", style="AddFlow.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
-        self.new_flow_button = ttk.Button(header, text="New Flow", style="Small.TButton", command=self.new_flow)
+        self.new_flow_button = ttk.Button(header, text="Clear Flow", style="Small.TButton", command=self.new_flow)
         self.new_flow_button.pack(side="right")
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
@@ -1049,7 +1067,7 @@ class FlowApp(tk.Tk):
                 self.notes_text = widget
                 widget.bind("<Tab>", lambda event: (event.widget.tk_focusNext().focus_set(), "break")[1])
                 widget.bind("<Shift-Tab>", lambda event: (event.widget.tk_focusPrev().focus_set(), "break")[1])
-                self.notes_button = tk.Button(heading, text="Expand", command=self.edit_notes, font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0)
+                self.notes_button = tk.Button(heading, text="Expand", command=self.edit_notes, font=(FONT, 8), bg=CARD, fg=TEAL, relief="flat", borderwidth=0, padx=3, pady=0, takefocus=False)
                 self.notes_button.pack(side="right")
             else:
                 if key == "date":
@@ -1058,7 +1076,7 @@ class FlowApp(tk.Tk):
                 else:
                     self.form_widgets[key] = widget
             if key in SUGGESTION_KINDS:
-                widget.on_remove = lambda value, field=key: self._remove_suggestion(field, value)
+                widget.on_open = self.refresh_suggestions
                 widget.on_accept = lambda field=key: self._accept_suggestion(field)
         self.form_widgets["tags"].multi_value = True
         self.flow_cells = cells
@@ -1102,6 +1120,7 @@ class FlowApp(tk.Tk):
             choice = CheckFilter(primary, label=label, values=values,
                                  all_label=f"{label}: All",
                                  case_sensitive=key in ("Status", "Units"),
+                                 on_open=lambda k=key: self._refresh_filter_values(k),
                                  on_change=lambda k=key: self._ledger_filter_changed(k))
             # Search has a compact fixed request. The six filter buttons share
             # the remaining width, including in the smallest supported window.
@@ -1208,7 +1227,7 @@ class FlowApp(tk.Tk):
             variables.append(variable)
             ttk.Label(body, text=label).pack(anchor="w")
             ttk.Entry(body, textvariable=variable, width=26).pack(fill="x", pady=(4, 12))
-        ttk.Label(body, text="Blank = no limit · YYYY-MM-DD", style="Muted.TLabel").pack(anchor="w")
+        ttk.Label(body, text="Blank = no limit · YYYY-MM-DD · Time optional", style="Muted.TLabel").pack(anchor="w")
         error = tk.StringVar(dialog)
         ttk.Label(body, textvariable=error, foreground="#a44545").pack(anchor="w", pady=6)
         def accept():
@@ -1235,16 +1254,58 @@ class FlowApp(tk.Tk):
 
     def _feedback(self, text, error=False):
         self.status_message.set(text)
-        self.form_feedback.set(text if error else "From, To, Amount, and Units required")
+        self._update_flow_hint()
+        if error:
+            self.form_feedback.set(text)
+
+    def _missing_flow_fields(self):
+        return [label for key, label in REQUIRED_FLOW_FIELDS if not self.form_vars[key].get().strip()]
+
+    def _required_flow_hint(self):
+        missing = self._missing_flow_fields()
+        if not missing:
+            return "Ready to add"
+        if len(missing) == 1:
+            names = missing[0]
+        elif len(missing) == 2:
+            names = " and ".join(missing)
+        else:
+            names = ", ".join(missing[:-1]) + ", and " + missing[-1]
+        return names + " required"
+
+    def _update_flow_hint(self):
+        self.save_button.configure(state="disabled" if self.editing_id or self._missing_flow_fields() else "normal")
+        self.form_feedback.set("Edits save automatically" if self.editing_id else self._required_flow_hint())
+        error = self._flow_input_error
+        if error:
+            field, value, message = error
+            current = self.notes_text.get("1.0", "end-1c") if field == "notes" else self.form_vars[field].get()
+            if current == value:
+                self.form_feedback.set(message)
+            else:
+                self._flow_input_error = None
+
+    def _flow_error(self, exc, *, focus=False):
+        if isinstance(exc, FlowInputError):
+            value = self.notes_text.get("1.0", "end-1c") if exc.field == "notes" else self.form_vars[exc.field].get()
+            self._flow_input_error = (exc.field, value, str(exc)) if value.strip() else None
+        self._feedback(str(exc), True)
+        if focus and isinstance(exc, FlowInputError):
+            widget = self.notes_text if exc.field == "notes" else self.form_widgets[exc.field]
+            if isinstance(widget, FilterCombo):
+                widget.focus_set(open_popup=False)
+            else:
+                widget.focus_set()
 
     def new_flow(self, focus=True, confirm=True, clear_selection=True):
         before = self._draft_state("flow") if hasattr(self, "view_history") and not self.editing_id else None
-        if confirm and not self._finish_existing("flow"):
-            return False
-        if focus and not self.show_view("flows"):
+        if confirm:
+            self._finish_existing("flow")
+        if focus and self.current_view != "flows" and not self.show_view("flows"):
             return False
         self._loading = True
         try:
+            self._flow_input_error = None
             self.ledger_editor.close(commit=False)
             self._restore_draft_row()
             self._close_notes_editor(commit=False)
@@ -1259,7 +1320,7 @@ class FlowApp(tk.Tk):
             self.form_title.configure(text="New Flow")
             self.save_button.configure(text="Add Flow", state="normal")
             self.form_widgets["status"].configure(values=STATUSES)
-            self.form_feedback.set("From, To, Amount, and Units required")
+            self._update_flow_hint()
             self._clean_flow = self._flow_snapshot()
             if clear_selection:
                 self._set_flow_selection(None)
@@ -1275,12 +1336,30 @@ class FlowApp(tk.Tk):
 
     def _flow_data(self):
         data = {key: var.get().strip() for key, var in self.form_vars.items()}
-        data["amount"] = quantity_text(evaluate_quantity(data["amount"]))
-        try:
-            data["tags"] = [tag.strip() for tag in next(csv.reader([data["tags"]], skipinitialspace=True, strict=True)) if tag.strip()]
-        except csv.Error as exc:
-            raise ValueError("Tags use commas; quote a tag that itself contains a comma.") from exc
         data["notes"] = self.notes_text.get("1.0", "end-1c")
+        labels = (("date", "Date/Time"), ("name", "Name"), ("from_account", "From"),
+                  ("to_account", "To"), ("amount", "Amount"), ("units", "Units"),
+                  ("status", "Status"), ("category", "Category"), ("tags", "Tags"), ("notes", "Notes"))
+        required = {key for key, label in REQUIRED_FLOW_FIELDS}
+        for key, label in labels:
+            if key in required and not data[key]:
+                raise FlowInputError(key, self._required_flow_hint())
+            if "\x00" in data[key]:
+                raise FlowInputError(key, f"{label}: cannot contain a null character.")
+            try:
+                if key == "date":
+                    data[key] = normalize_flow_date(data[key])
+                elif key == "amount":
+                    data[key] = quantity_text(evaluate_quantity(data[key]))
+                elif key == "status" and data[key] not in STATUSES:
+                    raise ValueError("choose Complete, Pending, Planned, or Canceled.")
+            except ValueError as exc:
+                raise FlowInputError(key, f"{label}: {exc}") from exc
+            if key == "tags":
+                try:
+                    data[key] = [tag.strip() for tag in next(csv.reader([data[key]], skipinitialspace=True, strict=True)) if tag.strip()]
+                except csv.Error as exc:
+                    raise FlowInputError(key, "Tags: use commas; quote a tag containing a comma.") from exc
         if self.editing_id:
             data["flow_id"] = self.editing_id
         return data
@@ -1311,7 +1390,10 @@ class FlowApp(tk.Tk):
                 message = "Updated: " + result["name"]
             else:
                 raw = self.account_vars["opening"].get().strip()
-                amount = quantity_text(evaluate_quantity(raw)) if raw else None
+                try:
+                    amount = quantity_text(evaluate_quantity(raw)) if raw else None
+                except ValueError as exc:
+                    raise ValueError(f"Starting Balance: {exc}") from exc
                 when = normalize_date(self._account_when())
                 account = self._account_record(self.account_editing)
                 result = self.history.perform("Edit account", lambda: self.repo.save_account(account["name"], opening_amount=amount, opening_at=when, units=account["units"]))
@@ -1325,7 +1407,7 @@ class FlowApp(tk.Tk):
                     finally:
                         self._loading = False
                 self._clean_account = self._account_snapshot()
-                self.account_feedback.set("Edits save automatically · Blank = unknown")
+                self.account_feedback.set("Edits save automatically · Blank starting balance = unknown")
                 message = "Updated: " + result["name"]
             # A commit establishes a fresh undo boundary for continued typing.
             token = self._active_edit
@@ -1345,7 +1427,7 @@ class FlowApp(tk.Tk):
             return True
         except (ValueError, sqlite3.Error) as exc:
             if kind == "flow":
-                self._feedback(str(exc), True)
+                self._flow_error(exc)
             else:
                 self.account_feedback.set(str(exc))
                 self.status_message.set(str(exc))
@@ -1370,7 +1452,7 @@ class FlowApp(tk.Tk):
             self._update_history_buttons()
             return True
         except (ValueError, sqlite3.Error) as exc:
-            self._feedback(str(exc), True)
+            self._flow_error(exc, focus=True)
             return False
 
     def _selected(self):
@@ -1399,7 +1481,7 @@ class FlowApp(tk.Tk):
             self.notes_text.insert("1.0", flow.get("notes", ""))
             self.form_title.configure(text="Repeat Flow" if repeat else "Edit Flow")
             self.save_button.configure(state="normal" if repeat else "disabled")
-            self.form_feedback.set("New copy · Click Add Flow" if repeat else "Edits save automatically")
+            self._update_flow_hint()
             self._clean_flow = self._flow_snapshot()
             if not repeat:
                 self._set_flow_selection(flow["flow_id"], selection=selection)
@@ -1606,6 +1688,7 @@ class FlowApp(tk.Tk):
         """Render the selected form draft without changing stored flow data."""
         if self._loading:
             return
+        self._update_flow_hint()
         self._record_draft("flow", args)
         self._update_history_buttons()
         row = self.editing_id
@@ -1772,46 +1855,12 @@ class FlowApp(tk.Tk):
         if self.current_view == "experimental" and hasattr(self, "experimental"):
             self.experimental.refresh()
 
-    def _remove_suggestion(self, field, value):
-        """Forget an entry suggestion without touching the draft or records."""
-        try:
-            kind = SUGGESTION_KINDS[field]
-            self.history.perform_external("Remove suggestion",
-                lambda: self.suggestion_preferences.remove(kind, value),
-                lambda: self.suggestion_preferences.restore(kind, value),
-                lambda: self.suggestion_preferences.remove(kind, value))
-            self._update_history_buttons()
-        except (OSError, ValueError) as exc:
-            self._feedback(f"Could not remove suggestion: {exc}", True)
-            return False
-        self.refresh_suggestions()
-        self.status_message.set(f"Removed suggestion: {value}")
-        return True
-
     def _accept_suggestion(self, field, widget=None, record_kind="flow"):
-        """Explicit Enter can restore a forgotten value; refresh/save cannot."""
-        widget = widget or self.form_widgets[field]
-        value = widget._query()
-        if not value:
-            self._finish_existing(record_kind)
-            return
-        try:
-            kind = SUGGESTION_KINDS[field]
-            restored = self.history.perform_external("Restore suggestion",
-                lambda: self.suggestion_preferences.restore(kind, value),
-                lambda: self.suggestion_preferences.remove(kind, value),
-                lambda: self.suggestion_preferences.restore(kind, value))
-            self._update_history_buttons()
-        except (OSError, ValueError) as exc:
-            self._feedback(f"Could not restore suggestion: {exc}", True)
-            return
-        if restored:
-            self.refresh_suggestions()
-            self.status_message.set(f"Restored suggestion: {value}")
+        """Accept the current input; reusable choices come only from saved flows."""
         self._finish_existing(record_kind)
 
     def refresh_suggestions(self):
-        """Apply entry preferences while retaining all data in other views."""
+        """Refresh entry choices from current saved flows."""
         accounts = self.repo.list_accounts(referenced_only=True)
         names = list(dict.fromkeys(account["name"] for account in accounts))
         # Most-used values remain first; both directions still accept every name.
@@ -1823,12 +1872,23 @@ class FlowApp(tk.Tk):
                     counts[flow[key]] += 1
         names.sort(key=lambda name: (-counts[name], name.casefold()))
         for key in ("from_account", "to_account"):
-            self.form_widgets[key].set_values(self.suggestion_preferences.visible("account", names))
+            self.form_widgets[key].set_values(names)
         categories = list(dict.fromkeys(["Uncategorized", *self.repo.list_categories(referenced_only=True)]))
         for key, values in [("category", categories), ("tags", self.repo.list_tags(referenced_only=True)), ("name", self.repo.list_names()), ("units", self.repo.list_units(referenced_only=True))]:
-            self.form_widgets[key].set_values(self.suggestion_preferences.visible(SUGGESTION_KINDS[key], values))
-        self.account_widgets["units"].set_values(self.suggestion_preferences.visible("unit", self.repo.list_units(referenced_only=True)))
+            self.form_widgets[key].set_values(values)
+        self.account_widgets["units"].set_values(self.repo.list_units(referenced_only=True))
         self.ledger_editor.refresh_suggestions()
+
+    def _refresh_filter_values(self, key):
+        flows = self.repo.list_flows()
+        fields = {"From": "from_account", "To": "to_account", "Category": "category",
+                  "Units": "units", "Status": "status"}
+        values = {tag for flow in flows for tag in flow["tags"]} if key == "Tag" else {
+            flow[fields[key]] for flow in flows}
+        ordered = [status for status in STATUSES if status in values] if key == "Status" else sorted(
+            values, key=None if key == "Units" else str.casefold)
+        if self.ledger_filters[key].set_values(ordered):
+            self._ledger_filter_changed(key)
 
     def refresh_all(self, *, preserve_ledger=False):
         self.refresh_suggestions()
@@ -1891,7 +1951,7 @@ class FlowApp(tk.Tk):
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.account_title = ttk.Label(header, text="New Account", style="Section.TLabel")
         self.account_title.pack(side="left")
-        self.account_feedback = tk.StringVar(self, "Blank = unknown")
+        self.account_feedback = tk.StringVar(self, "Blank starting balance = unknown")
         ttk.Label(header, textvariable=self.account_feedback, style="CardMuted.TLabel", width=1).pack(side="left", fill="x", expand=True, padx=18)
         self.account_save_button = ttk.Button(header, text="Add Account", style="Primary.TButton", command=self.save_account)
         self.account_save_button.pack(side="right")
@@ -1912,7 +1972,7 @@ class FlowApp(tk.Tk):
             if key == "name":
                 self.account_name_entry = widget
             elif key == "units":
-                widget.on_remove = lambda value: self._remove_suggestion("units", value)
+                widget.on_open = self.refresh_suggestions
                 widget.on_accept = lambda w=widget: self._accept_suggestion("units", w, "account")
             elif key == "opening":
                 widget.bind("<FocusIn>", self._starting_balance_focus, add="+")
@@ -2172,7 +2232,7 @@ class FlowApp(tk.Tk):
             self.account_vars["date"].set(account["opening_at"])
             self.account_title.configure(text="Edit Account")
             self.account_save_button.configure(state="disabled")
-            self.account_feedback.set("Edits save automatically · Blank = unknown")
+            self.account_feedback.set("Edits save automatically · Blank starting balance = unknown")
             self._clean_account = self._account_snapshot()
             self._active_edit = None
             self._draft_redo = None
@@ -2200,7 +2260,7 @@ class FlowApp(tk.Tk):
                 self.account_vars[key].set(value)
             self.account_title.configure(text="New Account")
             self.account_save_button.configure(state="normal")
-            self.account_feedback.set("Blank = unknown")
+            self.account_feedback.set("Blank starting balance = unknown")
             self._clean_account = self._account_snapshot()
             self._set_account_selection(None)
         finally:
@@ -2219,7 +2279,10 @@ class FlowApp(tk.Tk):
         self._close_popups()
         try:
             raw = self.account_vars["opening"].get().strip()
-            amount = quantity_text(evaluate_quantity(raw)) if raw else None
+            try:
+                amount = quantity_text(evaluate_quantity(raw)) if raw else None
+            except ValueError as exc:
+                raise ValueError(f"Starting Balance: {exc}") from exc
             at = normalize_date(self._account_when())
             name = self.account_vars["name"].get().strip()
             units = self.account_vars["units"].get().strip()

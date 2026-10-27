@@ -152,7 +152,7 @@ class LedgerEditor:
         elif field in self.app.suggestion_fields:
             source = self.app.form_widgets[field]
             widget = FilterCombo(self.tree, variable=self.app.form_vars[field], values=source.values,
-                on_remove=lambda value: self.app._remove_suggestion(field, value))
+                on_open=self.app.refresh_suggestions)
             widget.multi_value = source.multi_value
             widget.entry.configure(width=1, style="Ledger.TEntry")
             widget.on_accept = lambda: self.app._accept_suggestion(field, widget)
