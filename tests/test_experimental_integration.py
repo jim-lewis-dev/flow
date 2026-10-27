@@ -434,6 +434,84 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.assertEqual(view.get_state(), moved)
         self.assertEqual(saved, self.saved_state())
 
+    def test_drag_outside_original_layout_follows_pointer_at_each_zoom_and_undoes(self):
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        for index, (zoom, corner) in enumerate(((.5, 1), (.5, -1), (2, 1), (2, -1))):
+            with self.subTest(zoom=zoom, corner=corner):
+                start = .5 if zoom < 1 else (1.1 if corner > 0 else -.1)
+                view._positions["Checking"] = (start, start)
+                view._zoom_at(zoom / view._zoom, canvas.winfo_width() // 2,
+                              canvas.winfo_height() // 2)
+                x, y = view._xy("Checking")
+                view._draw_scene(viewport=(x - canvas.winfo_width() / (2 * zoom),
+                                           y - canvas.winfo_height() / (2 * zoom)))
+                self.pump()
+                node = next(item for item, name in view._node_items.items()
+                            if name == "Checking" and canvas.type(item) == "oval")
+                x0, y0, x1, y1 = canvas.coords(node)
+                start_x = round((x0 + x1) / 2 - canvas.canvasx(0))
+                start_y = round((y0 + y1) / 2 - canvas.canvasy(0))
+                target_x = canvas.winfo_width() - 40 if corner > 0 else 40
+                target_y = canvas.winfo_height() - 35 if corner > 0 else 35
+                expected = (canvas.canvasx(target_x) / zoom, canvas.canvasy(target_y) / zoom)
+                before = view.get_state()
+                when = 1000 * (index + 1)
+                canvas.event_generate("<ButtonPress-1>", x=start_x, y=start_y, time=when)
+                canvas.event_generate("<B1-Motion>", x=target_x, y=target_y, time=when + 20)
+                canvas.event_generate("<ButtonRelease-1>", x=target_x, y=target_y, time=when + 40)
+                self.pump()
+                actual = view._xy("Checking")
+                for coordinate in view._positions["Checking"]:
+                    if corner > 0:
+                        self.assertGreater(coordinate, 1)
+                    else:
+                        self.assertLess(coordinate, 0)
+                self.assertAlmostEqual(actual[0], expected[0], delta=2 / zoom)
+                self.assertAlmostEqual(actual[1], expected[1], delta=2 / zoom)
+                self.assertAlmostEqual(actual[0] * zoom - canvas.canvasx(0), target_x, delta=2)
+                self.assertAlmostEqual(actual[1] * zoom - canvas.canvasy(0), target_y, delta=2)
+                moved = view.get_state()
+                self.app.undo()
+                self.pump()
+                self.assertEqual(view.get_state(), before)
+                self.app.redo()
+                self.pump()
+                self.assertEqual(view.get_state(), moved)
+        self.assertEqual(saved, self.saved_state())
+
+    def test_fit_and_scroll_include_accounts_beyond_every_original_edge(self):
+        from types import SimpleNamespace
+        view = self.app.experimental
+        canvas = view.canvas
+        saved = self.saved_state()
+        view._positions["Checking"] = (-.3, -.4)
+        view._positions["Shop"] = (1.4, 1.5)
+        view._draw_scene()
+        self.pump()
+        positions = dict(view._positions)
+        left, top, right, bottom = map(float, canvas.cget("scrollregion").split())
+        for item in view._node_items:
+            x0, y0, x1, y1 = canvas.bbox(item)
+            self.assertLessEqual(left, x0)
+            self.assertLessEqual(top, y0)
+            self.assertGreaterEqual(right, x1)
+            self.assertGreaterEqual(bottom, y1)
+        view._fit_from_pointer(SimpleNamespace(x=2, y=canvas.winfo_height() - 3))
+        self.pump()
+        for item in view._node_items:
+            x0, y0, x1, y1 = canvas.bbox(item)
+            self.assertGreaterEqual(x0 - canvas.canvasx(0), 0)
+            self.assertGreaterEqual(y0 - canvas.canvasy(0), 0)
+            self.assertLessEqual(x1 - canvas.canvasx(0), canvas.winfo_width())
+            self.assertLessEqual(y1 - canvas.canvasy(0), canvas.winfo_height())
+        self.app.show_view("flows")
+        self.app.show_view("experimental")
+        self.pump()
+        self.assertEqual(view._positions, positions)
+        self.assertEqual(saved, self.saved_state())
+
     def test_control_and_drag_undo_redo_change_only_session_view(self):
         view = self.app.experimental
         before_database = self.saved_state()

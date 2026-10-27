@@ -505,12 +505,13 @@ class ExperimentalView(ttk.Frame):
         self._pan_before = None
         self._ignore_pointer_up = True
         self.canvas.configure(cursor="")
+        left, top, right, bottom = self._scene_bounds()
         self._zoom = max(MIN_ZOOM, min(MAX_ZOOM,
-            self.canvas.winfo_width() / self._scene_width,
-            self.canvas.winfo_height() / self._scene_height))
+            self.canvas.winfo_width() / (right - left),
+            self.canvas.winfo_height() / (bottom - top)))
         self._draw_scene(viewport=(
-            (self._scene_width - self.canvas.winfo_width() / self._zoom) / 2,
-            (self._scene_height - self.canvas.winfo_height() / self._zoom) / 2))
+            (left + right - self.canvas.winfo_width() / self._zoom) / 2,
+            (top + bottom - self.canvas.winfo_height() / self._zoom) / 2))
         self._notify(before, "Fit flow map")
         return "break"
 
@@ -535,6 +536,29 @@ class ExperimentalView(ttk.Frame):
         x, y = self._positions[name]
         return x * self._scene_width, y * self._scene_height
 
+    def _scene_bounds(self) -> tuple[float, float, float, float]:
+        """Include the original layout and every drawn account, label and edge."""
+        bounds = self.canvas.bbox("all")
+        if bounds is None:
+            return 0, 0, self._scene_width, self._scene_height
+        left, top, right, bottom = (value / self._zoom for value in bounds)
+        return (min(0, left - 12), min(0, top - 12),
+                max(self._scene_width, right + 12), max(self._scene_height, bottom + 12))
+
+    def _set_viewport(self, viewport) -> None:
+        canvas = self.canvas
+        bounds = tuple(value * self._zoom for value in self._scene_bounds())
+        left, top = viewport[0] * self._zoom, viewport[1] * self._zoom
+        region = (min(bounds[0], left), min(bounds[1], top),
+                  max(bounds[2], left + canvas.winfo_width()),
+                  max(bounds[3], top + canvas.winfo_height()))
+        canvas.configure(scrollregion=region)
+        canvas.xview_moveto((left - region[0]) / (region[2] - region[0]))
+        canvas.yview_moveto((top - region[1]) / (region[3] - region[1]))
+        for bar, needed in ((self.xbar, bounds[2] - bounds[0] > canvas.winfo_width()),
+                            (self.ybar, bounds[3] - bounds[1] > canvas.winfo_height())):
+            (bar.grid if needed else bar.grid_remove)()
+
     def _draw_scene(self, *, viewport=None) -> None:
         canvas = self.canvas
         if viewport is None:
@@ -547,24 +571,13 @@ class ExperimentalView(ttk.Frame):
                         for name in (flow["from_account"], flow["to_account"])},
                        key=lambda s: (s.casefold(), s))
         self._scene_width, self._scene_height = self._scene_dimensions(len(names))
-        width, height = self._scene_width * self._zoom, self._scene_height * self._zoom
-        left, top = viewport[0] * self._zoom, viewport[1] * self._zoom
-        region = (min(0, left), min(0, top),
-                  max(width, left + canvas.winfo_width()),
-                  max(height, top + canvas.winfo_height()))
-        canvas.configure(scrollregion=region)
-        canvas.xview_moveto((left - region[0]) / (region[2] - region[0]))
-        canvas.yview_moveto((top - region[1]) / (region[3] - region[1]))
-        # Scrollbars are useful for crowded maps, not for a two-account line.
-        for bar, needed in ((self.xbar, width > canvas.winfo_width()),
-                            (self.ybar, height > canvas.winfo_height())):
-            (bar.grid if needed else bar.grid_remove)()
         if not names:
             canvas.create_text(self._scene_width / 2, self._scene_height / 2,
                                text=(self._invalid_message or
                                      "No flows match this period, unit, and status basis."),
                                fill=MUTED, font=self._canvas_font(11))
             canvas.scale("all", 0, 0, self._zoom, self._zoom)
+            self._set_viewport(viewport)
             self._fill_details()
             return
         self._auto_layout(names)
@@ -611,6 +624,7 @@ class ExperimentalView(ttk.Frame):
             self._node_items[label] = name
         canvas.scale("all", 0, 0, self._zoom, self._zoom)
         self._render_pulses()
+        self._set_viewport(viewport)
         self._fill_details()
 
     def _render_pulses(self) -> None:
@@ -825,9 +839,7 @@ class ExperimentalView(ttk.Frame):
         self.hide_hover()
         x = self.canvas.canvasx(event.x) / self._zoom
         y = self.canvas.canvasy(event.y) / self._zoom
-        self._positions[self._drag_name] = (
-            min(0.94, max(0.06, x / self._scene_width)),
-            min(0.91, max(0.06, y / self._scene_height)))
+        self._positions[self._drag_name] = (x / self._scene_width, y / self._scene_height)
         self._draw_scene()
 
     def _pointer_up(self, event) -> None:
