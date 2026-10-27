@@ -66,6 +66,34 @@ class DemoIntegrationTests(unittest.TestCase):
         self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
         self.assertEqual(len(self.repo.list_flows()), 20)
 
+    def test_camp_example_keeps_resources_independent_and_refuses_existing_file(self):
+        from examples.camp import create_camp
+
+        path = Path(self.directory.name) / "camp.sqlite3"
+        create_camp(path)
+        camp = Repository(path)
+        try:
+            flows = camp.list_flows()
+            self.assertEqual(len(flows), 60)
+            for statuses, energy, water in (
+                    (("Complete",), "560", "22"),
+                    (("Complete", "Pending"), "400", "14"),
+                    (("Complete", "Pending", "Planned"), "20", "6")):
+                for name, units, expected in (("Battery", "Wh", energy), ("Fresh tank", "L", water)):
+                    self.assertEqual(ledger_balance_at(camp.get_account(name, units), flows,
+                                                       "2026-10-03 23:59:59", statuses), Decimal(expected))
+            self.assertEqual(ledger_balance_at(camp.get_account("Cooking", "Wh"), flows,
+                                               "2026-10-03 23:59:59", statuses), Decimal("0"))
+            self.assertEqual(ledger_balance_at(camp.get_account("Cooking", "L"), flows,
+                                               "2026-10-03 23:59:59", statuses), Decimal("4.5"))
+            self.assertEqual(len(camp.load_map_positions()), 11)
+        finally:
+            camp.close()
+        original = path.read_bytes()
+        with self.assertRaises(FileExistsError):
+            create_camp(path)
+        self.assertEqual(path.read_bytes(), original)
+
 
 if __name__ == "__main__":
     unittest.main()

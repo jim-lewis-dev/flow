@@ -1,91 +1,113 @@
 # Flow
 
-Flow records **quantified transfers between accounts**. A flow may move money, material, energy, inventory, or any other resource you can express as a number and a unit. The desktop app keeps each account's balance separately for each unit and lets you inspect how those balances change over time.
+Flow records and visualizes **transfers between accounts, in any unit**. Track money, materials, energy, inventory, or water with the same small set of fields.
 
-For example, moving `0.125 kg` from Warehouse to Workshop subtracts `0.125 kg` from one balance and adds it to the other. A `USD` flow can involve the same accounts without changing either kilogram balance. Quantities use exact decimal arithmetic; units are labels, not exchange rates.
+Record a transfer, inspect the ledger, graph the balances, or play it through a map of accounts. Each unit stays separate: a payment in USD never changes a balance in kg.
 
-![Flow ledger with multiple units](docs/ledger.png)
+![Flow ledger: editable records, searchable fields, and multi-select filters](docs/ledger.png)
 
-## Try it
+## Run it
 
-On Ubuntu, install Python 3.10 or newer and the desktop dependencies:
+From the project directory on Ubuntu, with Python 3.10 or newer:
 
 ```bash
 sudo apt install python3-tk python3-matplotlib
 ./flow --demo
 ```
 
-To make `flow` available from other directories, run `./install.sh` once. It checks dependencies and links `~/.local/bin/flow` to this project; it installs no packages and changes no shell settings. Keep the project folder in place. `Flow` and `launch.sh` remain compatible with older launch commands.
+The demo uses a separate file. Run `./flow` for your records. **Esc** leaves fullscreen; terminal Ctrl+C exits.
 
-The demo uses a separate database with illustrative `USD` and `kg` transfers. For your own records, run `./flow`. If you use another Python installation, install `requirements.txt` into that environment and ensure its Tkinter module works. Terminal Ctrl+C exits quietly; Ctrl+C in the ledger still copies rows.
+For a `flow` command available outside this directory:
 
-Flow saves personal records under `~/.local/share/flowledger/flow.sqlite3` by default; `--demo` uses `demo.sqlite3`. Set `XDG_DATA_HOME` to move this directory or pass `--db /path/to/file.sqlite3` to choose a database. Use `flow money` to open `money.sqlite3` in your current directory, or otherwise in that default data directory. If neither exists, Flow creates it in the default directory. The `.sqlite3` extension is added when omitted; an explicit path is used directly. Running without a name still opens your existing default file. On another computer, install the dependencies and copy this project and your closed database file. The app is local; it does not sync between computers. **Esc** leaves fullscreen mode.
-
-## The model
-
-A flow has a date/time, name, **from**, **to**, amount, units, status, category, tags, and notes. The source and destination are account names; a saved flow also has an ID for editing and import. Date-only means midnight in local time. Times can be specified to the second.
-
-```json
-{
-  "date": "2026-10-03 09:15:06",
-  "name": "Materials",
-  "from_account": "Warehouse",
-  "to_account": "Workshop",
-  "amount": "0.125",
-  "units": "kg",
-  "status": "Complete",
-  "category": "Materials",
-  "tags": ["Project"],
-  "notes": "Sample for the workshop"
-}
+```bash
+./install.sh
+flow
 ```
 
-From and To may be the same account: the record remains, while its outgoing and incoming quantities cancel in that account's balance.
+The installer checks dependencies and links `~/.local/bin/flow` to this project. It installs no packages or shell settings; keep the project folder in place. It prints PATH instructions if needed.
 
-Flow amounts can be zero or negative. Zero keeps a dated note without changing balances; a negative amount reverses the transfer's effect while preserving the entered From and To.
+## One file for each dataset
 
-An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. Click a column heading to sort balances, and click again to reverse the order. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
+```bash
+flow money
+flow energy
+flow /path/to/travel.sqlite3
+```
 
-**As of** shows the date/time used for both displayed balance columns, initially the current timestamp. Enter a future date to inspect future flows, including pending transfers. Date-only means midnight. Clearing the field and pressing Enter selects the current timestamp.
+`flow money` opens `money.sqlite3` in the current directory, then checks `~/.local/share/flowledger`. If neither exists, it creates the file there. Omitted extensions become `.sqlite3`; explicit paths are used directly.
 
-| Balance basis | Included flows |
+Running without a name keeps opening `~/.local/share/flowledger/flow.sqlite3`. `XDG_DATA_HOME` overrides the default data location, and `--db PATH` accepts an exact filename.
+
+Completed edits save automatically. Close Flow and copy the database to move records, starting balances, history, and map layout together. CSV/JSON exports contain **flows only**; database backups preserve everything. There is no automatic sync.
+
+## Work with the ledger
+
+- **Add:** fill the top form; the hint lists missing fields. Date defaults to today, time is optional, and amounts accept arithmetic such as `(12 + 8) / 2`.
+- **Edit:** select a row or double-click a cell. Valid edits save when you finish a field; rows stay put as you Tab across them.
+- **Clear:** Clear Flow resets the form and selection. Unadded drafts survive tab switches.
+- **Select:** Ctrl-click toggles rows; Shift-click or Shift-arrow selects a range. Hover a selection for totals by account, category, and unit.
+- **Copy or delete:** Ctrl+C / Ctrl+V duplicates rows; Delete removes them. Ctrl+Z / Ctrl+Y undo and redo within the current session.
+- **Find:** search or combine From, To, Units, Status, Categories, and Tags filters. Choices reflect saved flows; Reset clears the filters.
+
+Zero and negative amounts are valid. Matching From and To accounts have zero net balance change. Names, categories, tags, and notes describe each transfer. [See the fields, defaults, and calculations](docs/model.md).
+
+## Balances over time
+
+Set a starting balance for each account/unit pair. Enter `0` for known zero; unknown balances stay unknown. **As of** in Accounts includes eligible flows through that instant.
+
+Graphs compare accounts or combine them within a unit. They refresh automatically. Hover for exact values, scroll to zoom, and use the toolbar to pan or return home.
+
+| Basis | Records included |
 | --- | --- |
 | Confirmed | Complete |
-| Including Pending | Complete, Pending |
-| Including Planned | Complete, Pending, Planned |
+| Including Pending | Complete and Pending |
+| Including Planned | Complete, Pending, and Planned |
 
-**Canceled** remains in the ledger but affects no balance or graph. You can change a flow's status as it progresses. A transfer between your own accounts moves the balance without creating or destroying the resource.
+Canceled records affect no balances or animation. Planned records are ordinary dated flows: include them to inspect projected balances.
 
-## Work with flows
+![Independent energy and water balances in the camp example](docs/graphs.png)
 
-- Type into the top form, then choose **Add Flow**. The hint lists missing required fields; Add Flow becomes available when Date, From, To, Amount, and Units are filled. Invalid values are reported by field before anything is added. **Clear Flow** resets the form and selection without deleting saved records. From, To, Units, Category, and Tags accept new values; suggestions come from current saved flows and refresh when opened. Removing the last saved use removes that suggestion; undo restores it. There is no separate suggestion-preferences file. The date defaults to today; the time is optional. Choosing a calendar day preserves the time. Unadded entries remain populated when you switch tabs. Name is optional and defaults to `From -> To`; Status defaults to Complete, Category to Uncategorized, and Tags and Notes may be blank. Tab moves between inputs, skipping their calendar, dropdown, and Expand buttons.
-- Click a ledger row and edit its fields above, or double-click a cell to edit in place. Completed valid changes save automatically. The row stays in place as you Tab between fields; sorting resumes when you leave the row, keeping the selected row visible. **Ctrl-click** toggles rows; **Shift-click**, **Shift-arrow**, and **Shift-scroll** select ranges in row lists. The top form edits the active row only.
-- Flows sort by **Date/Time → From → To → Amount → Units → Status → Category → Name**. Dates start newest first; the remaining fields ascend. Click a heading to make it the primary sort, and click again to reverse that column. Table pop-ups use the same heading clicks.
-- **Ctrl+C / Ctrl+V** duplicates selected flows with fresh IDs. Copies appear beside their sources when sort values match; the view follows a row moved by an edit. **Delete** removes selected flows. A batch paste or deletion is one **Ctrl+Z / Ctrl+Y** undo/redo action in the current session.
-- Hover a selected row in a multiple selection to see totals by From account, To account, and category, plus units, statuses, and dates. These are signed record totals across all selected statuses, including Canceled; units stay separate. Long summaries scroll. Single and unselected rows keep their individual details.
-- Amounts and starting balances accept arithmetic such as `1.23 + 4.56`, `(10 - 2) * 3`, or `12 / 4`, with an optional leading `=`. Press Enter or leave the field to calculate; only the resulting number is saved. Decimal results stay exact when terminating; repeating results use at least 50 significant digits.
-- Search finds account names in either From or To. Combine checkbox filters for From, To, Units, Status, Categories, and Tags; **Reset** clears the search, selections, and date limits in one undoable step. Choices disappear when their last saved reference is removed. Filters do not change saved records or balances.
-- In **Graphs**, click an account/unit pair to select it, Ctrl-click to add or remove selections, and use Shift-click or Shift-arrow for ranges. Scroll over the list to browse it. Plot each pair or combine selected accounts *within the same unit*. Dates fit the selected records, and values get 10% vertical breathing room. Hover for exact values, scroll over the plot to zoom, and use **Fit Dates** after a manual range. The graph refreshes as its controls change.
-- **Experimental** animates the currently filtered flows on a draggable account map. Step through timestamps, play/pause, or change speed from 0 to 5. Hover a node for its balance and a moving flow for its record details. Controls refresh automatically. Drag accounts anywhere in the visible map; scrolling and Fit include positions beyond the original layout. Scroll to pan, Ctrl-scroll to zoom, and double-click empty space to fit the map. This tab does not write data.
-- The **Data** tab imports and exports flows as CSV or JSON and offers database backup and restore. An import preview catches duplicates and conflicts before changes are saved. [Example import files](examples/README.md) show the supported fields.
+## Experimental: follow the transfers
 
-To see the Python repository API, run `python3 -m examples.two_units`; it creates two independent resources in a temporary database.
+Accounts become nodes; transfers travel along directed paths. Larger quantities produce larger pulses. The map uses the current ledger filters, with its own date range, unit, and status basis.
 
-![Account balances by unit over time](docs/graphs.png)
+![Experimental account map: battery energy flowing to camp equipment](docs/experimental.png)
 
-## Design and verification
+Play, pause, step, or jump to either end; speed runs from 0 to 5. Hover nodes for balances and totals, or pulses for flow details. Click a pulse to edit its record.
 
-Flow uses Python, Tkinter, Matplotlib, and SQLite. Amounts are stored as decimal text and calculated with `Decimal`; plotted coordinates use floating point only for drawing. [The data model](docs/model.md) explains the tables, starting balance rule, and graph calculations. [`flowledger/schema.sql`](flowledger/schema.sql) contains the actual schema.
+Drag accounts into a useful arrangement. **Positions save in the dataset and return on reopening.** Pan by dragging the background or scrolling; Ctrl-scroll zooms, and double-clicking empty space fits the layout. Drag undo/redo saves the restored positions. Playback never changes flow records.
 
-Run the complete suite on a graphical desktop with `python3 -m unittest discover -s tests`. On a headless Linux machine, install `xvfb` and `xauth`, then run:
+## Try a different resource
+
+The [camp example](examples/README.md) follows three days of battery energy in **Wh** and tank water in **L**, with completed, pending, and planned transfers:
+
+```bash
+python3 -m examples.camp
+./flow camp
+```
+
+It creates `camp.sqlite3` in the current directory and refuses to overwrite an existing file. In Graphs, select **Including Planned** and compare Battery / Wh with Fresh tank / L. In Experimental, choose Wh and Including Planned to explore the equipment map. Change a planned transfer to see how much energy or water would remain.
+
+[More examples](examples/README.md) include CSV/JSON imports, actual record objects, an inspectable SQL dump, and a short Python API example using two independent units.
+
+## Implementation and checks
+
+Python, Tkinter, Matplotlib, and SQLite. Quantities use exact decimal arithmetic; plot and map coordinates use floating point. The [data model](docs/model.md) and [schema](flowledger/schema.sql) describe storage and balance rules. With another Python environment, install `requirements.txt` and ensure Tkinter is available.
+
+Run the tests on a graphical desktop:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+On a headless Linux machine with `xvfb` and `xauth` installed:
 
 ```bash
 xvfb-run -a -s '-screen 0 1920x1200x24' python3 -m unittest discover -s tests
 ```
 
-The included GitHub Actions workflow runs the same suite for pushes and pull requests. The application currently uses local timestamps on one computer; it has no unit conversion, network synchronization, or automatic recurrence.
+GitHub Actions runs the suite on pushes and pull requests. Flow currently uses local wall-clock times and has no unit conversion, automatic recurrence, or mobile interface.
 
 ## License
 
 [MIT](LICENSE) © 2026 Jim Lewis.
-

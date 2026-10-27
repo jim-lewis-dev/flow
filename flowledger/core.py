@@ -12,10 +12,12 @@ anchor describes its balance immediately BEFORE flows at that time.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from contextlib import contextmanager
 from datetime import date as Date, datetime
 from decimal import Decimal, InvalidOperation, localcontext
 import json
+import math
 from pathlib import Path
 import re
 import sqlite3
@@ -26,7 +28,7 @@ STATUSES = ("Complete", "Pending", "Planned", "Canceled")
 FLOW_SORT_FIELDS = ("date", "from_account", "to_account", "amount", "units",
                     "status", "category", "name")
 DEFAULT_ANCHOR = "2026-10-01 00:00:00"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 APPLICATION_ID = 1179406167
 MAX_CENTS = 2**63 - 1
 
@@ -252,7 +254,7 @@ class Repository:
                     self.backup(self.migration_backup_path)
                     self.migration_forecasts_path = self._save_legacy_forecasts(
                         self.conn, self.migration_backup_path + ".forecasts.json")
-                # Recent upgrades only replace flow constraints, in one transaction.
+                # Recent upgrades preserve records in one transaction.
                 # Failure rolls back both schema and data; no retained copy.
                 self._migrate_legacy(self.conn)
             self._validate_database(self.conn)
@@ -265,7 +267,7 @@ class Repository:
         if conn.execute("PRAGMA application_id").fetchone()[0] != APPLICATION_ID:
             raise ValueError("This is not a Flowledger database.")
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION and not (allow_legacy and version in (1, 2, 3, 4, 5, 6)):
+        if version != SCHEMA_VERSION and not (allow_legacy and 1 <= version < SCHEMA_VERSION):
             raise ValueError(f"Unsupported database version {version}; expected {SCHEMA_VERSION}.")
         required = {
             "accounts": {"account_key", "name"},
@@ -280,6 +282,8 @@ class Repository:
         else:
             required["accounts"].update(("opening_cents", "opening_at"))
             required["flows"].add("amount_cents")
+        if version >= 8:
+            required["account_positions"] = {"account_key", "x", "y"}
         if version < 4:
             required["scenarios"] = {"scenario_key", "name"}
             required["scenario_exclusions"] = {"scenario_key", "flow_id"}
@@ -306,6 +310,10 @@ class Repository:
                 if _name(units, "Units") != units or (amount is not None and quantity_text(amount) != amount):
                     raise ValueError("Database contains an invalid starting balance or units.")
                 normalize_date(when)
+        if version >= 8:
+            for row in conn.execute("SELECT x,y FROM account_positions"):
+                if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in row):
+                    raise ValueError("Database contains an invalid account position.")
 
     @staticmethod
     def _save_legacy_forecasts(conn: sqlite3.Connection, path: str | Path) -> str | None:
@@ -350,7 +358,7 @@ class Repository:
 
     @staticmethod
     def _migrate_legacy(conn: sqlite3.Connection) -> None:
-        """Upgrade v1-v6 atomically; preserve values and permit same-account flows.
+        """Upgrade v1-v7 atomically; preserve values and add account positions.
 
         The caller preserves a recovery copy only for destructive pre-v5 migrations.
         Legacy optional-time flags become date precision. Version 1 did not
@@ -359,7 +367,7 @@ class Repository:
         never mixed into ordinary flows. Accounts and audit history are retained.
         """
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (1, 2, 3, 4, 5, 6):
+        if not 1 <= version < SCHEMA_VERSION:
             raise ValueError(f"Cannot migrate database version {version}.")
         if conn.in_transaction:
             raise ValueError("Finish the current write before migrating.")
@@ -407,8 +415,12 @@ class Repository:
                 conn.execute("CREATE INDEX flows_from ON flows(from_key,date)")
                 conn.execute("CREATE INDEX flows_to ON flows(to_key,date)")
                 conn.execute("PRAGMA user_version = 5")
-            Repository._upgrade_flow_constraints(conn)
-            conn.execute("PRAGMA user_version = 7")
+            if version < 7:
+                Repository._upgrade_flow_constraints(conn)
+            conn.execute("CREATE TABLE IF NOT EXISTS account_positions ("
+                         "account_key TEXT PRIMARY KEY REFERENCES accounts(account_key) ON DELETE CASCADE, "
+                         "x REAL NOT NULL,y REAL NOT NULL)")
+            conn.execute("PRAGMA user_version = 8")
             Repository._validate_database(conn)
             conn.execute("COMMIT")
         except BaseException:
@@ -504,6 +516,49 @@ class Repository:
         return self._account(self.conn.execute(
             "SELECT a.name,b.units,b.opening_amount,b.opening_at FROM accounts a JOIN account_balances b USING(account_key) "
             "WHERE a.account_key=? AND b.units=?", (_key(name), units)).fetchone())
+
+    def load_map_positions(self) -> dict[str, tuple[float, float]]:
+        """Account-node positions shared by all units in this database."""
+        return {name: (x, y) for name, x, y in self.conn.execute(
+            "SELECT a.name,p.x,p.y FROM account_positions p JOIN accounts a USING(account_key) "
+            "ORDER BY a.account_key")}
+
+    def save_map_positions(self, positions: Mapping[str, tuple[float, float]]) -> None:
+        """Replace the saved layout without editing flows, anchors or their audit.
+
+        Coordinates are relative to the scene size and may extend past its initial
+        bounds. Session view undo/redo calls this method with its restored layout.
+        """
+        if not isinstance(positions, Mapping):
+            raise ValueError("Account positions must map names to coordinates.")
+        normalized = {}
+        for name, point in positions.items():
+            key = _key(_name(name, "Account"))
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError("Each account position must contain x and y.")
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in point):
+                raise ValueError("Account coordinates must be finite numbers.")
+            try:
+                point = tuple(float(value) for value in point)
+            except (ValueError, OverflowError) as exc:
+                raise ValueError("Account coordinates must be finite numbers.") from exc
+            if not all(math.isfinite(value) for value in point):
+                raise ValueError("Account coordinates must be finite numbers.")
+            if key in normalized and normalized[key] != point:
+                raise ValueError("An account cannot have two different positions.")
+            normalized[key] = point
+        with self.atomic():
+            accounts = {row[0] for row in self.conn.execute("SELECT account_key FROM accounts")}
+            if normalized.keys() - accounts:
+                raise ValueError("Account positions must refer to existing accounts.")
+            current = {key: (x, y) for key, x, y in self.conn.execute("SELECT account_key,x,y FROM account_positions")}
+            for key in current.keys() - normalized.keys():
+                self.conn.execute("DELETE FROM account_positions WHERE account_key=?", (key,))
+            for key, point in normalized.items():
+                if current.get(key) != point:
+                    self.conn.execute("INSERT INTO account_positions VALUES(?,?,?) "
+                                      "ON CONFLICT(account_key) DO UPDATE SET x=excluded.x,y=excluded.y",
+                                      (key, *point))
 
     def save_account(self, name: str, opening_amount: Any | None = None,
                      opening_at: str = DEFAULT_ANCHOR, units: str = "USD") -> dict:

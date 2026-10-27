@@ -1,4 +1,4 @@
-"""Tk integration checks for the optional, read-only account flow map.
+"""Tk integration checks for the optional account flow map and saved layout.
 
 These tests use a disposable database and exercise the visible controls and
 canvas interactions, rather than comparing pixels or fixture layout.
@@ -6,6 +6,7 @@ canvas interactions, rather than comparing pixels or fixture layout.
 
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -75,7 +76,10 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.pump()
 
     def saved_state(self):
-        return tuple(self.repo.list_flows()), tuple(self.repo.conn.iterdump())
+        # Layout may change; flows, anchors, vocabulary and audit must not.
+        records = tuple(line for line in self.repo.conn.iterdump()
+                        if not line.startswith('INSERT INTO "account_positions"'))
+        return tuple(self.repo.list_flows()), records
 
     def visible_names(self):
         return [flow["name"] for flow in self.app.experimental._events]
@@ -512,7 +516,7 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.assertEqual(view._positions, positions)
         self.assertEqual(saved, self.saved_state())
 
-    def test_control_and_drag_undo_redo_change_only_session_view(self):
+    def test_control_and_drag_undo_redo_save_layout_without_changing_records(self):
         view = self.app.experimental
         before_database = self.saved_state()
         self.select_basis(1)
@@ -538,17 +542,97 @@ class ExperimentalIntegrationTests(unittest.TestCase):
         self.pump()
         moved = tuple(view._positions["Checking"])
         self.assertNotEqual(moved, original)
+        self.assertEqual(self.repo.load_map_positions()["Checking"], moved)
         self.app.undo()
         self.pump()
         self.assertEqual(tuple(view._positions["Checking"]), original)
+        self.assertEqual(self.repo.load_map_positions()["Checking"], original)
         self.app.redo()
         self.pump()
         self.assertEqual(tuple(view._positions["Checking"]), moved)
+        self.assertEqual(self.repo.load_map_positions()["Checking"], moved)
         self.app.show_view("charts")
         self.app.show_view("experimental")
         self.pump()
         self.assertEqual(tuple(view._positions["Checking"]), moved)
         self.assertEqual(before_database, self.saved_state())
+
+    def test_saved_layout_reopens_fits_and_survives_unit_filters(self):
+        import tkinter as tk
+        from flowledger.experimental import ExperimentalView
+
+        view = self.app.experimental
+        self.assertEqual(self.repo.load_map_positions(), {})
+        # A saved layout can extend beyond the original drawing rectangle.
+        positions = {"Checking": (-.3, -.4), "Shop": (1.4, 1.5), "Wallet": (.4, .5)}
+        self.repo.save_map_positions(positions)
+        view.reload_positions()
+        view.refresh()
+        self.pump()
+        self.select_unit("kg")
+        self.assertEqual(view._positions, positions)
+        self.assertEqual(self.repo.load_map_positions(), positions)
+        self.select_unit("USD")
+        saved = self.saved_state()
+
+        # A fresh view and connection exercise reopening without creating a
+        # second Tk root, whose platform lifecycle is unrelated to this feature.
+        reopened = Repository(self.repo.path)
+        window = tk.Toplevel(self.app)
+        window.geometry("1100x750+0+0")
+        fresh = ExperimentalView(window, reopened, reopened.list_flows, lambda _: None)
+        fresh.pack(fill="both", expand=True)
+        try:
+            fresh.refresh()
+            self.pump()
+            self.assertEqual(fresh._positions, positions)
+            canvas = fresh.canvas
+            for item in fresh._node_items:
+                x0, y0, x1, y1 = canvas.bbox(item)
+                self.assertGreaterEqual(x0 - canvas.canvasx(0), 0)
+                self.assertGreaterEqual(y0 - canvas.canvasy(0), 0)
+                self.assertLessEqual(x1 - canvas.canvasx(0), canvas.winfo_width())
+                self.assertLessEqual(y1 - canvas.canvasy(0), canvas.winfo_height())
+            self.assertEqual(reopened.load_map_positions(), positions)
+        finally:
+            fresh.close()
+            window.destroy()
+            reopened.close()
+        self.assertEqual(saved, self.saved_state())
+        # Restoring a database with no layout must also clear the in-memory one.
+        self.repo.save_map_positions({})
+        view.reload_positions()
+        view.refresh()
+        self.pump()
+        self.assertNotEqual(view._positions, positions)
+        self.assertEqual(self.repo.load_map_positions(), {})
+
+    def test_record_undo_redo_restores_saved_position_for_returning_account(self):
+        view = self.app.experimental
+        self.app.history.perform("Add flow", lambda: self.repo.save_flow(dict(
+            date="2026-10-02", from_account="Checking", to_account="New account",
+            amount="1", units="USD")))
+        self.app.refresh_all()
+        self.pump()
+        view._positions["New account"] = (1.25, -.2)
+        self.assertTrue(view._save_positions())
+        self.app.undo()
+        self.pump()
+        self.assertIsNone(self.repo.get_account("New account"))
+        self.assertNotIn("New account", self.repo.load_map_positions())
+        self.assertEqual(view._positions["New account"], (1.25, -.2))
+        self.app.redo()
+        self.pump()
+        self.assertIsNotNone(self.repo.get_account("New account"))
+        self.assertEqual(self.repo.load_map_positions()["New account"], (1.25, -.2))
+
+    def test_layout_save_error_is_visible_without_changing_flow_records(self):
+        view = self.app.experimental
+        saved = self.saved_state()
+        with patch.object(self.repo, "save_map_positions", side_effect=sqlite3.OperationalError("read only")):
+            self.assertFalse(view._save_positions())
+        self.assertIn("Could not save layout: read only", view.message_var.get())
+        self.assertEqual(saved, self.saved_state())
 
     def test_play_tab_change_and_close_cancel_deferred_animation(self):
         view = self.app.experimental

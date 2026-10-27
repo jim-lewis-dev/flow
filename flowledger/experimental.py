@@ -1,8 +1,8 @@
-"""An optional, read-only map of the flows visible in the Flow Ledger.
+"""An optional account map of the flows visible in the Flow Ledger.
 
 This view owns only its display settings and node positions. It derives every
-event from the normal public flow records; it neither saves flows nor invents
-balances from a filtered subset of the ledger.
+event from the normal public flow records. Node positions persist in the same
+database; the map never changes flows or invents balances from a filtered ledger.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import date
 from decimal import Decimal
 import math
+import sqlite3
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -82,7 +83,9 @@ class ExperimentalView(ttk.Frame):
         self._playing = False
         self._after_id = None
         self._started_at = 0.0
-        self._positions: dict[str, tuple[float, float]] = {}
+        self._positions = self.repo.load_map_positions()
+        self._saved_positions = dict(self._positions)
+        self._fit_saved_layout = bool(self._positions)
         self._drag_name: str | None = None
         self._drag_before: dict | None = None
         self._pan_before: dict | None = None
@@ -199,6 +202,7 @@ class ExperimentalView(ttk.Frame):
         ybar.grid(row=0, column=1, sticky="ns")
         self.canvas.configure(xscrollcommand=xbar.set, yscrollcommand=ybar.set)
         self.canvas.bind("<Configure>", self._canvas_resized)
+        self.canvas.bind("<Map>", self._canvas_resized)
         self.canvas.bind("<ButtonPress-1>", self._pointer_down)
         self.canvas.bind("<B1-Motion>", self._pointer_drag)
         self.canvas.bind("<ButtonRelease-1>", self._pointer_up)
@@ -290,7 +294,30 @@ class ExperimentalView(ttk.Frame):
         self._stepped = self._index >= 0
         self._draw_scene(viewport=state.get("viewport", (0, 0)))
         self._update_progress()
+        if current["positions"] != self.get_state()["positions"]:
+            self._save_positions()
         self._history_state = self.get_state()
+
+    def reload_positions(self) -> None:
+        """Use the restored database's layout without carrying over this file's map."""
+        self._positions = self.repo.load_map_positions()
+        self._saved_positions = dict(self._positions)
+        self._fit_saved_layout = True
+        self._drag_name = self._drag_before = None
+        self._pan_before = None
+
+    def _save_positions(self) -> bool:
+        # Record undo can remove an account created during this session. Keep
+        # its coordinates in memory for redo, but persist only existing names.
+        names = {account["name"] for account in self.repo.list_accounts()}
+        positions = {name: point for name, point in self._positions.items() if name in names}
+        try:
+            self.repo.save_map_positions(positions)
+        except (ValueError, sqlite3.Error) as exc:
+            self.message_var.set(f"Could not save layout: {exc}")
+            return False
+        self._saved_positions = dict(self._positions)
+        return True
 
     def _notify(self, before: dict | None, label: str) -> None:
         after = self.get_state()
@@ -304,6 +331,13 @@ class ExperimentalView(ttk.Frame):
             self.update()
         self.pause()
         self._load_data(reset_index=False)
+        if self._saved_positions:
+            names = {account["name"] for account in self.repo.list_accounts()}
+            # Undo can remove an account and cascade its stored position. Redo
+            # restores the account, so restore its remembered layout as well.
+            returned = (self._saved_positions.keys() & names) - self.repo.load_map_positions().keys()
+            if returned:
+                self._save_positions()
         self._history_state = self.get_state()
 
     def update(self) -> None:
@@ -505,6 +539,11 @@ class ExperimentalView(ttk.Frame):
         self._pan_before = None
         self._ignore_pointer_up = True
         self.canvas.configure(cursor="")
+        self._fit_scene()
+        self._notify(before, "Fit flow map")
+        return "break"
+
+    def _fit_scene(self) -> None:
         left, top, right, bottom = self._scene_bounds()
         self._zoom = max(MIN_ZOOM, min(MAX_ZOOM,
             self.canvas.winfo_width() / (right - left),
@@ -512,8 +551,6 @@ class ExperimentalView(ttk.Frame):
         self._draw_scene(viewport=(
             (left + right - self.canvas.winfo_width() / self._zoom) / 2,
             (top + bottom - self.canvas.winfo_height() / self._zoom) / 2))
-        self._notify(before, "Fit flow map")
-        return "break"
 
     def _canvas_font(self, size: int, *, bold: bool = False) -> tuple:
         font = (FONT, max(6, round(size * self._zoom)))
@@ -624,6 +661,10 @@ class ExperimentalView(ttk.Frame):
             self._node_items[label] = name
         canvas.scale("all", 0, 0, self._zoom, self._zoom)
         self._render_pulses()
+        if self._fit_saved_layout and canvas.winfo_ismapped() and canvas.winfo_width() > 1 and canvas.winfo_height() > 1:
+            self._fit_saved_layout = False
+            self._fit_scene()
+            return
         self._set_viewport(viewport)
         self._fill_details()
 
@@ -801,6 +842,9 @@ class ExperimentalView(ttk.Frame):
         self._history_state = self.get_state()
 
     def close(self) -> None:
+        if self._drag_name is not None:
+            self._save_positions()
+            self._drag_name = self._drag_before = None
         self._cancel_date_update()
         self.pause()
         self.hide_hover(destroy=True)
@@ -852,6 +896,8 @@ class ExperimentalView(ttk.Frame):
             self._drag_name = None
             self._drag_before = None
             self.canvas.configure(cursor="")
+            if before is not None and before["positions"] != self.get_state()["positions"]:
+                self._save_positions()
             self._notify(before, f"Move {name} in flow map")
             return
         if self._pan_before is not None:

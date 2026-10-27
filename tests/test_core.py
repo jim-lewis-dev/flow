@@ -297,5 +297,71 @@ class CalculationTests(unittest.TestCase):
         self.assertEqual(ledger_balance_at(account, flows, "2026-10-04", basis), 98000)
 
 
+class MapPositionTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.path = Path(self.directory.name) / "layout.sqlite3"
+        self.repo = Repository(self.path)
+        self.addCleanup(lambda: self.repo.close())
+        self.repo.save_account("A", "10", units="kg")
+        self.repo.save_account("A", "20", units="USD")
+        self.repo.save_flow(dict(from_account="A", to_account="B", amount="2", units="kg"))
+
+    def test_layout_roundtrip_noop_and_backup_keep_records_untouched(self):
+        flows, accounts, audit = self.repo.list_flows(), self.repo.list_accounts(), self.repo.history()
+        self.repo.save_map_positions({" a ": [-0.25, 1.5], "B": [2, -1]})
+        positions = {"A": (-0.25, 1.5), "B": (2.0, -1.0)}
+        self.assertEqual(self.repo.load_map_positions(), positions)
+        changes = self.repo.conn.total_changes
+        self.repo.save_map_positions(positions)
+        self.assertEqual(self.repo.conn.total_changes, changes)
+        self.assertEqual((self.repo.list_flows(), self.repo.list_accounts(), self.repo.history()),
+                         (flows, accounts, audit))
+        self.repo.close()
+        self.repo = Repository(self.path)
+        self.assertEqual(self.repo.load_map_positions(), positions)
+        backup = Path(self.directory.name) / "copy.sqlite3"
+        self.repo.backup(backup)
+        self.repo.save_map_positions({"A": (0, 0)})
+        self.assertEqual(self.repo.load_map_positions(), {"A": (0.0, 0.0)})
+        self.repo.restore(backup)
+        self.assertEqual(self.repo.load_map_positions(), positions)
+        self.assertEqual((self.repo.list_flows(), self.repo.list_accounts(), self.repo.history()),
+                         (flows, accounts, audit))
+
+    def test_invalid_layouts_are_atomic_and_never_create_accounts(self):
+        self.repo.save_map_positions({"A": (0.2, 0.3)})
+        positions = self.repo.load_map_positions()
+        for point in ((float("inf"), 0), (float("nan"), 0), (True, 0),
+                      ("1", 0), (0,), (0, 1, 2), None):
+            with self.subTest(point=point), self.assertRaises(ValueError):
+                self.repo.save_map_positions({"A": (0, 0), "B": point})
+            self.assertEqual(self.repo.load_map_positions(), positions)
+        for invalid in ({"Missing": (0, 0)}, {"A": (0, 0), " a ": (1, 1)}, []):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                self.repo.save_map_positions(invalid)
+            self.assertEqual(self.repo.load_map_positions(), positions)
+        self.assertIsNone(self.repo.get_account("Missing"))
+
+    def test_layout_does_not_add_record_history_or_block_account_undo(self):
+        from flowledger.history import SessionHistory
+        history = SessionHistory(self.repo)
+        self.addCleanup(history.close)
+        history.perform("Add flow", lambda: self.repo.save_flow(
+            dict(from_account="New", to_account="A", amount="1", units="kg")))
+        token = history.undo_token
+        self.repo.save_map_positions({"A": (0.2, 0.3), "New": (1.2, -0.3)})
+        self.assertIs(history.undo_token, token)
+        history.undo()
+        self.assertEqual(self.repo.load_map_positions(), {"A": (0.2, 0.3)})
+        self.repo.save_map_positions({"A": (0.4, 0.3)})
+        self.assertTrue(history.can_redo)
+        history.redo()
+        self.repo.save_map_positions({"A": (0.4, 0.3), "New": (1.2, -0.3)})
+        self.assertEqual(self.repo.load_map_positions()["New"], (1.2, -0.3))
+        self.assertEqual(self.repo.conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

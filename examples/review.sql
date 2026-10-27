@@ -1,6 +1,6 @@
--- Actual SQLite dump of the illustrative records in record_objects.json.
+-- Illustrative records from record_objects.json, using the current schema.
 PRAGMA application_id = 1179406167;
-PRAGMA user_version = 6;
+PRAGMA user_version = 8;
 BEGIN TRANSACTION;
 CREATE TABLE account_balances (
     account_key TEXT NOT NULL REFERENCES accounts(account_key),
@@ -14,6 +14,11 @@ INSERT INTO "account_balances" VALUES('warehouse','USD','1000','2026-10-01 00:00
 INSERT INTO "account_balances" VALUES('warehouse','kg','20','2026-10-01 00:00:00');
 INSERT INTO "account_balances" VALUES('joe''s diner','USD','0','2026-10-01 00:00:00');
 INSERT INTO "account_balances" VALUES('workshop','kg','0','2026-10-01 00:00:00');
+CREATE TABLE account_positions (
+    account_key TEXT PRIMARY KEY REFERENCES accounts(account_key) ON DELETE CASCADE,
+    x REAL NOT NULL,
+    y REAL NOT NULL
+);
 CREATE TABLE accounts (
     account_key TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -31,13 +36,13 @@ CREATE TABLE audit (
     before_json TEXT,
     after_json TEXT
 );
-INSERT INTO "audit" VALUES(1,'2026-10-10 15:31:37.311628','account','AmEx [USD]','create',NULL,'{"name": "AmEx", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
-INSERT INTO "audit" VALUES(2,'2026-10-10 15:31:37.312512','account','Warehouse [USD]','create',NULL,'{"name": "Warehouse", "opening_amount": "1000", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
-INSERT INTO "audit" VALUES(3,'2026-10-10 15:31:37.312585','account','Warehouse [kg]','create',NULL,'{"name": "Warehouse", "opening_amount": "20", "opening_at": "2026-10-01 00:00:00", "units": "kg"}');
-INSERT INTO "audit" VALUES(4,'2026-10-10 15:31:37.312630','account','Joe''s Diner [USD]','create',NULL,'{"name": "Joe''s Diner", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
-INSERT INTO "audit" VALUES(5,'2026-10-10 15:31:37.312666','account','Workshop [kg]','create',NULL,'{"name": "Workshop", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "kg"}');
-INSERT INTO "audit" VALUES(6,'2026-10-10 15:31:37.313157','flow','11111111-1111-4111-8111-111111111111','create',NULL,'{"amount": "12", "category": "Dining", "date": "2026-10-02 12:30:00", "flow_id": "11111111-1111-4111-8111-111111111111", "from_account": "AmEx", "name": "Friday lunch", "notes": "Burger and fries", "status": "Complete", "tags": ["Road trip"], "to_account": "Joe''s Diner", "units": "USD"}');
-INSERT INTO "audit" VALUES(7,'2026-10-10 15:31:37.313676','flow','22222222-2222-4222-8222-222222222222','create',NULL,'{"amount": "0.125", "category": "Materials", "date": "2026-10-03 09:15:06", "flow_id": "22222222-2222-4222-8222-222222222222", "from_account": "Warehouse", "name": "Materials", "notes": "Exact fractional quantity", "status": "Complete", "tags": ["Project"], "to_account": "Workshop", "units": "kg"}');
+INSERT INTO "audit" VALUES(1,'2026-10-03 09:15:06','account','AmEx [USD]','create',NULL,'{"name": "AmEx", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
+INSERT INTO "audit" VALUES(2,'2026-10-03 09:15:06','account','Warehouse [USD]','create',NULL,'{"name": "Warehouse", "opening_amount": "1000", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
+INSERT INTO "audit" VALUES(3,'2026-10-03 09:15:06','account','Warehouse [kg]','create',NULL,'{"name": "Warehouse", "opening_amount": "20", "opening_at": "2026-10-01 00:00:00", "units": "kg"}');
+INSERT INTO "audit" VALUES(4,'2026-10-03 09:15:06','account','Joe''s Diner [USD]','create',NULL,'{"name": "Joe''s Diner", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "USD"}');
+INSERT INTO "audit" VALUES(5,'2026-10-03 09:15:06','flow','11111111-1111-4111-8111-111111111111','create',NULL,'{"amount": "12", "category": "Dining", "date": "2026-10-02 12:30:00", "flow_id": "11111111-1111-4111-8111-111111111111", "from_account": "AmEx", "name": "Friday lunch", "notes": "Burger and fries", "status": "Complete", "tags": ["Road trip"], "to_account": "Joe''s Diner", "units": "USD"}');
+INSERT INTO "audit" VALUES(6,'2026-10-03 09:15:06','account','Workshop [kg]','create',NULL,'{"name": "Workshop", "opening_amount": "0", "opening_at": "2026-10-01 00:00:00", "units": "kg"}');
+INSERT INTO "audit" VALUES(7,'2026-10-03 09:15:06','flow','22222222-2222-4222-8222-222222222222','create',NULL,'{"amount": "0.125", "category": "Materials", "date": "2026-10-03 09:15:06", "flow_id": "22222222-2222-4222-8222-222222222222", "from_account": "Warehouse", "name": "Materials", "notes": "Exact fractional quantity", "status": "Complete", "tags": ["Project"], "to_account": "Workshop", "units": "kg"}');
 CREATE TABLE categories (category_key TEXT PRIMARY KEY, name TEXT NOT NULL);
 INSERT INTO "categories" VALUES('uncategorized','Uncategorized');
 INSERT INTO "categories" VALUES('dining','Dining');
@@ -61,7 +66,6 @@ CREATE TABLE flows (
     name TEXT NOT NULL,
     notes TEXT NOT NULL DEFAULT '',
     category_key TEXT NOT NULL REFERENCES categories(category_key),
-    CHECK(from_key <> to_key),
     FOREIGN KEY(from_key, units) REFERENCES account_balances(account_key, units),
     FOREIGN KEY(to_key, units) REFERENCES account_balances(account_key, units)
 );
