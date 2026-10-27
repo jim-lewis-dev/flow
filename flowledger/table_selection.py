@@ -132,8 +132,24 @@ class MultiSelection:
             self.anchor = self._focused(rows)
 
     def _key(self, event):
-        if not event.state & 1 and event.keysym in ("Up", "Down", "Home", "End", "Prior", "Next"):
-            self.anchor = self._focused(self._rows())
+        if event.keysym in ("Up", "Down", "Home", "End", "Prior", "Next"):
+            if not event.state & 1:
+                self.anchor = self._focused(self._rows())
+            if self.is_tree:
+                self._see_row(self.widget.focus())
+
+    def _see_row(self, row):
+        if not row or not self.widget.exists(row):
+            return
+        self.widget.see(row)
+        bounds = self.widget.bbox(row)
+        if bounds:
+            _, y, _, height = bounds
+            # Tk's see() can leave the last row clipped by the bottom border.
+            bottom = y + height - 1
+            if (bottom >= self.widget.winfo_height() or
+                    self.widget.identify_region(self.widget.winfo_width() // 2, bottom) == "nothing"):
+                self.widget.yview_scroll(1, "units")
 
     def _range_start(self, rows):
         selected = self._selected(rows)
@@ -165,7 +181,7 @@ class MultiSelection:
         if self.is_tree:
             widget.selection_set(rows[start:end + 1])
             widget.focus(endpoint)
-            widget.see(endpoint)
+            self._see_row(endpoint)
         else:
             widget.selection_clear(0, "end")
             widget.selection_set(start, end)

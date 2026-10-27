@@ -20,6 +20,32 @@ def field_at(tree, x):
     return columns[index] if 0 <= index < len(columns) else None
 
 
+def sort_rows(rows, key, reverse=False):
+    """Sort by all keys; reverse only the chosen column, as in the ledger."""
+    rows.sort(key=key)
+    if reverse:
+        rows.sort(key=lambda row: key(row)[0], reverse=True)
+
+
+def enable_column_sort(tree, row_key):
+    """Give a read-only table the ledger's ascending/reverse heading clicks."""
+    column, reverse = None, False
+
+    def sort(key):
+        nonlocal column, reverse
+        reverse = not reverse if column == key else False
+        column = key
+        rows = list(tree.get_children())
+        sort_rows(rows, lambda row: row_key(row, key), reverse)
+        for index, row in enumerate(rows):
+            tree.move(row, "", index)
+        if tree.focus():
+            tree._multi_selection._see_row(tree.focus())
+
+    for key in tree["columns"]:
+        tree.heading(key, command=lambda k=key: sort(k))
+
+
 class ColumnDrag:
     """Move headers after a short drag; keep ordinary clicks and resizing.
 

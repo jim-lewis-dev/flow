@@ -34,7 +34,7 @@ from .history import SessionHistory
 from .view_history import ViewHistory
 from .experimental import ExperimentalView
 from .units import decimal_places, format_display
-from .table_columns import ColumnDrag, displayed_columns
+from .table_columns import ColumnDrag, displayed_columns, sort_rows, enable_column_sort
 from .table_selection import enable_multi_selection
 
 BG = "#f2f5f2"
@@ -1731,10 +1731,7 @@ class FlowApp(tk.Tk):
             flows = [saved[fid] for fid in self.ledger.get_children() if fid in saved]
         else:
             flows.sort(key=lambda flow: order[flow["flow_id"]])
-            flows.sort(key=self._ledger_sort_key)
-            if self.sort_reverse:
-                # Reverse the chosen column only; secondary keys stay ascending.
-                flows.sort(key=lambda flow: self._ledger_sort_key(flow)[0], reverse=True)
+            sort_rows(flows, self._ledger_sort_key, self.sort_reverse)
             live = {flow["flow_id"] for flow in flows}
             reordered = iter(flow["flow_id"] for flow in flows)
             # Retain deleted IDs' slots for undo, while each new sort preserves
@@ -2926,6 +2923,24 @@ class FlowApp(tk.Tk):
         version = self.repo.conn.execute("PRAGMA user_version").fetchone()[0]
         return self._show_text("SQLite Schema", f"-- Schema version {version}\n\n" + "\n\n".join(row[0] + ";" for row in rows))
 
+    def _sortable_popup(self, tree, numeric=(), raw_values=None):
+        raw_values = raw_values or {}
+        columns = tuple(tree["columns"])
+
+        def value(row, column):
+            raw = raw_values.get(row, {}).get(column, tree.set(row, column))
+            if column in numeric:
+                try:
+                    return (0, parse_quantity(raw))
+                except ValueError:
+                    return (1, str(raw).casefold())  # Invalid import values remain inspectable.
+            if column == "status":
+                return STATUSES.index(raw)
+            return str(raw) if column == "units" else str(raw).casefold()
+
+        enable_column_sort(tree, lambda row, key:
+            (value(row, key), *(value(row, column) for column in columns if column != key)))
+
     def import_records(self):
         self._prepare_dialog()
         path = filedialog.askopenfilename(parent=self, title="Import flow records", filetypes=[("Flow records", "*.json *.csv"), ("JSON", "*.json"), ("CSV", "*.csv")])
@@ -2954,13 +2969,16 @@ class FlowApp(tk.Tk):
             tree.heading(key, text=key.upper())
             tree.column(key, width=width, stretch=key == "message")
         tree.grid(row=2, column=0, sticky="nsew", padx=22)
+        raw_values = {}
         for row in preview:
             data = row.get("data") if isinstance(row.get("data"), dict) else {}
             try:
                 amount = format_display(data.get("amount", ""), data.get("units", ""))
             except (ValueError, TypeError):
                 amount = data.get("amount", "")
-            tree.insert("", "end", values=(row["row"], row["state"], data.get("name", ""), data.get("from_account", ""), data.get("to_account", ""), amount, data.get("units", ""), row["message"]))
+            item = tree.insert("", "end", values=(row["row"], row["state"], data.get("name", ""), data.get("from_account", ""), data.get("to_account", ""), amount, data.get("units", ""), row["message"]))
+            raw_values[item] = {"amount": data.get("amount", "")}
+        self._sortable_popup(tree, ("row", "amount"), raw_values)
         include_similar = tk.BooleanVar(dialog, False)
         ttk.Checkbutton(dialog, text="Include similar rows as separate flows (possible legitimate repeats)", variable=include_similar).grid(row=3, column=0, sticky="w", padx=22, pady=14)
         bottom = ttk.Frame(dialog)
@@ -3040,6 +3058,7 @@ class FlowApp(tk.Tk):
         detail.grid(row=2, column=0, sticky="nsew", padx=20, pady=15)
         for index, record in enumerate(rows):
             tree.insert("", "end", iid=str(index), values=(record["changed_at"], record["entity"], record["action"], record["entity_key"]))
+        self._sortable_popup(tree)
         def select(event=None):
             if not tree.selection():
                 return
@@ -3083,5 +3102,9 @@ class FlowApp(tk.Tk):
             tree.heading(key, text=title)
             tree.column(key, width=width, anchor="e" if key in {"amount", "count"} else "w")
         tree.grid(row=2, column=0, sticky="nsew", padx=22, pady=(0, 22))
+        raw_values = {}
         for (category, status, units), amounts in sorted(groups.items()):
-            tree.insert("", "end", values=(category, status, format_display(decimal_sum(amounts), units), units, len(amounts)))
+            total = decimal_sum(amounts)
+            item = tree.insert("", "end", values=(category, status, format_display(total, units), units, len(amounts)))
+            raw_values[item] = {"amount": total}
+        self._sortable_popup(tree, ("amount", "count"), raw_values)

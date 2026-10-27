@@ -163,6 +163,19 @@ class TableSelectionTests(unittest.TestCase):
                 self.assertEqual(self.selected(widget), before)
                 self.assertGreater(widget.yview()[0], 0)
 
+    def test_arrow_ranges_keep_bottom_row_fully_visible_in_shared_row_lists(self):
+        for widget in self.controllers:
+            with self.subTest(widget=widget.winfo_class()):
+                self.click(widget, 0)
+                for _ in range(29):
+                    self.key(widget, "<Shift-Down>")
+                self.assertEqual(self.selected(widget), tuple(range(30)))
+                _, y, _, height = widget.bbox("r29" if widget is self.tree else 29)
+                self.assertLess(y + height - 1, widget.winfo_height() - 1)
+                self.key(widget, "<Up>")
+                _, y, _, height = widget.bbox("r28" if widget is self.tree else 28)
+                self.assertLess(y + height - 1, widget.winfo_height() - 1)
+
     def test_deleted_anchor_falls_back_to_remaining_selected_row(self):
         self.click(self.tree, 2)
         self.key(self.tree, "<Shift-MouseWheel>", delta=-240)

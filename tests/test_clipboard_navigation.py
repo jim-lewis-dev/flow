@@ -165,6 +165,27 @@ class ClipboardNavigationTests(unittest.TestCase):
         self.assertEqual(len(self.repo.list_flows()), 121)
         self.assertEqual(self.app.form_vars["name"].get(), saved["name"])
 
+    def test_arrow_keys_reveal_entire_first_and_last_rows_at_different_window_heights(self):
+        tree = self.app.ledger
+        rows = tree.get_children()
+        for height in (700, 900, 1080, 1200):
+            with self.subTest(height=height):
+                self.app.geometry(f"1500x{height}+0+0")
+                self.pump()
+                self.select(rows[0])
+                for row in rows[1:]:
+                    self.keys("<Down>")
+                    self.assertEqual(tree.focus(), row)
+                    _, y, _, h = tree.bbox(row)
+                    self.assertLess(y + h - 1, tree.winfo_height())
+                    self.assertEqual(tree.identify_region(20, y + h - 1), "cell")
+                self.assertEqual(tree.selection(), (rows[-1],))
+                for _ in rows[1:]:
+                    self.keys("<Up>")
+                self.assertEqual(tree.selection(), (rows[0],))
+                _, y, _, _ = tree.bbox(rows[0])
+                self.assertEqual(tree.identify_region(20, y), "cell")
+
     def test_wheel_finishes_inline_edit_and_keeps_row_keyboard_clipboard_working(self):
         source = self.app.ledger.get_children()[-1]
         copied = self.copy_paste(source)
