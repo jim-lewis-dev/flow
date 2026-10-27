@@ -15,24 +15,20 @@ class FilterCombo(ttk.Frame):
     suggestion; typing otherwise preserves the user's new value. Vocabulary is
     supplied by the repository only after a successful save.
 
-    ``on_remove(value)`` persists removal from suggestions and returns True on
-    success. Removing a suggestion never accepts or changes the current draft.
+    ``on_open()`` refreshes values from the current records before opening.
     """
 
     def __init__(self, master, variable=None, values: Iterable[str] = (),
                  on_accept: Callable[[], None] | None = None,
-                 on_remove: Callable[[str], bool] | None = None, **kwargs):
+                 on_open: Callable[[], None] | None = None, **kwargs):
         super().__init__(master, **kwargs)
         self.variable = variable or tk.StringVar(self)
         self.values = list(values)
         self.on_accept = on_accept
-        self.on_remove = on_remove
+        self.on_open = on_open
         self.multi_value = False
         self.popup = None
         self.listbox = None
-        self.remove_canvas = None
-        self._remove_redraw_id = None
-        self._remove_pressed = None
         self._show_all = False
         self.matches = []
         self.nav_index = None
@@ -168,6 +164,8 @@ class FilterCombo(ttk.Frame):
             previous.close_popup()
         top._flow_filter_combo = self
         if self.popup is None or not self.popup.winfo_exists():
+            if self.on_open is not None:
+                self.on_open()
             self.popup = tk.Toplevel(self)
             if hasattr(top, "_bind_history_popup"):
                 top._bind_history_popup(self.popup)
@@ -188,23 +186,7 @@ class FilterCombo(ttk.Frame):
             self.listbox.pack(side="left", fill="both", expand=True)
             self.listbox.bind("<ButtonPress-1>", lambda event: "break")
             self.listbox.bind("<ButtonRelease-1>", self._click)
-            if self.on_remove is not None:
-                self.remove_canvas = tk.Canvas(body, width=28, height=1,
-                    bg="white", borderwidth=0, highlightthickness=0, takefocus=False)
-                self.remove_canvas.pack(side="right", fill="y")
-                self.remove_canvas.bind("<ButtonPress-1>", self._remove_press)
-                self.remove_canvas.bind("<ButtonRelease-1>", self._remove_release)
-                self.remove_canvas.bind("<Motion>", self._remove_motion)
-                self.remove_canvas.bind("<Leave>", lambda event: self.remove_canvas.configure(cursor=""))
-                self.remove_canvas.bind("<Button-4>", lambda event: self._scroll_remove(-1))
-                self.remove_canvas.bind("<Button-5>", lambda event: self._scroll_remove(1))
-                self.remove_canvas.bind("<MouseWheel>", self._remove_wheel)
-                self.remove_canvas.bind("<Configure>", self._queue_remove_redraw)
-                self.listbox.bind("<Configure>", self._queue_remove_redraw)
-                self.listbox.configure(yscrollcommand=self._queue_remove_redraw)
-            hint = ("↑ ↓ choose · Enter accepts · × removes" if self.on_remove is not None
-                    else "↑ ↓ choose   ·   Enter accepts   ·   Esc closes")
-            self._hint = tk.Label(self.popup, text=hint,
+            self._hint = tk.Label(self.popup, text="↑ ↓ choose   ·   Enter accepts   ·   Esc closes",
                      bg="#f1f6f3", fg="#668079", font=("DejaVu Sans", 8),
                      anchor="w", padx=8, pady=4)
             self._hint.pack(fill="x")
@@ -251,76 +233,6 @@ class FilterCombo(ttk.Frame):
             y = self.winfo_rooty() - height
         y = max(0, min(y, screen_height - height))
         self.popup.geometry(f"{width}x{height}+{x}+{y}")
-        self._queue_remove_redraw()
-
-    def _queue_remove_redraw(self, *args):
-        # The listbox reports scrolling before all geometry has settled. Draw
-        # from its actual visible row bounds once; never remap the popup.
-        if self.remove_canvas is not None and self._remove_redraw_id is None:
-            self._remove_redraw_id = self.after_idle(self._draw_remove_buttons)
-
-    def _draw_remove_buttons(self):
-        self._remove_redraw_id = None
-        canvas, listbox = self.remove_canvas, self.listbox
-        if canvas is None or listbox is None:
-            return
-        canvas.delete("all")
-        if not self.matches:
-            return
-        first = max(0, listbox.nearest(0))
-        last = min(len(self.matches) - 1, listbox.nearest(listbox.winfo_height()))
-        for index in range(first, last + 1):
-            bounds = listbox.bbox(index)
-            if bounds is not None:
-                _, y, _, height = bounds
-                canvas.create_text(canvas.winfo_width() / 2, y + height / 2,
-                    text="×", fill="#668079", font=("DejaVu Sans", 11),
-                    tags=("remove", f"remove_{index}"))
-
-    def _remove_index(self, event):
-        if self.listbox is None or not self.matches or self.on_remove is None:
-            return None
-        if not 0 <= event.x < self.remove_canvas.winfo_width():
-            return None
-        index = self.listbox.nearest(event.y)
-        bounds = self.listbox.bbox(index)
-        if bounds is not None and 0 <= index < len(self.matches):
-            _, y, _, height = bounds
-            if y <= event.y < y + height:
-                return index
-        return None
-
-    def _remove_motion(self, event):
-        self.remove_canvas.configure(cursor="hand2" if self._remove_index(event) is not None else "")
-
-    def _remove_press(self, event):
-        index = self._remove_index(event)
-        self._remove_pressed = self.matches[index] if index is not None else None
-        return "break"
-
-    def _remove_release(self, event):
-        index = self._remove_index(event)
-        value = self.matches[index] if index is not None else None
-        pressed, self._remove_pressed = self._remove_pressed, None
-        if value is not None and value == pressed:
-            # The callback owns persistence and can refresh this combo itself.
-            # A rejected removal must leave both vocabulary and draft intact.
-            if self.on_remove(value):
-                self.set_values(v for v in self.values if v != value)
-            self.focus_set(open_popup=False)
-        return "break"
-
-    def _scroll_remove(self, delta):
-        if self.listbox is not None:
-            self.listbox.yview_scroll(delta, "units")
-        return "break"
-
-    def _remove_wheel(self, event):
-        # Windows uses multiples of 120; macOS can send small deltas.
-        if event.delta:
-            self._scroll_remove(-int(event.delta / 120) if abs(event.delta) >= 120
-                                else (-1 if event.delta > 0 else 1))
-        return "break"
 
     def _query(self):
         if not self.multi_value:
@@ -428,15 +340,13 @@ class FilterCombo(ttk.Frame):
         self.close_popup()
 
     def _cancel_callbacks(self):
-        for after_id in (self._focus_check_id, self._paste_id, self._dismiss_focus_id,
-                         self._remove_redraw_id):
+        for after_id in (self._focus_check_id, self._paste_id, self._dismiss_focus_id):
             if after_id is not None:
                 try:
                     self.after_cancel(after_id)
                 except tk.TclError:
                     pass
         self._focus_check_id = self._paste_id = self._dismiss_focus_id = None
-        self._remove_redraw_id = None
 
     def _finish_dismissal(self):
         self._dismiss_focus_id = None
@@ -468,8 +378,6 @@ class FilterCombo(ttk.Frame):
                 pass
         self.popup = None
         self.listbox = None
-        self.remove_canvas = None
-        self._remove_pressed = None
         self.matches = []
         self.nav_index = None
         if (had_popup or needs_focus_cleanup) and self.winfo_exists():

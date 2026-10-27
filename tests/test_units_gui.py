@@ -169,32 +169,6 @@ class UnitsGuiTests(unittest.TestCase):
         self.assertEqual([{k: v for k, v in row.items() if k != "flow_id"} for row in rows],
                          [{k: v for k, v in flow.items() if k != "flow_id"}] * 2)
 
-    def test_unit_suggestion_x_is_case_sensitive_and_never_changes_records(self):
-        self.seed(units="mW")
-        self.seed(units="MW", name="Other scale")
-        combo = self.app.form_widgets["units"]
-        self.entry("units").focus_force()
-        self.pump()
-        combo.open_popup(show_all=True)
-        self.pump()
-        index = combo.matches.index("mW")
-        combo.listbox.see(index)
-        self.pump()
-        _, y, _, height = combo.listbox.bbox(index)
-        x = combo.remove_canvas.winfo_width() // 2
-        before = self.repo.list_flows()
-        combo.remove_canvas.event_generate("<ButtonPress-1>", x=x, y=y + height // 2)
-        combo.remove_canvas.event_generate("<ButtonRelease-1>", x=x, y=y + height // 2)
-        self.pump()
-        self.assertNotIn("mW", combo.values)
-        self.assertIn("MW", combo.values)
-        self.assertEqual(self.repo.list_flows(), before)
-        self.app.undo()
-        self.assertIn("mW", combo.values)
-        self.app.redo()
-        self.assertNotIn("mW", combo.values)
-        self.assertIn("MW", combo.values)
-        self.assertEqual(self.repo.list_flows(), before)
 
     def test_each_account_unit_has_its_own_inline_starting_balance(self):
         self.seed()

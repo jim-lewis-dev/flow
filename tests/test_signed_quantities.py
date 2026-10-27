@@ -9,6 +9,7 @@ from flowledger.core import Repository, decimal_sum, ledger_balance_at
 from flowledger.exchange import commit_import, export_flows, preview_import, read_import
 from flowledger.graphing import graph_timeline
 from flowledger.history import SessionHistory
+from flowledger.selection_summary import format_selection_summary
 
 
 class SignedQuantityTests(unittest.TestCase):
@@ -37,8 +38,36 @@ class SignedQuantityTests(unittest.TestCase):
         history.redo()
         self.assertEqual(self.repo.get_flow(original["flow_id"]), comment)
         self.assertEqual(self.repo.conn.execute("SELECT amount FROM flows").fetchone()[0], "0")
-        with self.assertRaisesRegex(ValueError, "different accounts"):
-            self.flow(amount="0", to_account="a")
+
+    def test_same_account_flows_keep_balances_flat_and_undo_preserves_records(self):
+        account = self.repo.save_account("A", "123.456", "2026-10-03", "kg")
+        history = SessionHistory(self.repo)
+        self.addCleanup(history.close)
+        for amount, status, date in (("5", "Complete", "2026-10-01"),
+                                     ("-2", "Pending", "2026-10-03"),
+                                     ("0", "Planned", "2026-10-04")):
+            with self.subTest(amount=amount, status=status):
+                saved = history.perform("Add Flow", lambda: self.flow(
+                    to_account=" a ", amount=amount, status=status, date=date,
+                    units="kg", category="Inspection", tags=["Check"], notes="Same account"))
+                self.assertEqual((saved["from_account"], saved["to_account"]), ("A", "A"))
+                history.undo()
+                self.assertIsNone(self.repo.get_flow(saved["flow_id"]))
+                history.redo()
+                self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)
+        flows = self.repo.list_flows()
+        statuses = ("Complete", "Pending", "Planned")
+        for when in ("2026-09-30", "2026-10-03", "2026-10-05"):
+            self.assertEqual(ledger_balance_at(account, flows, when, statuses), Decimal("123.456"))
+        for combined in (False, True):
+            points = graph_timeline([account], flows, "2026-10-01", "2026-10-05",
+                                    statuses, combined=combined)
+            self.assertTrue(all(value == Decimal("123.456") for rows in points.values()
+                                for _, value in rows))
+        summary = format_selection_summary(flows)
+        self.assertIn("From\n  A: 3 kg", summary)
+        self.assertIn("To\n  A: 3 kg", summary)
+        self.assertIn("Categories\n  Inspection: 3 kg", summary)
 
     def test_signed_flows_conserve_each_unit_with_confirmed_and_forecast_bases(self):
         for name, usd, kg in (("A", "100", "5"), ("B", "0", "2")):
@@ -85,7 +114,7 @@ class SignedQuantityTests(unittest.TestCase):
 
     def test_reopen_backup_restore_and_portable_exports_accept_signed_and_zero_records(self):
         self.flow(amount="-12345678901234567890.123456789", units="kg", notes="Return")
-        self.flow(amount="0", units="kg", notes="Inspection", name="Comment")
+        self.flow(amount="0", units="kg", to_account="A", notes="Inspection", name="Comment")
         self.repo.save_account("A", "-1", units="kg")
         original = self.repo.list_flows()
         schema = self.repo.conn.execute("PRAGMA user_version").fetchone()[0]

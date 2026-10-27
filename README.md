@@ -12,12 +12,14 @@ On Ubuntu, install Python 3.10 or newer and the desktop dependencies:
 
 ```bash
 sudo apt install python3-tk python3-matplotlib
-./Flow --demo
+./flow --demo
 ```
 
-The demo uses a separate database with illustrative `USD` and `kg` transfers. For your own records, run `./Flow`. If you use another Python installation, install `requirements.txt` into that environment and ensure its Tkinter module works. Terminal Ctrl+C exits quietly; Ctrl+C in the ledger still copies rows.
+To make `flow` available from other directories, run `./install.sh` once. It checks dependencies and links `~/.local/bin/flow` to this project; it installs no packages and changes no shell settings. Keep the project folder in place. `Flow` and `launch.sh` remain compatible with older launch commands.
 
-Flow saves personal records under `~/.local/share/flowledger/flow.sqlite3` by default; `--demo` uses `demo.sqlite3`. Set `XDG_DATA_HOME` to move this directory or pass `--db /path/to/file.sqlite3` to choose a database. The app is local; it does not sync between computers. **Esc** leaves fullscreen mode.
+The demo uses a separate database with illustrative `USD` and `kg` transfers. For your own records, run `./flow`. If you use another Python installation, install `requirements.txt` into that environment and ensure its Tkinter module works. Terminal Ctrl+C exits quietly; Ctrl+C in the ledger still copies rows.
+
+Flow saves personal records under `~/.local/share/flowledger/flow.sqlite3` by default; `--demo` uses `demo.sqlite3`. Set `XDG_DATA_HOME` to move this directory or pass `--db /path/to/file.sqlite3` to choose a database. Use `flow money` to open `money.sqlite3` in your current directory, or otherwise in that default data directory. If neither exists, Flow creates it in the default directory. The `.sqlite3` extension is added when omitted; an explicit path is used directly. Running without a name still opens your existing default file. On another computer, install the dependencies and copy this project and your closed database file. The app is local; it does not sync between computers. **Esc** leaves fullscreen mode.
 
 ## The model
 
@@ -38,6 +40,8 @@ A flow has a date/time, name, **from**, **to**, amount, units, status, category,
 }
 ```
 
+From and To may be the same account: the record remains, while its outgoing and incoming quantities cancel in that account's balance.
+
 Flow amounts can be zero or negative. Zero keeps a dated note without changing balances; a negative amount reverses the transfer's effect while preserving the entered From and To.
 
 An account can hold multiple units. Set a separate starting balance and date/time for each account/unit pair in **Accounts**. Click a column heading to sort balances, and click again to reverse the order. An unknown starting balance remains unknown; enter `0` when zero is known. Negative balances are allowed. Resource transfers conserve quantity *within each unit*; different units are never added or converted.
@@ -54,7 +58,7 @@ An account can hold multiple units. Set a separate starting balance and date/tim
 
 ## Work with flows
 
-- Type into the top form, then choose **Add Flow**. From, To, Units, Category, and Tags accept new values; suggestions come from saved flows. The date defaults to today; the time is optional. Choosing a calendar day preserves the time. Unadded entries remain populated when you switch tabs.
+- Type into the top form, then choose **Add Flow**. The hint lists missing required fields; Add Flow becomes available when Date, From, To, Amount, and Units are filled. Invalid values are reported by field before anything is added. **Clear Flow** resets the form and selection without deleting saved records. From, To, Units, Category, and Tags accept new values; suggestions come from current saved flows and refresh when opened. Removing the last saved use removes that suggestion; undo restores it. There is no separate suggestion-preferences file. The date defaults to today; the time is optional. Choosing a calendar day preserves the time. Unadded entries remain populated when you switch tabs. Name is optional and defaults to `From -> To`; Status defaults to Complete, Category to Uncategorized, and Tags and Notes may be blank. Tab moves between inputs, skipping their calendar, dropdown, and Expand buttons.
 - Click a ledger row and edit its fields above, or double-click a cell to edit in place. Completed valid changes save automatically. The row stays in place as you Tab between fields; sorting resumes when you leave the row, keeping the selected row visible. **Ctrl-click** toggles rows; **Shift-click**, **Shift-arrow**, and **Shift-scroll** select ranges in row lists. The top form edits the active row only.
 - Flows sort by **Date/Time → From → To → Amount → Units → Status → Category → Name**. Dates start newest first; the remaining fields ascend. Click a heading to make it the primary sort, and click again to reverse that column. Table pop-ups use the same heading clicks.
 - **Ctrl+C / Ctrl+V** duplicates selected flows with fresh IDs. Copies appear beside their sources when sort values match; the view follows a row moved by an edit. **Delete** removes selected flows. A batch paste or deletion is one **Ctrl+Z / Ctrl+Y** undo/redo action in the current session.

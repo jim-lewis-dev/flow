@@ -8,7 +8,6 @@ import unittest
 from flowledger.core import Repository
 from flowledger.exchange import commit_import, preview_import
 from flowledger.history import SessionHistory
-from flowledger.suggestions import SuggestionPreferences
 
 
 class SessionHistoryTests(unittest.TestCase):
@@ -329,33 +328,37 @@ class SessionHistoryTests(unittest.TestCase):
             self.history.undo()
             self.assertEqual(len(self.repo.list_flows()), 1)
 
-    def test_external_preferences_share_order_and_skip_noops(self):
-        preferences = SuggestionPreferences(":memory:")
+    def test_external_view_actions_share_order_and_skip_noops(self):
+        selected = []
         self.add()
 
-        def remove():
-            return preferences.remove("category", "Dining")
+        def select():
+            if selected:
+                return False
+            selected.append("Dining")
+            return True
 
-        def restore():
-            return preferences.restore("category", "Dining")
+        def clear():
+            selected.clear()
+            return True
 
-        self.assertTrue(self.history.perform_external("Remove suggestion", remove, restore, remove))
-        self.assertFalse(self.history.perform_external("Already removed", remove, restore, remove))
-        self.assertEqual(self.history.undo(), "Remove suggestion")
-        self.assertEqual(preferences.visible("category", ["Dining"]), ["Dining"])
+        self.assertTrue(self.history.perform_external("Select category", select, clear, select))
+        self.assertFalse(self.history.perform_external("Select category", select, clear, select))
+        self.assertEqual(self.history.undo(), "Select category")
+        self.assertEqual(selected, [])
         self.assertEqual(self.history.undo(), "Add Flow")
         self.assertEqual(self.history.redo(), "Add Flow")
-        self.assertEqual(self.history.redo(), "Remove suggestion")
-        self.assertEqual(preferences.visible("category", ["Dining"]), [])
+        self.assertEqual(self.history.redo(), "Select category")
+        self.assertEqual(selected, ["Dining"])
 
     def test_failed_external_undo_keeps_stack(self):
         def fail():
-            raise OSError("cannot write preference file")
+            raise OSError("cannot apply view state")
 
-        self.history.perform_external("Remove suggestion", lambda: True, fail, lambda: True)
+        self.history.perform_external("Change view", lambda: True, fail, lambda: True)
         with self.assertRaises(OSError):
             self.history.undo()
-        self.assertEqual(self.history.undo_label, "Remove suggestion")
+        self.assertEqual(self.history.undo_label, "Change view")
         self.assertFalse(self.history.can_redo)
 
 

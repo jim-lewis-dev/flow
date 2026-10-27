@@ -214,6 +214,10 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.app.account_vars["name"].set("Tank")
         self.app.account_vars["units"].set("litres")
         entry = self.app.account_widgets["opening"]
+        self.replace(entry, "1 / 0")
+        self.assertFalse(self.app.save_account())
+        self.assertTrue(self.app.account_feedback.get().startswith("Starting Balance:"))
+        self.assertIsNone(self.repo.get_account("Tank", "litres"))
         self.replace(entry, "12.5 + 7.5")
         self.finish(entry)
         self.assertEqual(entry.get(), "20")

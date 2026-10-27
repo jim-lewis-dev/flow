@@ -176,7 +176,7 @@ class SessionHistory:
         """Record one non-database change in the same undo order.
 
         ``callback`` returns whether anything changed. All three callbacks must
-        leave their state untouched on failure, as SuggestionPreferences does.
+        leave their state untouched on failure.
         These actions cannot be nested inside a database action.
         A non-null merge_key groups consecutive changes, retaining the first
         undo callback and latest redo callback. An undone branch never merges.

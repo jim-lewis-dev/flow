@@ -42,6 +42,71 @@ class AccountMigrationTests(unittest.TestCase):
             conn.execute(f"PRAGMA user_version={version}")
         return path
 
+    def make_v6(self):
+        path = self.root / "v6.sqlite3"
+        repo = Repository(":memory:")
+        try:
+            repo.save_account("A", "12.345", "2026-10-01", "kg")
+            repo.save_flow(dict(date="2026-10-02 12:34:56", from_account="A", to_account="B",
+                                amount="0.125", units="kg", tags=["First", "Second"], notes="Keep\nnotes"))
+            statements = "\n".join(repo.conn.iterdump()).replace(
+                "    FOREIGN KEY(from_key, units)",
+                "    CHECK(from_key <> to_key),\n    FOREIGN KEY(from_key, units)")
+            with sqlite3.connect(path) as conn:
+                conn.executescript(statements)
+                conn.execute("PRAGMA application_id = 1179406167")
+                conn.execute("PRAGMA user_version = 6")
+        finally:
+            repo.close()
+        return path
+
+    def test_v6_upgrade_preserves_every_record_and_allows_equal_endpoints_without_backup(self):
+        path = self.make_v6()
+        with sqlite3.connect(path) as conn:
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("UPDATE flows SET to_key=from_key")
+            tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            before = {table: conn.execute(f"SELECT * FROM {table}").fetchall() for table in tables}
+        repo = Repository(path)
+        try:
+            for table, rows in before.items():
+                self.assertEqual([tuple(row) for row in repo.conn.execute(f"SELECT * FROM {table}")], rows)
+            self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertIsNone(repo.migration_backup_path)
+            saved = repo.save_flow(dict(date="2026-10-03", from_account="A", to_account="a",
+                                       amount="-3", units="kg"))
+            self.assertEqual((saved["from_account"], saved["to_account"]), ("A", "A"))
+            self.assertEqual(repo.conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            repo.close()
+        self.assertEqual(list(self.root.iterdir()), [path])
+
+    def test_failed_v6_upgrade_rolls_back_and_v6_restore_leaves_source_unchanged(self):
+        path = self.make_v6()
+        with sqlite3.connect(path) as conn:
+            before = list(conn.iterdump())
+        validate = Repository._validate_database
+        def fail(conn, **kwargs):
+            if conn.execute("PRAGMA user_version").fetchone()[0] == 7:
+                raise ValueError("Migration test failure")
+            return validate(conn, **kwargs)
+        with patch.object(Repository, "_validate_database", side_effect=fail):
+            with self.assertRaisesRegex(ValueError, "Migration test failure"):
+                Repository(path)
+        with sqlite3.connect(path) as conn:
+            self.assertEqual(list(conn.iterdump()), before)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 6)
+        self.assertEqual(list(self.root.iterdir()), [path])
+        digest = hashlib.sha256(path.read_bytes()).digest()
+        repo = Repository(self.root / "restored.sqlite3")
+        try:
+            repo.restore(path)
+            self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 7)
+            self.assertEqual(repo.list_flows()[0]["tags"], ["First", "Second"])
+            self.assertEqual(hashlib.sha256(path.read_bytes()).digest(), digest)
+        finally:
+            repo.close()
+
     @staticmethod
     def snapshot(conn):
         tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
@@ -94,7 +159,7 @@ class AccountMigrationTests(unittest.TestCase):
                     self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03'),88)
                     self.assertEqual(ledger_balance_at(repo.get_account('Cash'),actual,'2026-10-03',('Complete','Pending','Planned')),86)
                     self.assertEqual(repo.conn.execute('PRAGMA foreign_keys').fetchone()[0],1)
-                    self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],6)
+                    self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],7)
                     self.assertIsNone(repo.conn.execute('PRAGMA foreign_key_check').fetchone())
                     with self.assertRaises(sqlite3.IntegrityError):
                         repo.conn.execute("DELETE FROM accounts WHERE account_key='cash'")
@@ -118,7 +183,7 @@ class AccountMigrationTests(unittest.TestCase):
                 reopened = Repository(path)
                 self.assertIsNone(reopened.migration_backup_path)
                 reopened.close()
-                self.assertEqual(len(list(self.root.glob(f'legacy-v{version}.sqlite3.pre-v6-*.bak'))),1)
+                self.assertEqual(len(list(self.root.glob(f'legacy-v{version}.sqlite3.pre-v7-*.bak'))),1)
 
     def test_failed_upgrade_rolls_back_all_tables_and_version(self):
         path = self.make_legacy()
@@ -126,7 +191,7 @@ class AccountMigrationTests(unittest.TestCase):
             before = self.snapshot(conn)
         validate = Repository._validate_database
         def fail_on_new_schema(conn, **kwargs):
-            if conn.execute('PRAGMA user_version').fetchone()[0] == 6:
+            if conn.execute('PRAGMA user_version').fetchone()[0] == 7:
                 raise ValueError('simulated migration failure')
             validate(conn, **kwargs)
         with patch.object(Repository,'_validate_database',side_effect=fail_on_new_schema):
@@ -135,7 +200,7 @@ class AccountMigrationTests(unittest.TestCase):
         with sqlite3.connect(path) as conn:
             self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0],2)
             self.assertEqual(self.snapshot(conn),before)
-        self.assertEqual(len(list(self.root.glob('*.pre-v6-*.bak'))),1)
+        self.assertEqual(len(list(self.root.glob('*.pre-v7-*.bak'))),1)
 
     def test_restore_v3_preserves_source_forecasts_and_current_data_safety_copy(self):
         path = self.make_legacy(3)
@@ -146,7 +211,7 @@ class AccountMigrationTests(unittest.TestCase):
         repo.restore(path)
         self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),original_hash)
         self.assertEqual([row['name'] for row in repo.list_accounts()],['Cash','Shop','Unknown'])
-        self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],6)
+        self.assertEqual(repo.conn.execute('PRAGMA user_version').fetchone()[0],7)
         self.assertEqual(repo.conn.execute('PRAGMA foreign_keys').fetchone()[0],1)
         self.assertEqual(len(repo.list_flows()),3)
         recovered = json.loads(Path(repo.migration_forecasts_path).read_text())

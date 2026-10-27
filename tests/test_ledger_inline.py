@@ -443,37 +443,21 @@ class LedgerInlineEditingTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["name"], "New name")
         self.assertEqual(len(self.repo.list_flows()), 2)
 
-    def test_suggestion_x_does_not_change_record_or_accept_current_cell(self):
+
+    def test_opening_suggestions_keeps_current_cell_uncommitted(self):
         flow = self.seed(category="Boat")
         entry = self.open_cell(flow, "category")
+        entry.delete(0, "end")
+        entry.insert(0, "Draft category")
         combo = self.app.ledger_editor.widget
         combo.open_popup(show_all=True)
         self.pump()
-        self.assertIsNotNone(combo.remove_canvas)
         self.assertIn("Boat", combo.matches)
-        index = combo.matches.index("Boat")
-        entry.delete(0, "end")
-        entry.insert(0, "Draft category")
-        _, y, _, height = combo.listbox.bbox(index)
-        canvas = combo.remove_canvas
-        x = canvas.winfo_width() // 2
-        canvas.event_generate("<ButtonPress-1>", x=x, y=y + height // 2)
-        canvas.event_generate("<ButtonRelease-1>", x=x, y=y + height // 2)
-        self.pump()
+        self.assertFalse(getattr(combo, "remove_canvas", None))
         self.assertEqual(self.app.form_vars["category"].get(), "Draft category")
         self.assertEqual(self.app.ledger_editor.field, "category")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.assertNotIn("Boat", combo.values)
-        self.assertNotIn("Boat", self.app.form_widgets["category"].values)
-        self.app.undo()
-        self.pump()
-        self.assertEqual(self.app.form_vars["category"].get(), "Draft category")
-        self.assertIn("Boat", combo.values)
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
-        self.app.undo()
-        self.pump()
-        self.assertEqual(self.app.form_vars["category"].get(), "Boat")
-        self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
+
 
     def test_view_change_keeps_existing_form_without_reopening_editor(self):
         flow = self.seed()
