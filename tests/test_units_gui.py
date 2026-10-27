@@ -316,6 +316,80 @@ class UnitsGuiTests(unittest.TestCase):
         self.assertEqual(set(rows), {("Inventory", "Complete", "10.00", "USD", "1"), ("Inventory", "Complete", "0.1250", "kg", "1")})
         report.winfo_toplevel().destroy()
 
+    def test_category_report_headings_sort_exact_totals_and_counts_like_ledger(self):
+        from tkinter import ttk
+        for category, amounts in (("A", ["1"] * 10), ("B", ["1"] * 2),
+                                  ("C", ["-2.00001"]), ("Z", ["-2.00002"])):
+            for amount in amounts:
+                self.repo.save_flow(dict(date="2026-10-01", from_account="Warehouse",
+                    to_account="Checking", amount=amount, units="kg", category=category))
+        self.app.refresh_all()
+        before = list(self.repo.conn.iterdump())
+        self.app.show_report()
+        self.pump()
+        dialog = next(w for w in self.app.winfo_children()
+                      if w.winfo_class() == "Toplevel" and w.title().startswith("Category totals"))
+        tree = next(w for w in dialog.winfo_children() if isinstance(w, ttk.Treeview))
+        original = tree.get_children()
+        tree.selection_set(original[:2])
+        tree.focus(original[0])
+        def sort(column):
+            command = tree.heading(column, "command")
+            self.assertTrue(command)
+            tree.tk.call(command)
+            self.pump()
+            return [tree.set(row, "category") for row in tree.get_children()]
+        self.assertEqual(sort("amount"), ["Z", "C", "B", "A"])
+        self.assertEqual(sort("amount"), ["A", "B", "C", "Z"])
+        self.assertEqual(sort("count"), ["C", "Z", "B", "A"])
+        self.assertEqual(sort("count"), ["A", "B", "C", "Z"])
+        self.assertEqual(sort("category"), ["A", "B", "C", "Z"])
+        self.assertEqual(sort("category"), ["Z", "C", "B", "A"])
+        for column in ("status", "units"):
+            sort(column)
+            sort(column)
+        self.assertEqual(set(tree.selection()), set(original[:2]))
+        self.assertEqual(tree.focus(), original[0])
+        self.assertEqual(list(self.repo.conn.iterdump()), before)
+        dialog.destroy()
+
+    def test_other_table_popups_have_sortable_headings_without_changing_records(self):
+        from tkinter import ttk
+        self.seed()
+        before = list(self.repo.conn.iterdump())
+        records = [dict(date="2026-10-04", name=f"Import {index}", from_account="Checking",
+                        to_account="Store", units="kg", amount=amount)
+                   for index, amount in enumerate(["10", "2", "-3"] + ["1"] * 8 + ["bad"])]
+        with patch("flowledger.gui.filedialog.askopenfilename", return_value="preview.json"), \
+                patch("flowledger.gui.read_import", return_value=records):
+            self.app.import_records()
+        self.pump()
+        dialog = self.app.grab_current()
+        tree = next(w for w in dialog.winfo_children() if isinstance(w, ttk.Treeview))
+        tree.tk.call(tree.heading("row", "command"))
+        self.assertEqual([int(tree.set(row, "row")) for row in tree.get_children()], list(range(1, 13)))
+        tree.tk.call(tree.heading("amount", "command"))
+        self.assertEqual(tree.set(tree.get_children()[0], "amount"), "-3.0000")
+        for column in tree["columns"]:
+            self.assertTrue(tree.heading(column, "command"))
+            tree.tk.call(tree.heading(column, "command"))
+            tree.tk.call(tree.heading(column, "command"))
+        dialog.destroy()
+        self.app.show_history(all_records=True)
+        self.pump()
+        dialog = next(w for w in self.app.winfo_children()
+                      if w.winfo_class() == "Toplevel" and w.title() == "Change history")
+        tree = next(w for w in dialog.winfo_children() if isinstance(w, ttk.Treeview))
+        original = set(tree.get_children())
+        for column in tree["columns"]:
+            command = tree.heading(column, "command")
+            self.assertTrue(command)
+            tree.tk.call(command)
+            tree.tk.call(command)
+        self.assertEqual(set(tree.get_children()), original)
+        self.assertEqual(list(self.repo.conn.iterdump()), before)
+        dialog.destroy()
+
     def test_stacked_graph_hover_reports_the_selected_unit_exactly(self):
         from matplotlib.backend_bases import MouseEvent
         from matplotlib.dates import date2num
