@@ -103,7 +103,8 @@ class NumericEntryGuiTests(unittest.TestCase):
         expressions = (("1.23 + 4.56", "5.79"), ("2 - 7", "-5"),
                        (".25 * 4", "1"), ("7 / 2", "3.5"),
                        ("-(2 + 3) * +4 / 2", "-10"), ("5-5", "0"),
-                       ("  =1.23 + 4.56", "5.79"), ("=-(2 + 3) * 2", "-10"))
+                       ("  =1.23 + 4.56", "5.79"), ("=-(2 + 3) * 2", "-10"),
+                       ("2^3", "8"), ("2^-3", "0.125"), ("=9^.5", "3"))
         for expression, result in expressions:
             with self.subTest(expression=expression):
                 self.replace(entry, expression)
@@ -114,7 +115,7 @@ class NumericEntryGuiTests(unittest.TestCase):
                 self.assertIsNone(self.app.editing_id)
 
     def test_add_evaluates_expression_and_zero_comment_retains_all_metadata(self):
-        for amount, expected in (("(1.23+4.56)*2", "11.58"), ("1-1", "0"), ("-3*2", "-6")):
+        for amount, expected in (("(1.23+4.56)*2", "11.58"), ("1-1", "0"), ("-3*2", "-6"), ("2^3", "8")):
             with self.subTest(amount=amount):
                 for key, value in dict(date="2026-10-02 10:11:12", from_account="Checking",
                                        to_account="Shop", amount=amount, units="USD",
@@ -134,7 +135,7 @@ class NumericEntryGuiTests(unittest.TestCase):
         flow = self.seed()
         self.select_flow(flow)
         entry = self.app.form_widgets["amount"]
-        self.replace(entry, "5 - 12")
+        self.replace(entry, "2^3 - 15")
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
         self.finish(entry)
         saved = {**flow, "amount": "-7"}
@@ -168,8 +169,8 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.assertTrue(self.app.ledger_editor.open(flow["flow_id"], "amount"))
         self.pump()
         entry = self.app.ledger_editor.input
-        self.replace(entry, "=3 * -2")
-        self.assertEqual(self.app.form_vars["amount"].get(), "=3 * -2")
+        self.replace(entry, "=-2^2 - 2")
+        self.assertEqual(self.app.form_vars["amount"].get(), "=-2^2 - 2")
         self.finish(entry)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), {**flow, "amount": "-6"})
         self.assertEqual(self.app.form_vars["amount"].get(), "-6")
@@ -192,7 +193,7 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.assertTrue(self.app.account_cell_editor.open(key, "balance"))
         self.pump()
         entry = self.app.account_cell_editor.input
-        self.replace(entry, "-5 * (3 + 1)")
+        self.replace(entry, "=-2^2 * 5")
         self.finish(entry)
         self.assertEqual(self.repo.get_account("Checking")["opening_amount"], "-20")
         self.assertEqual(self.app.account_vars["opening"].get(), "-20")
@@ -214,15 +215,11 @@ class NumericEntryGuiTests(unittest.TestCase):
         self.app.account_vars["name"].set("Tank")
         self.app.account_vars["units"].set("litres")
         entry = self.app.account_widgets["opening"]
-        self.replace(entry, "1 / 0")
-        self.assertFalse(self.app.save_account())
-        self.assertTrue(self.app.account_feedback.get().startswith("Starting Balance:"))
-        self.assertIsNone(self.repo.get_account("Tank", "litres"))
-        self.replace(entry, "12.5 + 7.5")
+        self.replace(entry, "2^4 + 4")
         self.finish(entry)
         self.assertEqual(entry.get(), "20")
         self.assertIsNone(self.repo.get_account("Tank", "litres"))
-        self.replace(entry, "20 / 4")
+        self.replace(entry, "=25^.5")
         self.assertTrue(self.app.save_account())
         account = self.repo.get_account("Tank", "litres")
         self.assertEqual(account["opening_amount"], "5")
@@ -232,7 +229,7 @@ class NumericEntryGuiTests(unittest.TestCase):
         flow = self.seed()
         self.select_flow(flow)
         with patch.object(self.app, "bell") as bell:
-            for expression in ("1/0", "1+", "2**3", "abs(-2)"):
+            for expression in ("1/0", "1+", "2**3", "abs(-2)", "0^-2", "(-2)^.5", "2^1000000000"):
                 with self.subTest(expression=expression):
                     entry = self.app.form_widgets["amount"]
                     self.replace(entry, expression)

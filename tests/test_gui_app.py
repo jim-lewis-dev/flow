@@ -176,7 +176,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertIsNone(self.repo.get_account("Brand new shop"))
         self.assertNotIn("New hobby", self.repo.list_categories())
         self.assertEqual(self.app.form_vars["amount"].get(), "invalid")
-        self.assertEqual(self.app.form_feedback.get(), "Amount: Use numbers, +, -, *, / and parentheses only.")
+        self.assertEqual(self.app.form_feedback.get(), "Amount: Use numbers, +, -, *, /, ^ and parentheses only.")
 
     def test_multiselect_filters_use_any_value_within_each_field(self):
         dining = self.seed_flow(category="Dining", tags=["Trip"], amount="12")
