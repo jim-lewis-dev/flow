@@ -68,6 +68,52 @@ class FlowFormValidationTests(unittest.TestCase):
         self.assertEqual(self.app.form_feedback.get(), text)
         self.assertEqual("disabled" in self.app.save_button.state(), disabled)
 
+    def test_clear_button_tracks_all_fields_and_buttons_keep_equal_size_and_gap(self):
+        self.open_app()
+        clear, add = self.app.new_flow_button, self.app.save_button
+        undo, redo = self.app.undo_button, self.app.redo_button
+        defaults = self.app._flow_snapshot()
+
+        def check_layout():
+            self.assertEqual((clear.winfo_width(), clear.winfo_height()),
+                             (add.winfo_width(), add.winfo_height()))
+            gap = add.winfo_rootx() - clear.winfo_rootx() - clear.winfo_width()
+            reference = redo.winfo_rootx() - undo.winfo_rootx() - undo.winfo_width()
+            self.assertGreater(gap, 0)
+            self.assertEqual(gap, reference)
+
+        self.assertIn("disabled", clear.state())
+        self.assertIn("disabled", add.state())
+        check_layout()
+        for key, value in (("date", datetime.now().strftime("%Y-%m-%d") + " 12:34:56"), ("name", "Note"),
+                           ("from_account", "Store"), ("to_account", "Workshop"),
+                           ("amount", "0"), ("units", "kg"), ("status", "Planned"),
+                           ("category", "Materials"), ("tags", "Project")):
+            with self.subTest(field=key):
+                original = self.app.form_vars[key].get()
+                self.fill(**{key: value})
+                self.assertNotIn("disabled", clear.state())
+                self.assertIn("disabled", add.state())
+                check_layout()
+                self.fill(**{key: original})
+                self.assertIn("disabled", clear.state())
+                self.fill(**{key: value})
+                clear.invoke()
+                self.pump()
+                self.assertEqual(self.app._flow_snapshot(), defaults)
+                self.assertIn("disabled", clear.state())
+        self.app.notes_text.insert("1.0", "Notes alone can be cleared")
+        self.pump()
+        self.assertNotIn("disabled", clear.state())
+        self.app.notes_text.delete("1.0", "end")
+        self.pump()
+        self.assertIn("disabled", clear.state())
+        self.complete()
+        self.assertNotIn("disabled", clear.state())
+        self.assertNotIn("disabled", add.state())
+        check_layout()
+        self.assertEqual(self.repo.list_flows(), [])
+
     def test_missing_hint_punctuation_and_button_follow_current_fields(self):
         self.open_app()
         self.assertEqual(self.app.form_vars["date"].get(), datetime.now().strftime("%Y-%m-%d"))
@@ -97,19 +143,24 @@ class FlowFormValidationTests(unittest.TestCase):
     def test_clear_is_reversible_and_self_flow_add_keeps_existing_edit_mode(self):
         self.open_app()
         self.assertEqual(self.app.new_flow_button.cget("text"), "Clear Flow")
+        defaults = self.app._flow_snapshot()
+        self.assertIn("disabled", self.app.new_flow_button.state())
         self.complete(from_account="Workshop", amount=".5 + .5")
         self.app.notes_text.insert("1.0", "Recorded without changing the balance")
         self.pump()
         self.app.new_flow_button.invoke()
         self.pump()
         self.assert_hint("To, From, and Amount required")
+        self.assertIn("disabled", self.app.new_flow_button.state())
         self.app.undo()
         self.pump()
         self.assert_hint("Ready to add", False)
+        self.assertNotIn("disabled", self.app.new_flow_button.state())
         self.assertEqual(self.app.form_vars["amount"].get(), ".5 + .5")
         self.app.redo()
         self.pump()
         self.assert_hint("To, From, and Amount required")
+        self.assertIn("disabled", self.app.new_flow_button.state())
         self.complete(from_account="Workshop", amount=".5 + .5")
         self.app.save_button.invoke()
         self.pump()
@@ -118,10 +169,17 @@ class FlowFormValidationTests(unittest.TestCase):
         self.assertEqual(flow["from_account"], flow["to_account"])
         self.assertEqual(flow["name"], "Workshop -> Workshop")
         self.assert_hint("To, From, and Amount required")
+        self.assertEqual(self.app._flow_snapshot(), defaults)
+        self.assertIn("disabled", self.app.new_flow_button.state())
+        self.assertEqual(self.app.ledger.selection(), ())
+        self.assertEqual(self.app.ledger.focus(), "")
+        self.assertIsNone(self.app.editing_id)
+        self.assertTrue(self.app.ledger.exists(flow["flow_id"]))
         self.app.ledger.selection_set(flow["flow_id"])
         self.app.ledger.focus(flow["flow_id"])
         self.pump()
         self.assertIn("disabled", self.app.save_button.state())
+        self.assertNotIn("disabled", self.app.new_flow_button.state())
         self.fill(name="Renamed")
         self.app._field_enter("flow", "name")
         self.pump()
@@ -135,6 +193,7 @@ class FlowFormValidationTests(unittest.TestCase):
         self.assertEqual(self.app.ledger.selection(), ())
         self.assertIsNone(self.app.editing_id)
         self.assert_hint("To, From, and Amount required")
+        self.assertIn("disabled", self.app.new_flow_button.state())
         self.assertEqual(self.repo.get_flow(flow["flow_id"])["amount"], "1")
         self.assertEqual(len(self.repo.list_flows()), 1)
 
