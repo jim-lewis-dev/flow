@@ -3,7 +3,7 @@ from decimal import Decimal, Inexact, Rounded, localcontext
 import unittest
 
 from flowledger.core import parse_quantity, quantity_text
-from flowledger.numeric_entry import evaluate_quantity, MAX_EXPRESSION_LENGTH, MAX_NESTING
+from flowledger.numeric_entry import evaluate_quantity, MAX_EXPRESSION_LENGTH, MAX_INTEGER_BITS, MAX_NESTING
 
 
 class NumericEntryTests(unittest.TestCase):
@@ -26,6 +26,21 @@ class NumericEntryTests(unittest.TestCase):
             "  = (2 + 3) * 4": "20",
             "=-.5": "-0.5",
             "=0": "0",
+            "2^3": "8",
+            "=2^3": "8",
+            "2^3^2": "512",
+            "(2^3)^2": "64",
+            "2 * 3^2 + 1": "19",
+            "-2^2": "-4",
+            "(-2)^2": "4",
+            "2^-3": "0.125",
+            "2^-3^2": "0.001953125",
+            "(.1+.2)^2": "0.09",
+            "(1 / 3)^2 * 9": "1",
+            "5^0": "1",
+            "0^3": "0",
+            "(-1)^999999999999999999999": "-1",
+            "(-1)^999999999999999999998": "1",
         }
         for text, expected in examples.items():
             with self.subTest(text=text):
@@ -63,6 +78,44 @@ class NumericEntryTests(unittest.TestCase):
         self.assertEqual(evaluate_quantity("0.1 * 0.1"), Decimal("0.01"))
         self.assertEqual(evaluate_quantity("9007199254740993 - 9007199254740992"), Decimal(1))
 
+    def test_fractional_powers_keep_exact_roots_and_round_irrational_results(self):
+        exact = {"9^.5": "3", "(4/9)^.5 * 3": "2", "16^-.5": ".25",
+                 "(-8)^(1/3)": "-2", "(-8)^(2/3)": "4", "(-8)^(-1/3)": "-.5"}
+        with localcontext() as context:
+            context.prec = 2
+            context.traps[Inexact] = True
+            context.traps[Rounded] = True
+            for text, result in exact.items():
+                with self.subTest(text=text):
+                    self.assertEqual(evaluate_quantity(text), Decimal(result))
+            self.assertEqual(evaluate_quantity("2^.5"),
+                             Decimal("1.4142135623730950488016887242096980785696718753769"))
+            self.assertEqual(evaluate_quantity("2^.5 * 2^.5"), Decimal(2))
+            self.assertEqual(evaluate_quantity("(-2)^(1/3)"),
+                             Decimal("-1.2599210498948731647672106072782283505702514647015"))
+            # Huge exponents amplify tiny exact differences from one. Rounding
+            # the base to ordinary working precision would silently return 1.
+            self.assertEqual(evaluate_quantity("(1+1/10^100)^(10^100+.5)"),
+                             Decimal("2.7182818284590452353602874713526624977572470937000"))
+            self.assertEqual(evaluate_quantity("(1-1/10^100)^(10^100+.5)"),
+                             Decimal("0.36787944117144232159552377016146086744581113103177"))
+
+    def test_powers_bound_growth_and_keep_boundary_results_valid_quantities(self):
+        for text in ("2^1000000000", "2^-1000000000", "2^2^1000", "10^1000000000.5",
+                     "10^-1000000000.5", ".1^-1000000000.5"):
+            with self.subTest(text=text), self.assertRaisesRegex(ValueError, "too large"):
+                evaluate_quantity(text)
+        for text in ("0^0", "0^-1", "(-2)^.5", "2^", "^2", "2^^3"):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                evaluate_quantity(text)
+        with self.assertRaisesRegex(ValueError, "too many nested powers"):
+            evaluate_quantity("1^" * (MAX_NESTING + 1) + "1")
+        self.assertEqual(evaluate_quantity("1^" * MAX_NESTING + "1"), Decimal(1))
+        largest = evaluate_quantity(f"2^{MAX_INTEGER_BITS - 1}")
+        self.assertEqual(parse_quantity(quantity_text(largest)), largest)
+        with self.assertRaisesRegex(ValueError, "too large"):
+            evaluate_quantity(f"2^{MAX_INTEGER_BITS}")
+
     def test_invalid_math_and_code_are_rejected_without_evaluation(self):
         invalid = ("", " ", "=", "= ", "==1+2", "1=2", "=(1=2)", "1e3", "NaN", "Infinity", "$1", "1,2 + 3",
                    "1,,000", "1.", ".", "1 +", "()", "(1 + 2", "1 + 2)", "1 2",
@@ -76,7 +129,7 @@ class NumericEntryTests(unittest.TestCase):
                 evaluate_quantity(text)
 
     def test_entry_calculations_do_not_change_the_record_parser(self):
-        for text in ("1 + 2", "3 / 4", "(5)", "=1+2", "=5"):
+        for text in ("1 + 2", "3 / 4", "(5)", "=1+2", "=5", "2^3"):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 parse_quantity(text)
         self.assertEqual(evaluate_quantity("3 / 4"), Decimal("0.75"))
