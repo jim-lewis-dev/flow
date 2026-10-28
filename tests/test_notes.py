@@ -107,6 +107,33 @@ class NotesTests(unittest.TestCase):
                                  dialog.winfo_rooty() + dialog.winfo_height())
             self.assertGreater(self.app.expanded_notes_text.winfo_height(), 50)
 
+    def test_expanded_window_can_minimize_and_expand_restores_same_editor(self):
+        flow = self.seed()
+        self.app.edit_notes()
+        dialog = self.app.notes_dialog
+        text = self.app.expanded_notes_text
+        text.insert("end-1c", "\nKeep this edit")
+        self.pump()
+        self.assertEqual(str(dialog.transient()), "")
+        self.assertTrue(all(dialog.resizable()))
+        self.assertIsNone(self.app.grab_current())
+        dialog.iconify()  # Tk rejects this for transient windows.
+        self.pump()
+        # Xvfb alone has no window manager to finish minimizing. Hiding the
+        # window also checks that Expand really restores it, not just raises it.
+        dialog.withdraw()
+        self.pump()
+        self.app.edit_notes()
+        self.pump()
+        self.assertIs(self.app.notes_dialog, dialog)
+        self.assertIs(self.app.expanded_notes_text, text)
+        self.assertEqual(dialog.state(), "normal")
+        self.assertTrue(dialog.winfo_viewable())
+        self.assertEqual(text.get("1.0", "end-1c"), "Old notes\nKeep this edit")
+        self.app._close_notes_editor()
+        self.assertEqual(self.repo.get_flow(flow["flow_id"])["notes"],
+                         "Old notes\nKeep this edit")
+
     def test_expanded_close_reads_immediately_and_preserves_whitespace(self):
         flow = self.seed()
         self.app.edit_notes()

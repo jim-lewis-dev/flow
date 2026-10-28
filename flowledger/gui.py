@@ -983,6 +983,7 @@ class FlowApp(tk.Tk):
     def edit_notes(self):
         """Expand the current draft; edits already belong to the main form."""
         if getattr(self, "notes_dialog", None) is not None:
+            self.notes_dialog.deiconify()
             self.notes_dialog.lift()
             self.expanded_notes_text.focus_set()
             return
@@ -992,7 +993,7 @@ class FlowApp(tk.Tk):
         dialog.title("Flow Notes")
         dialog.geometry("650x350")
         dialog.minsize(360, 220)
-        dialog.transient(self)
+        # A normal window keeps native minimize/maximize controls available.
         body = ttk.Frame(dialog, padding=16)
         body.pack(fill="both", expand=True)
         body.columnconfigure(0, weight=1)
