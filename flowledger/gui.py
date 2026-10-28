@@ -1054,7 +1054,7 @@ class FlowApp(tk.Tk):
         self.save_button = ttk.Button(header, text="Add Flow", width=10, style="AddFlow.Small.TButton", command=self.save_flow)
         self.save_button.pack(side="right")
         self.new_flow_button = ttk.Button(header, text="Clear Flow", width=10, style="Small.TButton", command=self.new_flow)
-        self.new_flow_button.pack(side="right")
+        self.new_flow_button.pack(side="right", padx=(0, 6))
         form = ttk.Frame(editor, style="Card.TFrame")
         form.grid(row=1, column=0, sticky="ew")
         cells = []
@@ -1275,6 +1275,8 @@ class FlowApp(tk.Tk):
 
     def _update_flow_hint(self):
         self.save_button.configure(state="disabled" if self.editing_id or self._missing_flow_fields() else "normal")
+        can_clear = self.editing_id is not None or self._flow_snapshot() != self._cleared_flow
+        self.new_flow_button.configure(state="normal" if can_clear else "disabled")
         self.form_feedback.set("Edits save automatically" if self.editing_id else self._required_flow_hint())
         error = self._flow_input_error
         if error:
@@ -1320,6 +1322,7 @@ class FlowApp(tk.Tk):
             self.form_title.configure(text="New Flow")
             self.save_button.configure(text="Add Flow", state="normal")
             self.form_widgets["status"].configure(values=STATUSES)
+            self._cleared_flow = self._flow_snapshot()
             self._update_flow_hint()
             self._clean_flow = self._flow_snapshot()
             if clear_selection:
