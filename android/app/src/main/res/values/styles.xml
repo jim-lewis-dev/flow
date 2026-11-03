@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Base.FlowTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#f5f6f3</item>
+        <item name="android:navigationBarColor">#f5f6f3</item>
+        <item name="android:colorAccent">#27705c</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+    <style name="FlowTheme" parent="Base.FlowTheme" />
+</resources>

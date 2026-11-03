@@ -1,0 +1,27 @@
+name: Android
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Check browser scripts
+        run: |
+          node --check android/app/src/main/assets/app.js
+          node --check android/app/src/main/assets/experimental.js
+      - name: Test and build Android
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug lintDebug

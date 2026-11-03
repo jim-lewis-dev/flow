@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f3">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>flow</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="experimental.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+<header class="appbar">
+  <div class="brand">flow<span id="dataset">Opening…</span></div>
+  <div class="history"><button id="undo" class="icon" aria-label="Undo" disabled>↶</button><button id="redo" class="icon" aria-label="Redo" disabled>↷</button></div>
+</header>
+<div id="storage-warning" class="storage-warning" role="alert" hidden><span id="storage-message"></span><button id="retry-save" class="text-button">Retry save</button></div>
+<main>
+  <section id="flows" class="page active" aria-label="Flows">
+    <div class="section-heading"><h1>Flows</h1><span id="count" class="muted"></span></div>
+    <div class="searchbar"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search flows" aria-label="Search flows" autocomplete="off"><button id="reset" class="text-button">Reset</button></div>
+    <div id="filters" class="chips" aria-label="Flow filters"></div>
+    <div id="flow-list" class="flow-list"></div>
+    <button id="add-open" class="floating">＋ Add Flow</button>
+  </section>
+  <section id="accounts" class="page" aria-label="Accounts">
+    <div class="section-heading"><h1>Accounts</h1><span class="muted">By unit</span></div>
+    <label class="field">As of<div class="date-control"><input id="as-of" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="as-of-calendar" type="date" tabindex="-1" aria-label="Choose as-of date"></span></div></label>
+    <label class="field">Balance basis<select id="basis"><option>Confirmed</option><option selected>Including Pending</option><option>Including Planned</option></select></label>
+    <p class="small muted">Tap an account to edit its starting balance.</p>
+    <div id="account-list"></div>
+  </section>
+  <section id="graphs" class="page" aria-label="Graphs">
+    <div class="section-heading"><h1>Graphs</h1><button id="graph-reset" class="text-button">Fit</button></div>
+    <div class="graph-controls"><button id="graph-select" class="outline">Accounts &amp; Units</button><select id="graph-basis" aria-label="Graph balance basis"><option>Confirmed</option><option>Including Pending</option><option selected>Including Planned</option></select></div>
+    <div class="two-col"><label class="field">From<div class="date-control"><input id="graph-start" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="graph-start-calendar" type="date" tabindex="-1" aria-label="Choose graph start date"></span></div></label><label class="field">To<div class="date-control"><input id="graph-end" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="graph-end-calendar" type="date" tabindex="-1" aria-label="Choose graph end date"></span></div></label></div>
+    <p class="small muted">Touch for values · Pinch to zoom · Drag to pan</p>
+    <div id="charts"></div>
+  </section>
+  <section id="files" class="page" aria-label="Files">
+    <div class="section-heading"><h1>Files</h1></div>
+    <div class="current-file"><strong id="file-name"></strong><span id="file-location" class="small muted"></span></div>
+    <p class="small muted">Edits save automatically. Flow reopens the last file.</p>
+    <div class="file-actions"><button id="open-file" class="primary">Open file</button><button id="save-as" class="outline">Save As…</button></div>
+    <h2>New file on this phone</h2>
+    <div class="new-dataset"><input id="new-dataset-name" aria-label="New file name" placeholder="money, energy, calories…" autocomplete="off"><button id="new-dataset" class="outline">Create</button></div>
+    <p class="small muted">Separate records in a named SQLite file. The extension is added for you.</p>
+    <details class="sync-panel"><summary>Synchronization <span id="sync-state" class="small muted"></span></summary>
+      <p id="sync-help" class="small muted"></p>
+      <div id="sync-conflicts"></div>
+      <label class="field">Local file name<input id="sync-name" autocomplete="off" placeholder="money"></label>
+      <label class="field">Connection text<textarea id="sync-connection" rows="3" autocomplete="off" spellcheck="false" placeholder="Paste the connection text from Dibbles"></textarea></label>
+      <div class="file-actions"><button id="sync-join" class="outline">Join shared file</button><button id="sync-reconnect" class="outline" hidden>Update connection</button></div>
+    </details>
+    <h2>Your files</h2><div id="dataset-list"></div>
+    <button id="camp" class="example"><span>Try the camp example</span><small>Three days of battery energy and water.</small><span aria-hidden="true">↗</span></button>
+    <p class="small muted">Open edits the selected file. Save As creates a file in the location you choose and switches to it. Files kept only inside Flow need Save As before uninstalling or clearing app data.</p>
+  </section>
+  <section id="experimental" class="page" aria-label="Experimental">
+    <div class="section-heading"><h1>Experimental</h1><button id="map-fit" class="text-button">Fit</button></div>
+    <p class="small muted map-filter-note">Uses the current Flows filters.</p>
+    <div class="two-col map-selectors">
+      <label class="field">Units<select id="map-units" aria-label="Map units"></select></label>
+      <label class="field">Balance basis<select id="map-basis"><option>Confirmed</option><option>Including Pending</option><option>Including Planned</option></select></label>
+    </div>
+    <div class="two-col map-dates">
+      <label class="field">From<div class="date-control"><input id="map-start" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="map-start-calendar" type="date" tabindex="-1" aria-label="Choose map start date"></span></div></label>
+      <label class="field">Through<div class="date-control"><input id="map-end" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="map-end-calendar" type="date" tabindex="-1" aria-label="Choose map end date"></span></div></label>
+    </div>
+    <div class="map-playback" aria-label="Playback controls">
+      <button id="map-first" aria-label="Go to start" title="Go to start" disabled>|◀</button>
+      <button id="map-previous" aria-label="Previous time step" title="Previous time step" disabled>‹</button>
+      <button id="map-play" aria-label="Play" title="Play" disabled>▶</button>
+      <button id="map-next" aria-label="Next time step" title="Next time step" disabled>›</button>
+      <button id="map-last" aria-label="Go to end" title="Go to end" disabled>▶|</button>
+    </div>
+    <div class="map-speed"><label for="map-speed">Speed</label><input id="map-speed" type="range" min="0" max="5" step="1" value="1"><output id="map-speed-label" for="map-speed">1×</output></div>
+    <div class="map-timestamp"><span id="map-time">No flows</span><span id="map-step"></span></div>
+    <p id="map-message" class="small muted" role="status" hidden></p>
+    <div class="map-frame"><svg id="map-canvas" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Animated account flow map" tabindex="0"></svg></div>
+    <p class="small muted map-help">Drag accounts to arrange · Pinch to zoom · Drag background to pan · Tap accounts or dots for details</p>
+    <div class="map-legend" aria-label="Flow statuses"><span><i class="complete"></i>Complete</span><span><i class="pending"></i>Pending</span><span><i class="planned"></i>Planned</span></div>
+  </section>
+</main>
+<nav class="bottom-nav" aria-label="Main navigation">
+  <button data-page="flows" class="active"><span aria-hidden="true">⇄</span>Flows</button>
+  <button data-page="accounts"><span aria-hidden="true">▤</span>Accounts</button>
+  <button data-page="graphs"><span aria-hidden="true">⌁</span>Graphs</button>
+  <button data-page="files"><span aria-hidden="true">▱</span>Files</button>
+  <button data-page="experimental"><span aria-hidden="true">⌘</span>Experimental</button>
+</nav>
+<div id="notice" role="status" hidden></div>
+<dialog id="editor" class="sheet full-sheet">
+  <div class="sheet-header"><h2 id="editor-title">Add Flow</h2><button id="editor-close" class="text-button" autofocus>Done</button></div>
+  <div class="sheet-body">
+    <div id="edit-form">
+      <label class="field">Date<div class="date-control"><input id="f-date" data-field="date" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="f-calendar" type="date" tabindex="-1" aria-label="Choose flow date"></span></div></label>
+      <label class="field">Name<input id="f-name" data-field="name" list="names" autocomplete="off"></label>
+      <div class="two-col"><label class="field">From<input id="f-from_account" data-field="from_account" list="account-options" autocomplete="off"></label><label class="field">To<input id="f-to_account" data-field="to_account" list="account-options" autocomplete="off"></label></div>
+      <div class="two-col"><label class="field">Amount<input id="f-amount" data-field="amount" placeholder="0 or a calculation" autocomplete="off" spellcheck="false"></label><label class="field">Units<input id="f-units" data-field="units" list="unit-options" autocomplete="off"></label></div>
+      <div class="two-col"><label class="field">Status<select id="f-status" data-field="status"><option>Complete</option><option>Pending</option><option>Planned</option><option>Canceled</option></select></label><label class="field">Category<input id="f-category" data-field="category" list="category-options" autocomplete="off"></label></div>
+      <label class="field">Tags<input id="f-tags" data-field="tags" placeholder="Comma separated" autocomplete="off" list="tag-options"></label>
+      <label class="field">Notes<textarea id="f-notes" data-field="notes" rows="4"></textarea></label>
+    </div>
+    <p id="form-error" class="error" role="alert" hidden></p>
+    <div id="existing-actions" class="row-actions" hidden><button id="copy-flow" class="outline">Duplicate</button><button id="delete-flow" class="text-button danger">Delete</button></div>
+  </div>
+  <div class="sheet-footer"><p id="required-hint" class="small muted"></p><div class="form-buttons"><button id="clear-flow" class="outline">Clear Flow</button><button id="add-flow" class="primary" disabled>Add Flow</button></div></div>
+</dialog>
+<dialog id="picker" class="sheet picker"><div class="sheet-header"><h2 id="picker-title"></h2><button id="picker-done" class="text-button">Done</button></div><div class="sheet-body"><input id="picker-search" type="search" placeholder="Search" aria-label="Search choices"><div id="picker-options"></div></div></dialog>
+<dialog id="anchor" class="sheet"><div class="sheet-header"><h2 id="anchor-title"></h2><button id="anchor-done" class="text-button">Done</button></div><div class="sheet-body"><label class="field">Starting date<div class="date-control"><input id="anchor-date" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true">▦</span><input id="anchor-date-calendar" type="date" tabindex="-1" aria-label="Choose starting date"></span></div></label><label class="field">Starting balance<input id="anchor-amount" placeholder="Unknown" autocomplete="off"></label><p class="small muted">Blank is unknown. Enter 0 for a known zero.</p><p id="anchor-error" class="error" role="alert" hidden></p></div></dialog>
+<dialog id="map-detail" class="sheet"><div class="sheet-header"><h2 id="map-detail-title"></h2><button id="map-detail-close" class="text-button">Done</button></div><div id="map-detail-body" class="sheet-body"></div></dialog>
+<datalist id="account-options"></datalist><datalist id="unit-options"></datalist><datalist id="category-options"></datalist><datalist id="tag-options"></datalist><datalist id="names"></datalist>
+</body>
+</html>

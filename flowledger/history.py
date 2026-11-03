@@ -16,6 +16,7 @@ import uuid
 
 _COLUMNS = {
     "accounts": ("account_key", "name"),
+    "account_positions": ("account_key", "x", "y"),
     "account_balances": ("account_key", "units", "opening_amount", "opening_at"),
     "categories": ("category_key", "name"),
     "tags": ("tag_key", "name"),
@@ -39,6 +40,7 @@ class _Change:
 class _Action:
     label: str
     changes: tuple[_Change, ...]
+    tokens: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +168,7 @@ class SessionHistory:
             self._capturing = False
             self.repo.conn.execute(f"DELETE FROM {self._journal}")
         if changes:
-            self._undo.append(_Action(label, changes))
+            self._undo.append(_Action(label, changes, self.repo.sync.history_tokens(changes) if getattr(self.repo, "sync", None) and self.repo.sync.enabled else None))
             self._redo.clear()
         return result
 
@@ -216,12 +218,34 @@ class SessionHistory:
 
     def _restore(self, action: _Action, *, undo: bool) -> None:
         with self.repo.atomic():
+            if action.tokens is not None:
+                self.repo.sync.check_history_tokens(action.tokens)
             # An unrecorded write must not be silently overwritten. Unrelated
             # records can change without invalidating this sparse undo step.
             for change in action.changes:
                 expected = change.after if undo else change.before
-                if self._read_row(change) != expected:
+                current = self._read_row(change)
+                if change.before is None or change.after is None:
+                    matches = current == expected
+                else:
+                    matches = current is not None and all(current[i] == expected[i] for i, (a, b) in enumerate(zip(change.before, change.after)) if a != b)
+                if not matches:
                     raise ValueError("Cannot undo or redo: these records changed outside this session action.")
+            # A newly attached tag or map position must not disappear through
+            # an ON DELETE CASCADE while undoing an older parent insertion.
+            deleting = {(change.table, change.key) for change in action.changes
+                        if action.tokens is not None and (change.before if undo else change.after) is None}
+            for table, key in deleting:
+                if table == "flows":
+                    dependents = [("flow_tags", tuple(row)) for row in self.repo.conn.execute(
+                        "SELECT flow_id,tag_key FROM flow_tags WHERE flow_id=?", key)]
+                elif table == "accounts":
+                    dependents = [("account_positions", tuple(row)) for row in self.repo.conn.execute(
+                        "SELECT account_key FROM account_positions WHERE account_key=?", key)]
+                else:
+                    dependents = []
+                if any(dependent not in deleting for dependent in dependents):
+                    raise ValueError("Cannot undo or redo: another record depends on this change.")
             before = self._audit_records(action.changes)
             # References may move between accounts/categories in the same step.
             # Defer FK checks until every affected row is in its final state.
@@ -239,6 +263,9 @@ class SessionHistory:
                     target = change.before if undo else change.after
                     if change.table != table or target is None:
                         continue
+                    if change.before is not None and change.after is not None:
+                        current = self._read_row(change)
+                        target = tuple(target[i] if change.before[i] != change.after[i] else current[i] for i in range(len(columns)))
                     keys = columns[:len(change.key)]
                     updates = ",".join(f"{column}=excluded.{column}" for column in columns[len(keys):])
                     placeholders = ",".join("?" for _ in columns)
@@ -264,6 +291,8 @@ class SessionHistory:
             action.undo()
         else:
             self._restore(action, undo=True)
+            if action.tokens is not None:
+                action = replace(action, tokens=self.repo.sync.history_tokens(action.changes))
         self._undo.pop()
         self._redo.append(action)
         return action.label
@@ -277,6 +306,8 @@ class SessionHistory:
             action.redo()
         else:
             self._restore(action, undo=False)
+            if action.tokens is not None:
+                action = replace(action, tokens=self.repo.sync.history_tokens(action.changes))
         self._redo.pop()
         self._undo.append(action)
         return action.label
