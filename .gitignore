@@ -25,3 +25,18 @@ htmlcov/
 *.bak
 *.bak.*
 *.suggestions.json
+
+# Android build output and local SDK/signing configuration
+.gradle/
+android/local.properties
+android/**/build/
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Private synchronization service configuration
+coordinator.json
+server.key
+server.crt
+service.lock

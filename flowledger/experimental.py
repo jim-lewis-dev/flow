@@ -54,12 +54,14 @@ class ExperimentalView(ttk.Frame):
 
     def __init__(self, master, repo, get_flows: Callable[[], list[dict]],
                  on_select_flow: Callable[[str], None],
-                 on_view_change: Callable[[dict, str], None] | None = None):
+                 on_view_change: Callable[[dict, str], None] | None = None,
+                 on_save_positions: Callable[[dict], None] | None = None):
         super().__init__(master)
         self.repo = repo
         self.get_flows = get_flows
         self.on_select_flow = on_select_flow
         self.on_view_change = on_view_change
+        self.on_save_positions = on_save_positions
         self.from_var = tk.StringVar(self)
         self.through_var = tk.StringVar(self)
         self.units_var = tk.StringVar(self)
@@ -260,6 +262,18 @@ class ExperimentalView(ttk.Frame):
                          self.canvas.canvasy(0) / self._zoom],
         }
 
+    def _sync_enabled(self):
+        sync = getattr(self.repo, "sync", None)
+        return sync is not None and sync.status()["enabled"]
+
+    def get_view_state(self) -> dict:
+        state = self.get_state()
+        # Synced positions use guarded database undo. Camera/filter undo must
+        # never restore an old layout over another device's node movement.
+        if self._sync_enabled():
+            state.pop("positions", None)
+        return state
+
     def put_state(self, state: dict) -> None:
         self._cancel_date_update()
         current = self.get_state()
@@ -284,8 +298,9 @@ class ExperimentalView(ttk.Frame):
         self.basis_var.set(state.get("basis", "Confirmed"))
         self.speed_var.set(max(0, min(MAX_SPEED, int(state.get("speed", 1)))))
         self.speed_label_var.set(f"{self.speed_var.get()}×")
+        positions = state.get("positions", self._positions)
         self._positions = {name: (float(pos[0]), float(pos[1]))
-                           for name, pos in state.get("positions", {}).items()}
+                           for name, pos in positions.items()}
         self._zoom = max(MIN_ZOOM, min(MAX_ZOOM, float(state.get("zoom", 1))))
         self._initialized_dates = True
         self._load_data(reset_index=True)
@@ -306,17 +321,73 @@ class ExperimentalView(ttk.Frame):
         self._drag_name = self._drag_before = None
         self._pan_before = None
 
-    def _save_positions(self) -> bool:
+    def merge_remote_positions(self) -> None:
+        """Keep an active drag while other received node positions update."""
+        if not self._sync_enabled():
+            return
+        saved = self.repo.load_map_positions()
+        dragging = self._drag_name
+        changed = False
+        for name in set(self._saved_positions) | set(saved):
+            if name == dragging:
+                continue
+            if name in saved:
+                if self._positions.get(name) != saved[name]:
+                    self._positions[name] = saved[name]
+                    changed = True
+            elif name in self._saved_positions:
+                self._positions.pop(name, None)
+                changed = True
+        if dragging:
+            previous = self._saved_positions.get(dragging)
+            self._saved_positions = dict(saved)
+            if previous is None:
+                self._saved_positions.pop(dragging, None)
+            else:
+                self._saved_positions[dragging] = previous
+        else:
+            self._saved_positions = dict(saved)
+        if changed:
+            self._draw_scene()
+        self._history_state = self.get_state()
+
+    def _save_positions(self, before: dict | None = None) -> bool:
         # Record undo can remove an account created during this session. Keep
         # its coordinates in memory for redo, but persist only existing names.
         names = {account["name"] for account in self.repo.list_accounts()}
         positions = {name: point for name, point in self._positions.items() if name in names}
         try:
-            self.repo.save_map_positions(positions)
+            if self._sync_enabled():
+                current = self.repo.load_map_positions()
+                original = ({name: tuple(point) for name, point in before["positions"].items()}
+                            if before is not None else self._saved_positions)
+                changes = {name for name in set(positions) | set(original)
+                           if positions.get(name) != original.get(name)}
+                for name in changes:
+                    if (current.get(name) != self._saved_positions.get(name)
+                            and current.get(name) != positions.get(name)):
+                        raise ValueError(f"{name} moved on another device. Try the move again.")
+                # Only the moved nodes change. Received coordinates for other
+                # accounts survive an open map and an in-progress drag.
+                merged = dict(current)
+                for name in changes:
+                    if name in positions:
+                        merged[name] = positions[name]
+                    else:
+                        merged.pop(name, None)
+                positions = merged
+            if self.on_save_positions is None:
+                self.repo.save_map_positions(positions)
+            else:
+                self.on_save_positions(positions)
         except (ValueError, sqlite3.Error) as exc:
             self.message_var.set(f"Could not save layout: {exc}")
+            if self._sync_enabled():
+                self.reload_positions()
+                self._draw_scene()
             return False
-        self._saved_positions = dict(self._positions)
+        self._saved_positions = (dict(positions) if self._sync_enabled()
+                                 else dict(self._positions))
         return True
 
     def _notify(self, before: dict | None, label: str) -> None:
@@ -327,11 +398,12 @@ class ExperimentalView(ttk.Frame):
 
     def refresh(self) -> None:
         """Re-read current ledger filter results; preserve the current timestamp."""
+        self.merge_remote_positions()
         if self._date_after_id is not None:
             self.update()
         self.pause()
         self._load_data(reset_index=False)
-        if self._saved_positions:
+        if self._saved_positions and not self._sync_enabled():
             names = {account["name"] for account in self.repo.list_accounts()}
             # Undo can remove an account and cascade its stored position. Redo
             # restores the account, so restore its remembered layout as well.
@@ -843,7 +915,7 @@ class ExperimentalView(ttk.Frame):
 
     def close(self) -> None:
         if self._drag_name is not None:
-            self._save_positions()
+            self._save_positions(self._drag_before)
             self._drag_name = self._drag_before = None
         self._cancel_date_update()
         self.pause()
@@ -897,7 +969,7 @@ class ExperimentalView(ttk.Frame):
             self._drag_before = None
             self.canvas.configure(cursor="")
             if before is not None and before["positions"] != self.get_state()["positions"]:
-                self._save_positions()
+                self._save_positions(before)
             self._notify(before, f"Move {name} in flow map")
             return
         if self._pan_before is not None:

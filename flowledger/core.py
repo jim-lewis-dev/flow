@@ -174,8 +174,8 @@ def normalize_date(value: Any) -> str:
     if isinstance(value, Date):
         return value.isoformat() + " 00:00:00"
     match = re.fullmatch(
-        r"([0-9]{4})(?:-([0-9]{1,2})(?:-([0-9]{1,2})"
-        r"(?:[ T]([0-9]{1,2})(?::([0-9]{1,2})(?::([0-9]{1,2}))?)?)?)?)?",
+        r"([0-9]{4})(?:-([0-9]{1,2})(?:-([0-9]{1,2}))?)?"
+        r"(?:[ T]([0-9]{1,2})(?::([0-9]{1,2})(?::([0-9]{1,2}))?)?)?",
         value.strip() if isinstance(value, str) else "")
     if match is None:
         raise ValueError("Use YYYY-MM-DD with optional 24-hour time. Leading zeros and trailing components are optional.")
@@ -223,6 +223,7 @@ class Repository:
     """
 
     def __init__(self, path: str | Path):
+        self.sync = None
         self.path = str(path)
         if not self.path:
             raise ValueError("Database path cannot be empty.")
@@ -258,6 +259,9 @@ class Repository:
                 # Failure rolls back both schema and data; no retained copy.
                 self._migrate_legacy(self.conn)
             self._validate_database(self.conn)
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
+                from .sync import SyncState
+                SyncState(self)
         except Exception:
             self.conn.close()
             raise
@@ -475,16 +479,24 @@ class Repository:
     @contextmanager
     def atomic(self) -> Iterator[None]:
         """Commit all enclosed writes together; nest safely using savepoints."""
+        outer = not self.conn.in_transaction
+        if outer and self.sync is not None:
+            self.sync._start_capture()
         marker = "flow_" + uuid.uuid4().hex
         self.conn.execute(f"SAVEPOINT {marker}")
         try:
             yield
+            if outer and self.sync is not None:
+                self.sync._finish_capture()
         except BaseException:
             self.conn.execute(f"ROLLBACK TO SAVEPOINT {marker}")
             self.conn.execute(f"RELEASE SAVEPOINT {marker}")
             raise
         else:
             self.conn.execute(f"RELEASE SAVEPOINT {marker}")
+        finally:
+            if outer and self.sync is not None:
+                self.sync._stop_capture()
 
     def _audit(self, entity: str, key: str, action: str, before: Any, after: Any) -> None:
         self.conn.execute(
@@ -768,6 +780,8 @@ class Repository:
         For file databases the safety copy sits beside the current database.
         In-memory repositories retain a temporary safety copy on disk as well.
         """
+        if self.sync is not None and self.sync.enabled:
+            raise ValueError("A synchronized file cannot be replaced by a backup. Open the backup separately or join a new local copy.")
         if self.conn.in_transaction:
             raise ValueError("Finish the current write before restoring.")
         source_path = Path(path).expanduser().resolve()
@@ -779,6 +793,10 @@ class Repository:
         prepared = sqlite3.connect(":memory:", isolation_level=None)
         try:
             self._validate_database(source, allow_legacy=True)
+            if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
+                shared = source.execute("SELECT value FROM sync_meta WHERE key='dataset'").fetchone()
+                if shared is not None and json.loads(shared[0]):
+                    raise ValueError("A synchronized backup cannot replace this file. Open it separately or join a new local copy.")
             # Migrate a private snapshot, leaving the source backup unchanged.
             # Validate the whole candidate before making any live-data changes.
             source.backup(prepared)

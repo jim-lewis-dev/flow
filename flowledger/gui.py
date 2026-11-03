@@ -152,6 +152,8 @@ class FlowApp(tk.Tk):
         self.refresh_all()
         self.show_view("flows")
         self._build_view_history()
+        from .sync_ui import SyncController
+        self.sync_controller = SyncController(self)
         if suggestion_cleanup_error:
             self._feedback(suggestion_cleanup_error, True)
 
@@ -211,6 +213,9 @@ class FlowApp(tk.Tk):
         self.undo_button.pack(side="left", padx=3)
         self.redo_button = ttk.Button(context, text="Redo", style="Small.TButton", command=self.redo, state="disabled")
         self.redo_button.pack(side="left", padx=3)
+        self.sync_button = ttk.Button(context, text="Sync", width=11, style="Small.TButton",
+                                      command=lambda: self.sync_controller.show())
+        self.sync_button.pack(side="left", padx=(10, 3))
         if self.demo:
             ttk.Label(context, text="Demo", style="CardMuted.TLabel").pack(side="left", padx=(0, 18))
         self.view_host = ttk.Frame(self, padding=(16, 14, 16, 0))
@@ -253,6 +258,107 @@ class FlowApp(tk.Tk):
 
     def _flow_snapshot(self):
         return tuple(v.get() for v in self.form_vars.values()) + (self.notes_text.get("1.0", "end-1c"),)
+
+    @staticmethod
+    def _tags_text(tags):
+        stream = io.StringIO()
+        csv.writer(stream, lineterminator="").writerow(tags)
+        return stream.getvalue()
+
+    def _changed_form_fields(self, kind):
+        keys = (*self.form_vars, "notes") if kind == "flow" else tuple(self.account_vars)
+        current = self._flow_snapshot() if kind == "flow" else self._account_snapshot()
+        clean = getattr(self, "_clean_" + kind, current)
+        return {key for key, old, new in zip(keys, clean, current) if old != new}
+
+    def _flow_display_values(self, flow):
+        values = {key: flow[key] for key in self.form_vars}
+        values["amount"] = format_quantity(flow["amount"]).replace(",", "")
+        values["tags"] = self._tags_text(flow.get("tags", []))
+        values["notes"] = flow.get("notes", "")
+        return values
+
+    def _record_edit_tokens(self, kind, record):
+        sync = getattr(self.repo, "sync", None)
+        if sync is None or not sync.status()["enabled"]:
+            return {}
+        table, key = (("flows", (record["flow_id"],)) if kind == "flow" else
+                      ("account_balances", (record["name"].casefold(), record["units"])))
+        return sync.field_tokens(table, key)
+
+    def _check_edit_tokens(self, kind, changed, record):
+        previous = getattr(self, "_" + kind + "_edit_tokens", {})
+        if not previous:
+            return
+        current = self._record_edit_tokens(kind, record)
+        mapping = ({"from_account": "from_key", "to_account": "to_key", "category": "category_key"}
+                   if kind == "flow" else {"opening": "opening_amount", "date": "opening_at"})
+        if previous.get("__row__", "") != current.get("__row__", ""):
+            raise ValueError("This record changed on another device. Reselect it before editing.")
+        for key in changed:
+            column = mapping.get(key, key)
+            if previous.get(column, "") != current.get(column, ""):
+                raise ValueError(f"{key.replace('_', ' ').title()} changed on another device. Reselect the record before editing this field.")
+
+    def _refresh_synced_records(self):
+        """Refresh received data without committing or replacing unfinished input."""
+        loading, committing = self._loading, self._committing
+        self._loading = self._committing = True
+        try:
+            for kind, identity in (("flow", self.editing_id), ("account", self.account_editing)):
+                if not identity:
+                    continue
+                changed = self._changed_form_fields(kind)
+                if kind == "flow":
+                    record = self.repo.get_flow(identity)
+                    keys = (*self.form_vars, "notes")
+                    if record is None:
+                        self.ledger_editor.close(commit=False)
+                        self.form_feedback.set("Deleted on another device · Clear to continue")
+                        continue
+                    values = self._flow_display_values(record)
+                else:
+                    previous = getattr(self, "_account_edit_base", None)
+                    record = self.repo.get_account(previous["name"], previous["units"]) if previous else None
+                    keys = tuple(self.account_vars)
+                    if record is None:
+                        self.account_cell_editor.close(commit=False)
+                        self.account_feedback.set("Deleted on another device · Clear to continue")
+                        continue
+                    values = {"name": record["name"], "units": record["units"],
+                              "opening": "" if record["opening_amount"] is None else format_quantity(record["opening_amount"]).replace(",", ""),
+                              "date": record["opening_at"]}
+                clean = dict(zip(keys, getattr(self, "_clean_" + kind)))
+                base = dict(getattr(self, "_" + kind + "_edit_base", None) or record)
+                tokens = dict(getattr(self, "_" + kind + "_edit_tokens", {}))
+                received_tokens = self._record_edit_tokens(kind, record)
+                mapping = ({"from_account": "from_key", "to_account": "to_key", "category": "category_key"}
+                           if kind == "flow" else {"opening": "opening_amount", "date": "opening_at"})
+                for key in keys:
+                    if key in changed:
+                        continue
+                    record_key = mapping.get(key, key) if kind == "account" else key
+                    value = (self._field_value(kind, key) if base.get(record_key) == record[record_key]
+                             else values[key])
+                    if self._field_value(kind, key) != value:
+                        self._put_field_value(kind, key, value)
+                    clean[key] = normalize_date(value) if kind == "account" and key == "date" else value
+                    base[record_key] = record[record_key]
+                    column = mapping.get(key, key)
+                    if column in received_tokens:
+                        tokens[column] = received_tokens[column]
+                if not changed:
+                    tokens = received_tokens
+                setattr(self, "_clean_" + kind, tuple(clean[key] for key in keys))
+                setattr(self, "_" + kind + "_edit_base", base)
+                setattr(self, "_" + kind + "_edit_tokens", tokens)
+            self.experimental.merge_remote_positions()
+            self.refresh_all(preserve_ledger=self._flow_field_has_focus(), preserve_accounts=True)
+        finally:
+            self._loading, self._committing = loading, committing
+        self._sync_flow_draft()
+        self._sync_account_draft()
+        self._update_history_buttons()
 
     def _account_snapshot(self):
         values = [v.get() for v in self.account_vars.values()]
@@ -298,7 +404,7 @@ class FlowApp(tk.Tk):
                           lambda t=tree: tuple((c, t.column(c, "width")) for c in t["columns"]),
                           lambda values, t=tree: self._put_column_widths(t, values))
         view.register("graph", self._graph_state, self._put_graph_state)
-        view.register("experimental", self.experimental.get_state, self.experimental.put_state)
+        view.register("experimental", self.experimental.get_view_state, self.experimental.put_state)
         for variable, key in ((self.chart_basis, "basis"), (self.chart_start, "start"),
                               (self.chart_end, "end"), (self.chart_combined, "combined")):
             variable.trace_add("write", lambda *args, k=key:
@@ -840,6 +946,7 @@ class FlowApp(tk.Tk):
 
     def request_close(self):
         if self._confirm_changes("flow") and self._confirm_changes("account"):
+            self.sync_controller.close()
             self.experimental.close()
             self._close_popups()
             self.history.close()
@@ -1314,6 +1421,7 @@ class FlowApp(tk.Tk):
             self._close_notes_editor(commit=False)
             self._close_popups()
             self.editing_id = None
+            self._flow_edit_base = None
             self._active_edit = None
             self._draft_redo = None
             defaults = {"date": datetime.now().strftime("%Y-%m-%d"), "from_account": "", "to_account": "", "amount": "", "units": "USD", "status": "Complete", "name": "", "category": "Uncategorized", "tags": ""}
@@ -1381,14 +1489,30 @@ class FlowApp(tk.Tk):
             self._committing = True
             if kind == "flow":
                 data = self._flow_data()
+                changed = self._changed_form_fields("flow")
+                current = self.repo.get_flow(self.editing_id)
+                if current is None:
+                    raise ValueError("This flow was deleted on another device. Clear the form to continue.")
+                base = getattr(self, "_flow_edit_base", None) or current
+                self._check_edit_tokens("flow", changed, current)
+                for key in changed:
+                    if current[key] != base[key] and current[key] != data[key]:
+                        raise FlowInputError(key, f"{key.replace('_', ' ').title()}: changed on another device. Reselect the flow before editing this field.")
+                data = {**current, **{key: data[key] for key in changed}}
                 result = self.history.perform("Edit flow", lambda: self.repo.save_flow(data))
                 self._loading = True
                 try:
                     for key in ("date", "from_account", "to_account", "name", "units", "category", "status"):
                         self.form_vars[key].set(result[key])
                     self.form_vars["amount"].set(format_quantity(result["amount"]).replace(",", ""))
+                    self.form_vars["tags"].set(self._tags_text(result["tags"]))
+                    if self.notes_text.get("1.0", "end-1c") != result["notes"]:
+                        self.notes_text.delete("1.0", "end")
+                        self.notes_text.insert("1.0", result["notes"])
                 finally:
                     self._loading = False
+                self._flow_edit_base = result
+                self._flow_edit_tokens = self._record_edit_tokens("flow", result)
                 self._clean_flow = self._flow_snapshot()
                 self.form_feedback.set("Edits save automatically")
                 message = "Updated: " + result["name"]
@@ -1400,16 +1524,37 @@ class FlowApp(tk.Tk):
                     raise ValueError(f"Starting Balance: {exc}") from exc
                 when = normalize_date(self._account_when())
                 account = self._account_record(self.account_editing)
+                if account is None:
+                    raise ValueError("This account balance no longer exists.")
+                account = self.repo.get_account(account["name"], account["units"])
+                changed = self._changed_form_fields("account")
+                base = getattr(self, "_account_edit_base", None) or account
+                self._check_edit_tokens("account", changed, account)
+                if "opening" not in changed:
+                    amount = account["opening_amount"]
+                elif account["opening_amount"] != base["opening_amount"] and account["opening_amount"] != amount:
+                    raise ValueError("Starting Balance changed on another device. Reselect the account before editing it.")
+                if "date" not in changed:
+                    when = account["opening_at"]
+                elif account["opening_at"] != base["opening_at"] and account["opening_at"] != when:
+                    raise ValueError("Starting Date changed on another device. Reselect the account before editing it.")
                 result = self.history.perform("Edit account", lambda: self.repo.save_account(account["name"], opening_amount=amount, opening_at=when, units=account["units"]))
+                self._loading = True
                 try:
-                    if raw:
-                        parse_quantity(raw)
-                except ValueError:
-                    self._loading = True
-                    try:
-                        self.account_vars["opening"].set(result["opening_amount"])
-                    finally:
-                        self._loading = False
+                    if "opening" not in changed and account["opening_amount"] != base["opening_amount"]:
+                        self.account_vars["opening"].set("" if result["opening_amount"] is None else format_quantity(result["opening_amount"]).replace(",", ""))
+                    else:
+                        try:
+                            if raw:
+                                parse_quantity(raw)
+                        except ValueError:
+                            self.account_vars["opening"].set(result["opening_amount"])
+                    if "date" not in changed and account["opening_at"] != base["opening_at"]:
+                        self.account_vars["date"].set(result["opening_at"])
+                finally:
+                    self._loading = False
+                self._account_edit_base = result
+                self._account_edit_tokens = self._record_edit_tokens("account", result)
                 self._clean_account = self._account_snapshot()
                 self.account_feedback.set("Edits save automatically · Blank starting balance = unknown")
                 message = "Updated: " + result["name"]
@@ -1476,6 +1621,8 @@ class FlowApp(tk.Tk):
         self._loading = True
         try:
             self.editing_id = None if repeat else flow["flow_id"]
+            self._flow_edit_base = None if repeat else dict(flow)
+            self._flow_edit_tokens = {} if repeat else self._record_edit_tokens("flow", flow)
             for key in ("date", "from_account", "to_account", "name", "units", "category", "status"):
                 self.form_vars[key].set(flow[key])
             self.form_vars["amount"].set(format_quantity(flow["amount"]).replace(",", ""))
@@ -1815,7 +1962,12 @@ class FlowApp(tk.Tk):
             # Refresh values and tooltip data in place. Apply sort/filter
             # changes on row exit, so even a newly filtered-out row can finish.
             saved = {flow["flow_id"]: flow for flow in flows}
-            flows = [saved[fid] for fid in self.ledger.get_children() if fid in saved]
+            visible = self.ledger.get_children()
+            flows = [saved[fid] for fid in visible if fid in saved]
+            flows.extend(flow for fid, flow in saved.items() if fid not in visible and matches(flow))
+            for fid in visible:
+                if fid not in saved:
+                    self.ledger.delete(fid)
         else:
             flows.sort(key=lambda flow: order[flow["flow_id"]])
             sort_rows(flows, self._ledger_sort_key, self.sort_reverse)
@@ -1832,7 +1984,7 @@ class FlowApp(tk.Tk):
             self.ledger_rows[fid] = flow
             values = self._flow_row_values(flow)
             tags = ("odd" if index % 2 else "even", flow["status"])
-            if preserve_edit:
+            if preserve_edit and self.ledger.exists(fid):
                 self.ledger.item(fid, values=values, tags=tags)
             else:
                 self.ledger.insert("", "end", iid=fid, values=values, tags=tags)
@@ -1894,7 +2046,7 @@ class FlowApp(tk.Tk):
         if self.ledger_filters[key].set_values(ordered):
             self._ledger_filter_changed(key)
 
-    def refresh_all(self, *, preserve_ledger=False):
+    def refresh_all(self, *, preserve_ledger=False, preserve_accounts=False):
         self.refresh_suggestions()
         flows = self.repo.list_flows()
         pruned = []
@@ -1913,7 +2065,7 @@ class FlowApp(tk.Tk):
             if pruned:
                 self.view_history.remember("ledger_filters")
         self.refresh_ledger(preserve_edit=preserve_ledger)
-        self.refresh_accounts()
+        self.refresh_accounts(preserve_edit=preserve_accounts)
         self.refresh_chart_accounts()
         if hasattr(self, "db_path_label"):
             self.db_path_label.configure(text=str(self.repo.path))
@@ -1926,13 +2078,31 @@ class FlowApp(tk.Tk):
         self.experimental = ExperimentalView(self.views["experimental"], self.repo,
             get_flows=lambda: list(self.ledger_rows.values()),
             on_select_flow=self._open_experimental_flow,
-            on_view_change=self._experimental_view_changed)
+            on_view_change=self._experimental_view_changed,
+            on_save_positions=self._save_experimental_positions)
         self.experimental.pack(fill="both", expand=True)
 
     def _experimental_view_changed(self, before, label):
         if hasattr(self, "view_history"):
+            if self._sync_enabled():
+                if label.startswith("Move "):
+                    self.view_history.remember("experimental")
+                    self._update_history_buttons()
+                    return
+                before = {key: value for key, value in before.items() if key != "positions"}
             self.view_history.record("experimental", label, before=before)
             self._update_history_buttons()
+
+    def _sync_enabled(self):
+        sync = getattr(self.repo, "sync", None)
+        return sync is not None and sync.status()["enabled"]
+
+    def _save_experimental_positions(self, positions):
+        if self._sync_enabled():
+            self.history.perform("Move account in flow map", lambda: self.repo.save_map_positions(positions))
+            self._update_history_buttons()
+        else:
+            self.repo.save_map_positions(positions)
 
     def _open_experimental_flow(self, flow_id):
         if not self.show_view("flows") or not self.ledger.exists(flow_id):
@@ -2149,10 +2319,10 @@ class FlowApp(tk.Tk):
             return sorted(rows, key=lambda row: row[0][column].casefold(), reverse=reverse)
         return rows
 
-    def refresh_accounts(self):
+    def refresh_accounts(self, *, preserve_edit=False):
         if not hasattr(self, "accounts_tree"):
             return
-        if not self.account_cell_editor.close(commit=not self._committing):
+        if not preserve_edit and not self.account_cell_editor.close(commit=not self._committing):
             return
         try:
             at = self._account_balance_time()
@@ -2168,7 +2338,8 @@ class FlowApp(tk.Tk):
         self.account_tooltip.hide()
         selection = self.accounts_tree.selection()
         selected = self._active_tree_row(self.accounts_tree, self._account_selection)
-        self.accounts_tree.delete(*self.accounts_tree.get_children())
+        if not preserve_edit:
+            self.accounts_tree.delete(*self.accounts_tree.get_children())
         self.account_rows = {}
         accounts = self.repo.list_accounts(referenced_only=True)
         flows = self.repo.list_flows()
@@ -2184,7 +2355,16 @@ class FlowApp(tk.Tk):
         for index, (account, opening, confirmed, pending) in enumerate(rows):
             key = self._account_key(account)
             self.account_rows[key] = account
-            self.accounts_tree.insert("", "end", iid=key, values=(account["name"], account["units"], quantity(opening, account["units"]), account["opening_at"][:10], quantity(confirmed, account["units"]), quantity(pending, account["units"])), tags=("odd" if index % 2 else "even",))
+            values = (account["name"], account["units"], quantity(opening, account["units"]), account["opening_at"][:10], quantity(confirmed, account["units"]), quantity(pending, account["units"]))
+            tags = ("odd" if index % 2 else "even",)
+            if preserve_edit and self.accounts_tree.exists(key):
+                self.accounts_tree.item(key, values=values, tags=tags)
+            else:
+                self.accounts_tree.insert("", "end", iid=key, values=values, tags=tags)
+        if preserve_edit:
+            for key in self.accounts_tree.get_children():
+                if key not in self.account_rows and key != self.account_editing:
+                    self.accounts_tree.delete(key)
         if self.account_editing and not self.accounts_tree.exists(self.account_editing):
             self.new_account(focus=False, confirm=False)
             selection = tuple(key for key in selection if self.accounts_tree.exists(key))
@@ -2227,6 +2407,8 @@ class FlowApp(tk.Tk):
                 selection = selected if key in selected else (key,)
             self._set_account_selection(key, selection=selection)
             self.account_editing = key
+            self._account_edit_base = dict(account)
+            self._account_edit_tokens = self._record_edit_tokens("account", account)
             self.account_vars["name"].set(name)
             self.account_vars["units"].set(account["units"])
             self.account_name_entry.configure(state="disabled")
@@ -2255,6 +2437,7 @@ class FlowApp(tk.Tk):
             self._restore_account_draft_row()
             self._close_popups()
             self.account_editing = None
+            self._account_edit_base = None
             self._active_edit = None
             self._draft_redo = None
             self.account_name_entry.configure(state="normal")
