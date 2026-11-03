@@ -2,7 +2,7 @@
 
 Flow records **quantified transfers between accounts**. A flow may move money, material, energy, inventory, or any other resource you can express as a number and a unit. Each account holds a separate balance for each unit.
 
-Inspect individual transfers in the ledger, compare balances over time, or follow resources through an animated map of accounts. Include planned flows to explore future balances.
+Inspect individual transfers in the ledger, compare balances over time, or follow resources through an animated map of accounts. Include planned flows to explore future and projected balances.
 
 ![Flow ledger: editable transfers with filters for accounts, units, status, categories, and tags](docs/ledger.png)
 
