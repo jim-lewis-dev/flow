@@ -241,5 +241,5 @@ An unrelated debug key cannot update an installed signed preview in place.
 
 ## License
 
-[MIT](LICENSE) © 2026 Jim Lewis. Python and Chaquopy retain their own bundled
+[MIT](../LICENSE) © 2026 Jim Lewis. Python and Chaquopy retain their own bundled
 license notices.
