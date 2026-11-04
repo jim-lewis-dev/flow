@@ -7,6 +7,7 @@ const filterDefs=[['from_account','From','accounts'],['to_account','To','account
 const filters=Object.fromEntries(filterDefs.map(([k])=>[k,new Set()]));
 let state=null, page='flows', editing=null, draft=null, formTail=Promise.resolve(true), submitted='', pickerConfig=null, anchorRecord=null, adding=false, formGeneration=0, fileBusy=false;
 let editorBase=null, anchorBase=null;
+let deletingFile=null;
 const queuedFlowFields=new Map(), queuedAnchorFields=new Map();
 let syncBusy=false, syncPaused=false, syncTimer=null, syncAgain=false;
 const writeActions=new Set(['add_flow','update_flow','copy_flow','delete_flow','save_anchor','save_positions','undo','redo','sync_resolve']);
@@ -66,12 +67,15 @@ const displayDate=value=>value.endsWith(' 00:00:00')?value.slice(0,10):value;
 function hint(data){const missing=required.filter(([k])=>!String(data[k]??'').trim()).map(([,n])=>n);return missing.length===0?'':(missing.length===1?missing[0]:missing.length===2?missing.join(' and '):missing.slice(0,-1).join(', ')+', and '+missing.at(-1))+' required';}
 
 function render(){
-  $('dataset').textContent=(state.dataset_name||state.dataset).replace(/\.sqlite3$/,'');
+  $('dataset').textContent=(state.dataset_name||state.dataset||'No file open').replace(/\.sqlite3$/,'');
   $('dataset').title=state.file_location||'On this phone';
   $('storage-warning').hidden=!state.storage_warning;
   $('storage-message').textContent=state.storage_warning||'';
   $('retry-save').hidden=!state.file_pending;
   $('undo').disabled=!state.undo;$('undo').title=state.undo||'Undo';$('redo').disabled=!state.redo;$('redo').title=state.redo||'Redo';
+  $('add-open').disabled=!state.dataset;
+  document.querySelectorAll('[data-page]').forEach(n=>n.disabled=!state.dataset&&n.dataset.page!=='files');
+  if(!state.dataset)navigate('files');
   for(const [key,,vocab] of filterDefs)for(const selected of filters[key])if(!state.vocabulary[vocab].includes(selected))filters[key].delete(selected);
   for(const [id,values] of [['account-options',state.vocabulary.accounts],['unit-options',state.vocabulary.units],['category-options',[...new Set(['Uncategorized',...state.vocabulary.categories])]],['tag-options',state.vocabulary.tags],['names',state.vocabulary.names]]){
     $(id).replaceChildren(...values.map(value=>{const n=el('option');n.value=value;return n;}));
@@ -114,25 +118,34 @@ function renderAccounts(){
 }
 function renderFiles(){
   renderSync();
-  $('file-name').textContent=state.dataset_name||state.dataset;
-  $('file-location').textContent=state.file_location||'On this phone · Flow files';
+  $('file-name').textContent=state.dataset_name||state.dataset||'No file open';
+  $('file-location').textContent=state.dataset?(state.file_location||'On this phone - Flow files'):'Open, create, or join a file.';
   const files=state.files||state.datasets.map(name=>({key:name,name,location:'On this phone'}));
   files.sort((a,b)=>a.name.localeCompare(b.name)||a.location.localeCompare(b.location));
   $('dataset-list').replaceChildren(...files.map(file=>{
-    const active=file.key===state.dataset,b=el('button','dataset-item'+(active?' active':'')),label=el('span','file-label');
-    label.append(el('span','',file.name),el('small','muted',file.location));b.append(label,el('span','',active?'●':'→'));
-    b.disabled=fileBusy;b.onclick=()=>switchDataset(file.key.startsWith('document:')?'open_document':'open_dataset',file.key.startsWith('document:')?{key:file.key}:{name:file.key}).catch(()=>{});return b;
+    const active=file.key===state.dataset,row=el('div','dataset-row'),b=el('button','dataset-item'+(active?' active':'')),label=el('span','file-label');
+    label.append(el('span','',file.name),el('small','muted',file.location));b.append(label,el('span','',active?'Open':'>'));
+    b.disabled=fileBusy;b.onclick=()=>switchDataset(file.key.startsWith('document:')?'open_document':'open_dataset',file.key.startsWith('document:')?{key:file.key}:{name:file.key}).catch(()=>{});row.append(b);
+    if(!file.key.startsWith('document:')){
+      const remove=el('button','text-button danger delete-dataset','Delete');
+      remove.setAttribute('aria-label','Delete '+file.name);remove.disabled=fileBusy;
+      remove.onclick=()=>{deletingFile=file;setError('delete-file-error','');$('delete-file-message').textContent=`Delete ${file.name} from this phone? Other devices are unchanged. This cannot be undone.`;$('delete-file-confirm').showModal();};
+      row.append(remove);
+    }
+    return row;
   }));
+  if(!files.length)$('dataset-list').append(el('p','small muted','No saved files on this phone.'));
+  fileControls();
 }
 async function switchDataset(action,args={}){return fileAction(action,args);}
 function resetView(){editorBase=null;anchorBase=null;queuedFlowFields.clear();queuedAnchorFields.clear();experimental.reset();formGeneration++;draft=null;editing=null;submitted='';$('search').value='';Object.values(filters).forEach(s=>s.clear());graphPairs=[];graphInitialized=false;rangeEdited=false;zoom={lo:0,hi:1};}
-function navigate(next){page=next;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('active',n.id===page));document.querySelectorAll('[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));window.scrollTo(0,0);if(page==='graphs')loadGraph();experimental.setActive(page==='experimental');}
+function navigate(next){if(state&&!state.dataset)next='files';page=next;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('active',n.id===page));document.querySelectorAll('[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));window.scrollTo(0,0);if(page==='graphs')loadGraph();experimental.setActive(page==='experimental');}
 document.querySelectorAll('[data-page]').forEach(n=>n.onclick=()=>navigate(n.dataset.page));
 
 function formData(){const d=Object.fromEntries(fields.map(f=>[f,$('f-'+f).value]));d.tags=d.tags.split(',').map(s=>s.trim()).filter(Boolean);if(editing)d.flow_id=editing;return d;}
 function updateHint(){const data=formData(),defaults=blank();const changed=fields.some(f=>JSON.stringify(data[f])!==JSON.stringify(defaults[f]));$('clear-flow').disabled=adding||(!editing&&!changed);const missing=hint(data);$('required-hint').textContent=missing||(editing?'Edits save automatically.':'Ready to add');$('add-flow').disabled=adding||!!editing||!!missing;$('existing-actions').hidden=!editing;}
 function fillForm(data){for(const f of fields)$('f-'+f).value=f==='tags'?data.tags.join(', '):data[f]??'';$('f-calendar').value=data.date.slice(0,10);updateHint();}
-function openEditor(record=null){formGeneration++;editing=record?.flow_id||null;editorBase=record?plain(record):null;queuedFlowFields.clear();const data=record?plain(record):(draft||blank());fillForm(data);submitted=editing?JSON.stringify(data):'';$('editor-title').textContent=editing?'Edit Flow':'Add Flow';setError('form-error','');$('editor').showModal();$('editor').querySelector('.sheet-body').scrollTop=0;}
+function openEditor(record=null){if(!state?.dataset)return;formGeneration++;editing=record?.flow_id||null;editorBase=record?plain(record):null;queuedFlowFields.clear();const data=record?plain(record):(draft||blank());fillForm(data);submitted=editing?JSON.stringify(data):'';$('editor-title').textContent=editing?'Edit Flow':'Add Flow';setError('form-error','');$('editor').showModal();$('editor').querySelector('.sheet-body').scrollTop=0;}
 function stash(){if(!editing)draft=formData();updateHint();}
 function commitField(field=null){
   if(!editing){stash();
@@ -246,12 +259,14 @@ $('anchor').addEventListener('cancel',event=>{event.preventDefault();closeAnchor
 bind('anchor-amount','focus',()=>{const n=$('anchor-amount');n.setSelectionRange(n.value.length,n.value.length);});
 bind('new-dataset','click',async()=>{await switchDataset('new_dataset',{name:$('new-dataset-name').value});$('new-dataset-name').value='';});
 bind('camp','click',async()=>{await switchDataset('camp');navigate('flows');});
-function fileControls(){for(const id of ['open-file','save-as','new-dataset','camp','sync-join','sync-reconnect'])$(id).disabled=fileBusy;document.querySelectorAll('.dataset-item').forEach(n=>n.disabled=fileBusy);}
+function fileControls(){for(const id of ['open-file','new-dataset','camp','sync-join','sync-reconnect','delete-file-yes','delete-file-no'])$(id).disabled=fileBusy;$('save-as').disabled=fileBusy||!state?.dataset;document.querySelectorAll('.dataset-item,.delete-dataset').forEach(n=>n.disabled=fileBusy);}
 async function fileAction(action,args={}){
   if(fileBusy)return {canceled:true};fileBusy=true;fileControls();
-  try{await formTail;await anchorTail;const r=await api(action,args);if(r.state){resetView();accept(r);notice(`Opened ${state.dataset_name||state.dataset}`);}return r;}
+  try{await formTail;await anchorTail;const r=await api(action,args);if(r.state){if(action!=='delete_dataset'||r.state.dataset!==state?.dataset)resetView();accept(r);notice(action==='delete_dataset'?'File deleted from this phone.':`Opened ${state.dataset_name||state.dataset}`);}return r;}
   catch(e){notice(e.message,true);throw e;}finally{fileBusy=false;fileControls();}
 }
+bind('delete-file-no','click',()=>{$('delete-file-confirm').close();deletingFile=null;});
+bind('delete-file-yes','click',async()=>{if(!deletingFile)return;try{await fileAction('delete_dataset',{name:deletingFile.key});$('delete-file-confirm').close();deletingFile=null;}catch(error){setError('delete-file-error',error.message);}});
 bind('open-file','click',()=>fileAction('pick_open'));
 bind('save-as','click',()=>fileAction('save_as'));
 bind('retry-save','click',async()=>{await act('retry_save');notice('Saved to the selected file.');});
@@ -265,7 +280,7 @@ bind('graph-basis','change',()=>{zoom={lo:0,hi:1};return loadGraph();});
 for(const id of ['graph-start','graph-end'])bindDateInput(id,()=>{rangeEdited=true;zoom={lo:0,hi:1};return loadGraph();},message=>$('charts').replaceChildren(el('p','error',message)));
 bind('graph-reset','click',()=>{zoom={lo:0,hi:1};rangeEdited=false;return loadGraph();});
 async function loadGraph(){
-  if(!state)return;const gen=++graphGeneration;
+  if(!state?.dataset)return;const gen=++graphGeneration;
   if(!graphInitialized){const a=state.accounts.find(a=>a.opening_amount!==null);graphPairs=a?[[a.name,a.units]]:[];graphInitialized=true;}
   graphPairs=graphPairs.filter(p=>state.accounts.some(a=>a.name===p[0]&&a.units===p[1]));
   $('graph-select').textContent=`Accounts & Units${graphPairs.length?' · '+graphPairs.length:''}`;
@@ -355,7 +370,7 @@ bind('sync-reconnect','click',async()=>{const result=await api('reconnect_sync',
 window.flowResume=()=>{syncPaused=false;scheduleSync(0);};
 document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(syncTimer);}else{syncPaused=false;scheduleSync(0);}});
 
-window.flowBack=()=>{for(const id of ['map-detail','picker','anchor','editor'])if($(id).open){if(id==='editor')closeEditor();else if(id==='anchor')closeAnchor();else $(id).close();return true;}if(page!=='flows'){navigate('flows');return true;}return false;};
+window.flowBack=()=>{for(const id of ['delete-file-confirm','map-detail','picker','anchor','editor'])if($(id).open){if(id==='editor')closeEditor();else if(id==='anchor')closeAnchor();else $(id).close();return true;}if(page!==(state?.dataset?'flows':'files')){navigate('flows');return true;}return false;};
 window.flowPause=()=>{syncPaused=true;clearTimeout(syncTimer);experimental.pause();const saves=[];if($('editor').open)saves.push(commitField());if($('anchor').open)saves.push(saveAnchor());Promise.all(saves).then(()=>pollSync(true)).catch(()=>{});};
 window.addEventListener('resize',()=>{if(page==='graphs'&&graphData)drawGraphs();});
 const experimental=new window.FlowExperimental({api,getState:()=>state,getFlows:matchingFlows,accept,notice,dateControl:bindDateInput});

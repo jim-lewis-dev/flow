@@ -28,6 +28,9 @@
 .bottom-nav button[data-page="experimental"]{font-size:10px}
 .current-file,.file-label{display:flex;flex-direction:column;gap:4px;min-width:0;overflow-wrap:anywhere}
 .dataset-item .file-label{text-align:left}
+.dataset-row{display:flex;gap:6px;align-items:stretch;margin-bottom:8px}
+.dataset-row .dataset-item{flex:1;min-width:0;margin-bottom:0;align-items:center;gap:8px}
+.delete-dataset{flex:0 0 auto;padding:8px;font-size:12px}
 .storage-warning{padding:10px 14px;background:#fff1d9;color:#684e28;font-size:13px;line-height:1.5;max-width:800px;margin:auto}
 .storage-warning .text-button{display:block}
 @media(max-width:370px){.bottom-nav{padding-left:3px;padding-right:3px}.bottom-nav button{margin:2px 0}.map-detail-list{gap:10px}}

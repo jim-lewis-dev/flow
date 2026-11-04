@@ -94,11 +94,16 @@ Flow refuses to replace a different set of records. First connection starts a
 fresh session Undo history.
 
 **Android:** open **Files > Synchronization**, enter the local filename and
-connection text, then choose **Join shared file**. A matching local file connects
-in place; a new name creates a local copy. A different existing file is never
+connection text, then choose **Join shared file**. An empty or matching local file
+connects in place; a new name creates a local copy. A different existing file is never
 overwritten. The joined file lives in Flow's private phone folder and is available
 offline. Existing files opened through Android's document picker retain their
 manual-transfer behavior; join a local file for synchronization.
+
+On Android, **Files > Delete** removes only that phone's local file, leaving the
+coordinator and other devices unchanged. It refuses deletion while changes are
+unsent or conflicted. After deleting the open file, choose or join a file again;
+Flow does not create a replacement automatically.
 
 After joining, ordinary valid edits save locally and synchronize automatically.
 Desktop checks about once a second; Android checks about every two seconds

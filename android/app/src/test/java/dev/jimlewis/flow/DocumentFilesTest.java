@@ -222,7 +222,7 @@ public class DocumentFilesTest {
         files.open(uri);
         JSONObject joined = state(files.request("sync_join", new JSONObject().put("name", "shared.sqlite3")));
         assertEquals("shared.sqlite3", joined.getString("dataset"));
-        assertEquals("On this phone · Flow files", joined.getString("file_location"));
+        assertEquals("On this phone - Flow files", joined.getString("file_location"));
         edit("queued-local-edit");
         assertEquals("manual-file", content(uri));
         restart();
@@ -237,6 +237,45 @@ public class DocumentFilesTest {
         assertFalse(files.request("update_flow", new JSONObject().put("invalid", true)).getBoolean("ok"));
         assertFalse(state(files.request("init", new JSONObject())).getBoolean("file_pending"));
         assertEquals("before", content(uri));
+    }
+
+    @Test public void deletingLastLocalFilePersistsNoFileWithoutRecreatingIt() throws Exception {
+        state(files.request("init", new JSONObject()));
+        JSONObject deleted = state(files.request("delete_dataset", new JSONObject().put("name", "flow.sqlite3")));
+        assertEquals("", deleted.getString("dataset"));
+        assertEquals(0, deleted.getJSONArray("files").length());
+        assertEquals("", deleted.getString("file_location"));
+        restart();
+        JSONObject reopened = state(files.request("init", new JSONObject()));
+        assertEquals("", reopened.getString("dataset"));
+        assertEquals(0, reopened.getJSONArray("files").length());
+        assertFalse(new File(root, "flow.sqlite3").exists());
+        Uri uri = document("Documents/money.sqlite3", "existing-records");
+        assertEquals("existing-records", state(files.open(uri)).getString("text"));
+    }
+
+    @Test public void deletingActiveFileDoesNotSelectOrModifyAnotherLocalFile() throws Exception {
+        write(new File(root, "camp.sqlite3").toPath(), "camp-records");
+        state(files.request("init", new JSONObject()));
+        state(files.request("delete_dataset", new JSONObject().put("name", "flow.sqlite3")));
+        restart();
+        JSONObject reopened = state(files.request("init", new JSONObject()));
+        assertEquals("", reopened.getString("dataset"));
+        assertEquals(1, reopened.getJSONArray("files").length());
+        assertEquals("camp-records", read(new File(root, "camp.sqlite3").toPath()));
+    }
+
+    @Test public void deletingInactiveLocalFileKeepsDirtyExternalFileUntouched() throws Exception {
+        Uri uri = document("Documents/money.sqlite3", "before");
+        String key = state(files.open(uri)).getString("dataset");
+        provider.failWrites = true;
+        edit("phone-edit");
+        JSONObject deleted = state(files.request("delete_dataset", new JSONObject().put("name", "flow.sqlite3")));
+        assertEquals(key, deleted.getString("dataset"));
+        assertTrue(deleted.getBoolean("file_pending"));
+        assertEquals("phone-edit", deleted.getString("text"));
+        assertEquals("before", content(uri));
+        assertFalse(new File(root, "flow.sqlite3").exists());
     }
 
     public static final class TestDocuments extends ContentProvider {
@@ -280,9 +319,14 @@ public class DocumentFilesTest {
             current = file; key = identity; name = filename;
         }
         @Override public JSONObject call(String action, JSONObject args) throws Exception {
-            if ("init".equals(action) && current == null) {
+            if ("init".equals(action) && current == null && key == null) {
                 name = args.optString("dataset", "flow.sqlite3");
-                select(new File(root, name), name, name);
+                if (name.isEmpty()) key = "";
+                else select(new File(root, name), name, name);
+            } else if ("delete_dataset".equals(action)) {
+                File target = new File(root, args.getString("name"));
+                Files.delete(target.toPath());
+                if (target.equals(current)) { current = null; key = name = ""; }
             } else if ("sync_join".equals(action)) {
                 name = args.getString("name");
                 File target = new File(root, name);
@@ -305,7 +349,7 @@ public class DocumentFilesTest {
                 write(current.toPath(), next);
             } else if ("undo".equals(action)) write(current.toPath(), previous);
             else if ("redo".equals(action)) write(current.toPath(), next);
-            JSONObject state = new JSONObject().put("dataset", key).put("dataset_name", name).put("text", text())
+            JSONObject state = new JSONObject().put("dataset", key).put("dataset_name", name).put("text", current == null ? "" : text())
                 .put("datasets", new JSONArray(root.list((dir, filename) -> !filename.startsWith(".") && filename.endsWith(".sqlite3"))));
             return new JSONObject().put("ok", true).put("result", new JSONObject().put("state", state));
         }

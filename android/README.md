@@ -40,6 +40,9 @@ and reopens it next time.
   the same file; it does not create “flow 2.”
 - **Your files:** switch between phone files and previously opened files. The
   location distinguishes files with identical names.
+- **Delete:** remove a file from Flow's private phone folder. Other devices and
+  the coordinator are unchanged. Unsent changes must synchronize first. Deleting
+  the open file leaves no file open; choose or create one in Files.
 - **Save As:** choose a new file and location, then continue working there.
   The previous file remains unchanged. Use this to put a phone-only file in
   Downloads or Documents for transfer.
@@ -71,9 +74,9 @@ starting balances, audit history, units, and map positions travel together.
 Set up one coordinator using the desktop
 [synchronization guide](../docs/synchronization.md).
 On the phone, open **Files → Synchronization**, enter a local filename, paste
-the coordinator's connection text, and tap **Join shared file**. A matching local
-file connects in place; a new name creates a local copy. A different existing
-file is never overwritten.
+the coordinator's connection text, and tap **Join shared file**. An empty or
+matching local file connects in place; a new name creates a local copy. A
+different existing file is never overwritten.
 
 Valid edits save immediately on the phone. While Flow is in the foreground,
 it checks for changes about every two seconds and immediately after a save.
@@ -88,7 +91,9 @@ file. This preserves pending edits and refuses a different shared dataset.
 
 Use this local joined file for sync. **Open file** and **Save As** retain their
 manual document-file behavior; the app does not synchronize a network document
-by repeatedly replacing its entire SQLite file.
+by repeatedly replacing its entire SQLite file. Save As switches to the chosen
+document. To resume live synchronization afterward, select the original local
+file under Your files.
 
 If another device changes the same field before your edit arrives, choose
 **Keep this device's edit** or **Use received change**. The choice applies to
@@ -130,7 +135,7 @@ unfinished forms and filters stay on their device.
   have separate plots. Touch for exact values; pinch to zoom, drag to pan,
   and use Fit to restore the full range.
 - **Files:** create, open, switch, save a file in another location, or join a
-  synchronized file.
+  synchronized file. Delete removes only a local phone file.
 - **Experimental:** play transfers between account nodes. It uses the current
   Flows filters, with its own unit, date range, and balance basis.
 
@@ -165,9 +170,13 @@ iPhone build, hosted cloud service, or Play Store release.
 
 - Python tests cover records, exact quantities, balances, graphs, map
   positions, partial dates, file switching, and validated SQLite round trips.
+  Sync checks cover joining empty and matching files without hard links,
+  protecting different records, deleting local copies, and rejecting stale
+  sync responses after switching files.
 - Native Java tests exercise file coordination with a mock Android document
   provider: autosave, reopening, duplicate basenames, unavailable files,
-  interrupted writes, conflict protection, and Save As recovery.
+  interrupted writes, conflict protection, Save As recovery, and remembering
+  that no file is open after deletion.
 - Browser checks at 360 and 412 pixels wide cover separate phone files,
   record editing, switching, duplicate-name rejection, calendar controls,
   date/time ranges, and reachable navigation. The browser uses the real Python

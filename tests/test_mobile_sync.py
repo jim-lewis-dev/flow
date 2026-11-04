@@ -40,7 +40,9 @@ class MobileSyncTests(unittest.TestCase):
             response=self.shared.server_exchange(prepared['request'])))
 
     def test_join_is_named_local_file_and_never_replaces_existing_file(self):
-        result = self.join()
+        with patch('mobile.bridge.os.link', side_effect=PermissionError('Hardlinks are not allowed')) as link:
+            result = self.join()
+            link.assert_not_called()
         self.assertEqual(result['state']['dataset'], 'money.sqlite3')
         self.assertEqual(self.store.repo.get_flow(self.flow['flow_id'])['amount'], '10')
         self.assertTrue(result['state']['sync']['enabled'])
@@ -52,6 +54,66 @@ class MobileSyncTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.store.root.glob('*.sqlite3')),
                          ['flow.sqlite3', 'money.sqlite3'])
         self.assertFalse(list(self.store.root.glob('.sync-*')))
+
+    def test_empty_default_file_joins_in_place_and_syncs_after_reopening(self):
+        target = self.store.path('flow')
+        self.assertEqual(self.store.repo.list_flows(), [])
+        result = self.join('flow')
+        self.assertEqual(result['state']['dataset'], 'flow.sqlite3')
+        self.assertEqual(self.store.repo.path, str(target))
+        self.assertEqual(sorted(p.name for p in self.store.root.glob('*.sqlite3')), ['flow.sqlite3'])
+        self.assertEqual(self.store.repo.get_flow(self.flow['flow_id'])['amount'], '10')
+        self.store.dispatch('update_flow', dict(flow={'flow_id': self.flow['flow_id'], 'amount': '12'},
+                                               baseline={'amount': '10'}))
+        self.store.open('flow')
+        self.exchange()
+        self.assertEqual(self.server.get_flow(self.flow['flow_id'])['amount'], '12')
+        self.assertEqual(self.store.state()['sync']['pending'], 0)
+
+    def test_concurrent_filename_creation_is_not_overwritten_or_removed(self):
+        target = self.store.path('money')
+        original_open = Path.open
+        repo, history = self.store.repo, self.store.history
+
+        def create_before_reservation(path, mode='r', *args, **kwargs):
+            if path == target and mode == 'xb':
+                with original_open(path, 'wb') as other:
+                    other.write(b'Another file owns this name')
+            return original_open(path, mode, *args, **kwargs)
+
+        with patch.object(Path, 'open', create_before_reservation):
+            with self.assertRaisesRegex(ValueError, 'already exists'):
+                self.join()
+        self.assertEqual(target.read_bytes(), b'Another file owns this name')
+        self.assertIs(self.store.repo, repo)
+        self.assertIs(self.store.history, history)
+        self.assertEqual(self.store.dataset, 'flow.sqlite3')
+
+    def test_failed_join_validation_preserves_active_history_and_cleans_new_file(self):
+        record = self.store.dispatch('add_flow', {'flow': {**self.flow, 'amount': '99'}})['record']
+        repo, history = self.store.repo, self.store.history
+        before = set(self.store.root.iterdir())
+        with patch.object(self.store, '_state_for', side_effect=ValueError('Invalid received state')):
+            with self.assertRaisesRegex(ValueError, 'Invalid received state'):
+                self.join()
+        self.assertEqual(set(self.store.root.iterdir()), before)
+        self.assertIs(self.store.repo, repo)
+        self.assertIs(self.store.history, history)
+        self.assertEqual(self.store.repo.get_flow(record['flow_id'])['amount'], '99')
+        self.store.dispatch('undo', {})
+        self.assertEqual(self.store.repo.list_flows(), [])
+
+    def test_failed_join_validation_rolls_back_existing_empty_file(self):
+        repo, history = self.store.repo, self.store.history
+        with patch.object(self.store, '_state_for', side_effect=ValueError('Invalid received state')):
+            with self.assertRaisesRegex(ValueError, 'Invalid received state'):
+                self.join('flow')
+        self.assertIs(self.store.repo, repo)
+        self.assertIs(self.store.history, history)
+        self.assertEqual(self.store.repo.list_flows(), [])
+        self.store.open('flow')
+        self.assertEqual(self.store.repo.list_flows(), [])
+        self.assertFalse(self.store.state()['sync']['enabled'])
 
     def test_matching_local_file_connects_in_place_without_another_file(self):
         target = self.store.path('money')

@@ -52,6 +52,7 @@ class MobileStore:
         self.repo = None
         self.history = None
         self.dataset = self.dataset_name = None
+        self._no_file = False
         self.sync_session = uuid.uuid4().hex
         self.sync_error = ''
         self.sync_contacted = False
@@ -107,6 +108,7 @@ class MobileStore:
         self.close()
         self.repo, self.history = candidate, history
         self.dataset, self.dataset_name = identity, display_name
+        self._no_file = False
         self.sync_session = uuid.uuid4().hex
         self.sync_error = ''
         self.sync_contacted = False
@@ -126,7 +128,53 @@ class MobileStore:
         self._open_target(target, 'document:' + key, display_name)
 
     def state(self):
+        if self.repo is None:
+            return {
+                'dataset': '', 'dataset_name': '',
+                'datasets': sorted(p.name for p in self.root.glob('*.sqlite3') if not p.name.startswith('.')),
+                'flows': [], 'accounts': [], 'as_of': self.as_of, 'basis': self.basis,
+                'map_positions': {},
+                'vocabulary': {'accounts': [], 'units': [], 'categories': [],
+                               'tags': [], 'names': [], 'statuses': list(STATUSES)},
+                'undo': '', 'redo': '', 'sync': {'enabled': False},
+            }
         return self._state_for(self.repo, self.history, self.dataset, self.dataset_name)
+
+    def delete_dataset(self, name):
+        target = self.path(name)
+        if target.is_symlink() or not target.is_file():
+            raise ValueError('That local file is no longer available.')
+        # Inspect without opening a second writable repository or changing the
+        # current file. Pending operations include unresolved sync conflicts.
+        try:
+            with closing(sqlite3.connect(target.as_uri() + '?mode=ro', uri=True)) as check:
+                has_outbox = check.execute("SELECT 1 FROM sqlite_master WHERE name='sync_outbox'").fetchone()
+                if has_outbox and check.execute('SELECT 1 FROM sync_outbox LIMIT 1').fetchone():
+                    raise ValueError('Sync this file and resolve pending changes before deleting it.')
+        except sqlite3.DatabaseError as error:
+            raise ValueError('This file cannot be checked for unsent changes.') from error
+        active = self.repo is not None and Path(self.repo.path) == target
+        if active:
+            self.close()
+        try:
+            target.unlink()
+        except OSError:
+            if active:
+                self.open(target.name)
+            raise
+        if active:
+            self.dataset = self.dataset_name = ''
+            self._no_file = True
+            self.sync_session = uuid.uuid4().hex
+            self.sync_error = ''
+            self.sync_contacted = self.sync_more = False
+        for suffix in ('-wal', '-shm', '-journal'):
+            try:
+                target.with_name(target.name + suffix).unlink(missing_ok=True)
+            except OSError:
+                # The database has been deleted. Preserve that successful state
+                # even if an obsolete SQLite sidecar cannot be removed.
+                pass
 
     def _state_for(self, repo, history, identity, display_name):
         flows = sorted(repo.list_flows(), key=flow_sort_key)
@@ -195,37 +243,48 @@ class MobileStore:
         configuration = parse_connection(json.dumps(args['configuration']))
         target = self.path(args.get('name', ''))
         existing = target.exists()
-        staging = None if existing else self.root / ('.sync-' + uuid.uuid4().hex + '.sqlite3')
+        created = False
         candidate = None
         try:
-            candidate = Repository(target if existing else staging)
+            if not existing:
+                # Android may forbid hardlinks, even inside the app's folder.
+                # Reserve the name without overwriting a concurrent creation;
+                # SQLite then commits the received records in one transaction.
+                try:
+                    with target.open('xb'):
+                        pass
+                except FileExistsError as error:
+                    raise ValueError('A file with that name already exists. Choose another name.') from error
+                created = True
+            candidate = Repository(target)
             sync = getattr(candidate, 'sync', None)
             if sync and sync.enabled:
                 raise ValueError('This file is already connected. Use Update connection.')
             sync = sync or SyncState(candidate)
-            if existing and sync._rows() != args.get('seed', {}).get('snapshot'):
-                raise ValueError('This local file differs from the shared file. It was not replaced. Choose another name or reconcile its edits first.')
-            # configure compares every stored resource row with the received
-            # seed. Existing records are never replaced with different data.
-            sync.configure(**configuration, client=uuid.uuid4().hex, seed=args['seed'])
             history = SessionHistory(candidate)
             try:
-                self._state_for(candidate, history, target.name, target.name)
+                # The shared engine accepts an empty or matching existing file
+                # and refuses different records. Validate the resulting view
+                # before committing, so a failed join preserves existing data.
+                with candidate.atomic():
+                    sync.configure(**configuration, client=uuid.uuid4().hex, seed=args['seed'])
+                    self._state_for(candidate, history, target.name, target.name)
             finally:
                 history.close()
             candidate.close()
             candidate = None
-            if staging is not None:
-                # A concurrent file creation must not be overwritten either.
-                os.link(staging, target)
-                staging.unlink()
             self._open_target(target, target.name, target.name)
             self.sync_contacted = True  # Joining follows a successful HTTPS seed fetch.
+        except BaseException:
+            if candidate:
+                candidate.close()
+                candidate = None
+            if created:
+                target.unlink(missing_ok=True)
+            raise
         finally:
             if candidate:
                 candidate.close()
-            if staging is not None:
-                staging.unlink(missing_ok=True)
         return {'state': self.state()}
 
     def save_flow(self, data, *, existing=False, baseline=None):
@@ -490,8 +549,15 @@ class MobileStore:
         return {'positions': self.repo.load_map_positions(), 'state': self.state()}
 
     def dispatch(self, action, args):
+        if self.repo is None and action not in {
+                'init', 'state', 'view', 'new_dataset', 'open_dataset', 'delete_dataset',
+                'camp', 'install_document', 'open_document', 'join_sync', 'sync_join',
+                'sync_prepare', 'sync_accept', 'sync', 'normalize_input'}:
+            raise ValueError('Open or create a file first.')
         if action == 'init':
-            if not self.repo:
+            if args.get('dataset') == '' and not self.repo:
+                self._no_file = True
+            if not self.repo and not self._no_file:
                 name = args.get('dataset') or 'flow.sqlite3'
                 path = self.path(name)
                 # A missing remembered file is an error, not a new blank file.
@@ -544,6 +610,8 @@ class MobileStore:
             self.open(args.get('name', ''), create=True)
         elif action == 'open_dataset':
             self.open(args.get('name', ''))
+        elif action == 'delete_dataset':
+            self.delete_dataset(args.get('name', ''))
         elif action == 'camp':
             from examples.camp import create_camp
             target = self.path('camp')

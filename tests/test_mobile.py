@@ -353,6 +353,108 @@ class MobileTests(unittest.TestCase):
         self.store.dispatch('undo',{})
         self.assertEqual([f['name'] for f in self.store.repo.list_flows()],['Original'])
 
+    def test_delete_inactive_local_file_keeps_active_records_and_history(self):
+        original = self.add()
+        history = self.store.history
+        other = Repository(self.store.path('unused'))
+        other.close()
+        result = self.store.dispatch('delete_dataset', {'name': 'unused'})['state']
+        self.assertEqual(result['datasets'], ['flow.sqlite3'])
+        self.assertEqual(result['dataset'], 'flow.sqlite3')
+        self.assertIs(self.store.history, history)
+        self.assertEqual(self.store.repo.get_flow(original['flow_id'])['name'], 'Test')
+        self.store.dispatch('undo', {})
+        self.assertEqual(self.store.repo.list_flows(), [])
+
+    def test_delete_current_file_leaves_other_files_and_no_open_file(self):
+        self.add()
+        other = Repository(self.store.path('camp'))
+        other.save_flow(self.record(amount='8'))
+        other.close()
+        result = self.store.dispatch('delete_dataset', {'name': 'flow'})['state']
+        self.assertEqual(result['dataset'], '')
+        self.assertEqual(result['datasets'], ['camp.sqlite3'])
+        self.assertEqual(result['flows'], [])
+        self.assertEqual(result['undo'], '')
+        self.assertFalse(result['sync']['enabled'])
+        self.assertFalse(self.store.path('flow').exists())
+        self.store.dispatch('open_dataset', {'name': 'camp'})
+        self.assertEqual(self.store.state()['flows'][0]['amount'], '8')
+
+    def test_delete_last_file_stays_empty_and_can_create_again(self):
+        self.add()
+        session = self.store.sync_session
+        self.store.dispatch('delete_dataset', {'name': 'flow'})
+        for action, args in [('init', {}), ('view', {'as_of': '2026-11-04'}), ('state', {})]:
+            state = self.store.dispatch(action, args)['state']
+            self.assertEqual(state['dataset'], '')
+            self.assertEqual(state['datasets'], [])
+        self.assertNotEqual(self.store.sync_session, session)
+        self.assertEqual(self.store.sync_prepare(), {'enabled': False})
+        self.assertEqual(self.store.sync_accept({'session': session, 'response': {}}), {'ignored': True})
+        with self.assertRaisesRegex(ValueError, 'Open or create'):
+            self.add()
+        self.store.close()
+        self.store = MobileStore(self.store.root)
+        self.assertEqual(self.store.dispatch('init', {'dataset': ''})['state']['datasets'], [])
+        self.store.dispatch('new_dataset', {'name': 'flow'})
+        self.assertEqual(self.store.state()['datasets'], ['flow.sqlite3'])
+        self.assertEqual(self.store.state()['flows'], [])
+
+    def test_delete_rejects_external_paths_and_symlinks(self):
+        self.add()
+        original = self.store.path('flow').read_bytes()
+        for name in ('../flow', '/tmp/flow', '.documents/example', 'document:abc/path', ''):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.store.dispatch('delete_dataset', {'name': name})
+        link = self.store.path('link')
+        link.symlink_to(self.store.path('flow'))
+        with self.assertRaisesRegex(ValueError, 'local file'):
+            self.store.dispatch('delete_dataset', {'name': 'link'})
+        self.assertEqual(self.store.path('flow').read_bytes(), original)
+        with self.assertRaisesRegex(ValueError, 'no longer available'):
+            self.store.dispatch('delete_dataset', {'name': 'missing'})
+        self.store.path('broken').write_bytes(b'not a database')
+        with self.assertRaisesRegex(ValueError, 'cannot be checked'):
+            self.store.dispatch('delete_dataset', {'name': 'broken'})
+        self.assertTrue(self.store.path('broken').exists())
+
+    def test_delete_refuses_unsent_and_conflicted_local_changes(self):
+        from flowledger.sync import SyncState
+        sync = SyncState(self.store.repo)
+        self.store.repo.sync = sync
+        sync.configure(dataset='shared', client='phone')
+        self.add()
+        self.assertTrue(sync.status()['pending'])
+        for conflict in (None, '{"message":"Changed on another device"}'):
+            self.store.repo.conn.execute('UPDATE sync_outbox SET conflict=?', (conflict,))
+            self.store.repo.conn.commit()
+            with self.assertRaisesRegex(ValueError, 'Sync this file'):
+                self.store.dispatch('delete_dataset', {'name': 'flow'})
+            self.assertEqual(len(self.store.repo.list_flows()), 1)
+            self.assertTrue(self.store.path('flow').exists())
+        self.store.dispatch('new_dataset', {'name': 'other'})
+        with self.assertRaisesRegex(ValueError, 'Sync this file'):
+            self.store.dispatch('delete_dataset', {'name': 'flow'})
+        self.assertEqual(self.store.dataset, 'other.sqlite3')
+
+    def test_delete_failure_reopens_the_current_file_without_data_loss(self):
+        original = self.add()
+        with patch('mobile.bridge.Path.unlink', side_effect=PermissionError('blocked')):
+            with self.assertRaises(PermissionError):
+                self.store.dispatch('delete_dataset', {'name': 'flow'})
+        self.assertEqual(self.store.dataset, 'flow.sqlite3')
+        self.assertEqual(self.store.repo.get_flow(original['flow_id'])['name'], 'Test')
+        real_unlink = Path.unlink
+        def block_sidecars(path, *args, **kwargs):
+            if str(path).endswith('-wal'):
+                raise PermissionError('blocked sidecar')
+            return real_unlink(path, *args, **kwargs)
+        with patch('mobile.bridge.Path.unlink', block_sidecars):
+            self.store.dispatch('delete_dataset', {'name': 'flow'})
+        self.assertEqual(self.store.dispatch('init', {})['state']['dataset'], '')
+        self.assertFalse(self.store.path('flow').exists())
+
     def test_missing_remembered_file_is_not_recreated(self):
         self.add()
         self.store.close()

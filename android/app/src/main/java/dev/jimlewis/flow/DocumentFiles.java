@@ -82,6 +82,15 @@ final class DocumentFiles {
             return decorate(state());
         }
         if ("open_document".equals(action)) return openRemembered(args.getString("key"));
+        if ("delete_dataset".equals(action)) {
+            JSONObject response = engine.call(action, args);
+            if (response.getBoolean("ok")) {
+                String next = response.getJSONObject("result").getJSONObject("state").getString("dataset");
+                if (!next.equals(current)) warning = "";
+                selected(next);
+            }
+            return decorate(response);
+        }
         if ("open_dataset".equals(action) || "new_dataset".equals(action) || "camp".equals(action) || "sync_join".equals(action)) {
             flush();
             JSONObject response = engine.call(action, args);
@@ -275,7 +284,8 @@ final class DocumentFiles {
             files.put(new JSONObject().put("key", key).put("name", record.getString("name")).put("location", record.getString("location")));
         }
         state.put("files", files).put("storage_warning", warning);
-        state.put("file_location", external(current) ? document(current).getString("location") : "On this phone · Flow files");
+        state.put("file_location", current == null || current.isEmpty() ? "" :
+            external(current) ? document(current).getString("location") : "On this phone - Flow files");
         state.put("file_pending", external(current) && document(current).optBoolean("dirty"));
         return response;
     }
