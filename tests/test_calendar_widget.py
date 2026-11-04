@@ -104,6 +104,18 @@ class CalendarEntryTests(unittest.TestCase):
         self.assertEqual((self.calendar.button.winfo_width(), self.calendar.button.winfo_height()),
                          (48, 48))
 
+    def test_measurement_accepts_tk_screen_distances(self):
+        from tkinter import ttk
+        plain = ttk.Entry(self.root, width=12)
+        # Tk dimensions may be Tcl_Obj values, not Python integers. Unit-bearing
+        # distances also exercise Tk's conversion on versions returning strings.
+        self.calendar.configure(width="1c", height="2c")
+        self.calendar._measure_size()
+        self.root.update()
+        self.assertEqual(self.calendar.winfo_reqwidth(), plain.winfo_reqwidth())
+        self.assertEqual(self.calendar.winfo_reqheight(), plain.winfo_reqheight())
+        plain.destroy()
+
     def test_year_boundaries_and_calendar_limits(self):
         self.open("2026-12-31")
         self.calendar.next_button.invoke()

@@ -70,7 +70,7 @@ class CalendarEntry(ttk.Frame):
     def _measure_size(self):
         self._size_after_id = None
         width, height = self._measure_entry.winfo_reqwidth(), self._measure_entry.winfo_reqheight()
-        if (int(self.cget("width")), int(self.cget("height"))) != (width, height):
+        if (self.winfo_pixels(self.cget("width")), self.winfo_pixels(self.cget("height"))) != (width, height):
             self.configure(width=width, height=height)
         self._layout_button()
 
