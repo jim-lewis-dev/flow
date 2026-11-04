@@ -181,7 +181,7 @@ class SyncGuiTests(unittest.TestCase):
         self.repo.conn.backup(server.conn)
         SyncState(server).configure(dataset="money", server=True)
         seed = server.sync.export_seed()
-        connection = dict(dataset="money", endpoint="https://dibbles:8765",
+        connection = dict(dataset="money", endpoint="https://sync.example.test:8765",
                           token="a" * 40, certificate="b" * 64)
         worker_threads = []
 

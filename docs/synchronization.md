@@ -13,13 +13,13 @@ without a service or network connection.
 | Location | Contents | Purpose |
 | --- | --- | --- |
 | Each computer or phone | Local Flow file, received revisions, pending changes | Immediate saves and offline work |
-| Dibbles, on its local disk | Coordinator database, certificate, key, connection settings | Order and distribute accepted changes |
+| Coordinator computer, on its local disk | Coordinator database, certificate, key, connection settings | Order and distribute accepted changes |
 | Router drive, optionally | One refreshed database snapshot | A separate copy; its availability does not control sync |
 
-The service runs on Dibbles. A drive attached to the router provides storage,
-not a place to run that service. Keep the coordinator's live database on
-Dibbles' local disk. Devices communicate with it over HTTPS; they do not open
-its SQLite file over a network share.
+Run the service on a computer reachable by your other devices. A drive attached
+to the router provides storage, not a place to run that service. Keep the live
+coordinator database on that computer's local disk. Devices communicate with it
+over HTTPS; they do not open its SQLite file over a network share.
 
 Flows, starting balances, and saved account-map positions synchronize. Filters,
 unfinished forms, selection, and session Undo history stay on their device.
@@ -37,11 +37,11 @@ service needs Python 3.10 or newer and OpenSSL to create its certificate once;
 it does not need Tkinter or Matplotlib.
 
 First choose the current file that will seed the shared dataset. Finish edits
-and close its application while making the initial transfer to Dibbles. Do not
-edit other copies until they have joined. In this example, the transferred file
-is `~/money.sqlite3`; replace that path with yours.
+and close its application while transferring it to the coordinator computer.
+Do not edit other copies until they have joined. In this example, the
+transferred file is `~/money.sqlite3`; replace that path with yours.
 
-From the Flow project directory on Dibbles:
+From the Flow project directory on the coordinator computer:
 
 ```bash
 python3 -m flowledger.sync_server init ~/money.sqlite3 \
@@ -52,9 +52,9 @@ python3 -m flowledger.sync_server serve \
   --directory ~/.local/share/flow-sync/money
 ```
 
-Replace `192.168.1.50` with Dibbles' reachable LAN address. A fixed address or
-router DHCP reservation avoids changing it later. If a firewall blocks the
-service, allow the chosen TCP port from your local network.
+Replace `192.168.1.50` with the coordinator computer's reachable LAN address.
+A fixed address or router DHCP reservation avoids changing it later. If a
+firewall blocks the service, allow the chosen TCP port from your local network.
 
 `init` creates a new service directory and leaves the source file unchanged.
 It refuses to overwrite an existing directory. Run it once; use `serve` to
@@ -63,17 +63,18 @@ restart that same coordinator.
 To maintain a snapshot on the router drive, add this option to **init**:
 
 ```bash
---mirror ~/bitbucket/Flow/money.sqlite3
+--mirror /mnt/shared/flow/money.sqlite3
 ```
 
-Create that destination folder first. The mirror replaces this one file after
-successful writes; it does not accumulate numbered backups. It runs separately
-from sync and retries if the share becomes unavailable. Treat the mirror as a
-snapshot, not as an editable client file.
+Replace that path with a file on your mounted network drive and create its
+parent folder first. The mirror replaces this one file after successful writes; it does not
+accumulate numbered backups. It runs separately from sync and retries if the
+share becomes unavailable. Treat the mirror as a snapshot, not as an editable
+client file.
 
 ## Connect the devices
 
-In another terminal on Dibbles, print the connection text:
+In another terminal on the coordinator computer, print the connection text:
 
 ```bash
 python3 -m flowledger.sync_server connection \
@@ -92,7 +93,7 @@ An empty file receives the shared records. A nonempty file must match the seed;
 Flow refuses to replace a different set of records. First connection starts a
 fresh session Undo history.
 
-**Android:** open **Files → Synchronization**, enter the local filename and
+**Android:** open **Files > Synchronization**, enter the local filename and
 connection text, then choose **Join shared file**. A matching local file connects
 in place; a new name creates a local copy. A different existing file is never
 overwritten. The joined file lives in Flow's private phone folder and is available
@@ -132,7 +133,7 @@ Unrelated received fields are preserved. There are no field locks.
 | Situation | Result |
 | --- | --- |
 | Phone or computer leaves the network | Edits save locally and queue for the next connection |
-| Dibbles is off | Every device can keep working; delivery waits for the same coordinator to return |
+| Coordinator is off | Every device can keep working; delivery waits for the same coordinator to return |
 | Router drive is unavailable | Sync continues; the snapshot retries separately |
 | App closes before receiving an acknowledgement | Saved operations remain queued and retry safely |
 | Two devices edit the same field independently | Explicit conflict; no silent overwrite |
@@ -146,8 +147,8 @@ coordinator directory** to the new host. Preserve its database, certificate,
 private key, and settings. Start that directory on the replacement host only.
 Keeping the same network address avoids reconnecting clients. If the address
 changes, update `endpoint` in `coordinator.json`, print the connection text
-again, and reconnect clients to the same dataset: **Sync → Connect** on desktop,
-or **Files → Synchronization → Update connection** on Android. These connection
+again, and reconnect clients to the same dataset: **Sync > Connect** on desktop,
+or **Files > Synchronization > Update connection** on Android. These connection
 updates retain pending local edits.
 
 The router's database snapshot does not contain the service's certificate or
@@ -184,6 +185,6 @@ systemctl --user enable --now flow-sync-money
 journalctl --user -u flow-sync-money -f
 ```
 
-A user service normally runs while that user is logged in. If Dibbles must run
+A user service normally runs while that user is logged in. If the coordinator must run
 it from boot without a login, its administrator can enable lingering for that
 user. This is a host configuration choice; Flow does not change it.

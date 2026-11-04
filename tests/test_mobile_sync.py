@@ -20,7 +20,7 @@ class MobileSyncTests(unittest.TestCase):
         self.server.save_account('Battery', '100', '2026-11-01', 'Wh')
         self.shared = SyncState(self.server)
         self.shared.configure(dataset='money', server=True)
-        self.configuration = dict(dataset='money', endpoint='https://dibbles:8787',
+        self.configuration = dict(dataset='money', endpoint='https://sync.example.test:8787',
                                   token='a'*40, certificate='b'*64)
         self.store = MobileStore(self.root / 'phone')
         self.store.dispatch('init', {})
@@ -149,7 +149,7 @@ class MobileSyncTests(unittest.TestCase):
     def test_update_connection_keeps_pending_edits_and_rejects_other_dataset(self):
         self.join()
         self.store.dispatch('update_flow',dict(flow={'flow_id':self.flow['flow_id'],'notes':'Queued'},baseline={'notes':'First'}))
-        config={**self.configuration,'endpoint':'https://new-dibbles:8787'}
+        config={**self.configuration,'endpoint':'https://new-sync.example.test:8787'}
         self.store.dispatch('sync_reconnect',dict(session=self.store.sync_session,configuration=config))
         self.assertEqual(self.store.state()['sync']['endpoint'],config['endpoint'])
         self.assertEqual(self.store.state()['sync']['pending'],1)

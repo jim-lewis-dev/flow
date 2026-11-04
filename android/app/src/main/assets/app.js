@@ -316,7 +316,7 @@ function renderSync(){
   $('sync-reconnect').hidden=!sync.enabled;
   $('sync-state').textContent=!sync.enabled?'Not connected':sync.error?`Offline · ${sync.pending||0} pending`:sync.more?'Catching up':sync.conflicts?.length?'Needs review':sync.pending?`${sync.pending} pending`:sync.connected?'Up to date':'Waiting to sync';
   $('sync-state').title=sync.error||sync.endpoint||'';
-  $('sync-help').textContent=sync.error||(sync.enabled?'Edits save here first and synchronize while Flow is open.':'Use the connection text from Dibbles. A matching local file connects in place; a new name creates a local copy.');
+  $('sync-help').textContent=sync.error||(sync.enabled?'Edits save here first and synchronize while Flow is open.':'Use the connection text from the coordinator. A matching local file connects in place; a new name creates a local copy.');
   $('sync-conflicts').replaceChildren(...(sync.conflicts||[]).map(conflict=>{
     const row=el('div','sync-conflict');
     row.append(el('p','',conflict.message||'An edit overlaps a change from another device.'));

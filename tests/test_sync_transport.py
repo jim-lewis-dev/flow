@@ -176,10 +176,10 @@ class SyncTransportTests(unittest.TestCase):
 
 class ConnectionTextTests(unittest.TestCase):
     def test_requires_encrypted_endpoint_and_complete_pin(self):
-        valid = dict(endpoint='https://dibbles.local:8765', dataset='money', token='a' * 43, certificate='b' * 64)
+        valid = dict(endpoint='https://sync.example.test:8765', dataset='money', token='a' * 43, certificate='b' * 64)
         self.assertEqual(parse_connection(json.dumps(valid)), valid)
-        for endpoint in ['http://dibbles.local:8765', 'https://user:pass@dibbles.local',
-                         'https://dibbles.local/files', 'https://dibbles.local?token=abc']:
+        for endpoint in ['http://sync.example.test:8765', 'https://user:pass@sync.example.test',
+                         'https://sync.example.test/files', 'https://sync.example.test?token=abc']:
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 parse_connection(dict(valid, endpoint=endpoint))
         with self.assertRaises(ValueError):
