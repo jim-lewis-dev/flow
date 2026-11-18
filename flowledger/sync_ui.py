@@ -160,7 +160,7 @@ class SyncController:
                                           or self.peer.pending == "share" else "normal")
             peer = self.peer
             feedback = peer.error or peer.notice.get()
-            if peer.pending not in (None, "resume", "status"):
+            if peer.pending not in (None, "resume", "status", "nearby_poll"):
                 feedback = "Working..."
             self.panel_notice.set(feedback)
             self._display_conflict()

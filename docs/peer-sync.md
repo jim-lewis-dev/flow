@@ -9,9 +9,11 @@ way until you choose otherwise.
 
 1. Connect both devices to the same LAN. Open a test file on the first device
    (for example, `flow peer-test` on Linux).
-2. On desktop, open **Sync > Devices > Create pairing code**. On the phone,
-   open **Files > Pair device**, enter the code and connect. You can also show
-   the code on the phone and enter it on desktop. It expires in five minutes.
+2. Open **Sync > Devices > Pair nearby** on desktop and **Files > Pair device >
+   Pair nearby** on the phone. Tap the other device's name on one screen.
+   Compare the number on the two screens. If it matches, choose **Numbers
+   match** on both. Nothing needs to be typed. For an older peer, the manual
+   code option is still available.
 3. On the device holding the file, choose **Share this file** (desktop:
    **Sync > Shared files**; Android: **Files**). On the other, choose
    **Find shared files**, select the file, then join. Joining creates a local
@@ -41,11 +43,31 @@ C tomorrow, C can learn A's changes even if A is off. If **no pair ever
 overlaps**, nothing travels. Changes wait on disk. An idle network drive is
 not a peer. Do not open the same live SQLite file on multiple devices.
 
-The default peer port is TCP 47621; automatic discovery uses UDP 47622 on
-the local network. Both devices must accept a direct connection. If automatic
-discovery fails, enter the address shown alongside the code. Manual pairing
-does not require multicast. The old coordinator port is separate. Linux uses
-OpenSSL to create a device identity once; the phone uses Android. The initial snapshot is limited to
+If a name does not appear, check that both devices are in nearby pairing and
+on the same home network. **Find at address** can use the other device's
+Wi-Fi or Ethernet address, or a hostname your network resolves. It uses
+the same number comparison; the port is optional. A timeout means Flow
+could not complete the connection. Guest Wi-Fi isolation, a firewall, or a
+VPN that blocks LAN access can prevent this. On Linux, `ip -br -4 addr`
+shows which address belongs to each interface.
+
+The peer listener uses TCP 47621; automatic discovery uses UDP 47622.
+These are home-network ports. No router port forwarding is needed. If you
+use UFW, scope any rules to your actual LAN. For example, **only if** your
+LAN is `192.168.0.0/24` and your firewall is blocking Flow:
+
+```sh
+sudo ufw allow from 192.168.0.0/24 to any port 47621 proto tcp
+sudo ufw allow from 192.168.0.0/24 to any port 47622 proto udp
+```
+
+After updating a desktop, reopen Flow. If the optional background peer
+is already running, restart it with `systemctl --user restart flow-peer.service`
+so it uses the updated pairing protocol. The older coordinator is a separate
+service. Existing paired devices and shared files keep their identities.
+
+Linux uses OpenSSL to create a device identity once; the phone uses Android.
+The initial snapshot is limited to
 56 MiB of serialized records. After joining, edits travel in batches of up to
 2 MiB. There is no network transfer of the live SQLite file.
 

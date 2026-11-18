@@ -69,6 +69,7 @@ class _Worker:
 
     def run(self):
         node = None
+        owns_window = False
         try:
             while not self.closed.is_set():
                 item = self.jobs.get()
@@ -104,8 +105,15 @@ class _Worker:
                     elif action not in ("status", "forget", "unshare"):
                         node.start()
                         value = getattr(node, action)(*args)
+                        if action == "nearby_open":
+                            owns_window = True
+                        elif action == "nearby_close":
+                            owns_window = False
                     elif action != "status":
                         getattr(node, action)(*args)
+                except TimeoutError:
+                    error = ("Connection timed out. Check both devices are on the same Wi-Fi "
+                             "and that the LAN allows Flow on TCP 47621.")
                 except Exception as exc:
                     error = str(exc) or "Could not reach the other device."
                 try:
@@ -116,7 +124,11 @@ class _Worker:
                 self.results.put((action, value, status, error))
         finally:
             if node is not None:
-                node.stop()
+                try:
+                    if owns_window:
+                        node.nearby_close()
+                finally:
+                    node.stop()
 
 
 class PeerController:
@@ -125,7 +137,12 @@ class PeerController:
         self.state = {}
         self.remote = []
         self._scan_on_show = False
+        self.scan_after_pair = False
         self.pending = None
+        self.deferred = None
+        self.nearby = {}
+        self.next_nearby_poll = 0
+        self.end_nearby = False
         self.error = ""
         self.last_poll = self.last_status = self.code_until = 0
         self.version = None
@@ -153,12 +170,18 @@ class PeerController:
         self.worker.close()
 
     def _submit(self, action, *args):
+        if self.pending in ("nearby_poll", "status") and action not in ("nearby_poll", "status"):
+            # A background check must not swallow a real click.
+            if not self.deferred:
+                self.deferred = (action, args)
+            return
         if self.app.demo or self.pending or self.worker.closed.is_set():
             return
         self.pending = action
         if action == "available":
             self._scan_on_show = False
-        self.error = ""
+        if action not in ("nearby_poll", "status"):
+            self.error = ""
         self.worker.submit(action, args)
         if self.visible:
             self.render()
@@ -174,16 +197,38 @@ class PeerController:
             self.state = state
             if state.get("name"):
                 self.app.repo.peer_origin = state["name"]
-            if action != "status" or error:
+            if action not in ("status", "nearby_poll") or error:
                 self.error = error
+            if action.startswith("nearby_"):
+                self.next_nearby_poll = time.monotonic() + 1.5
+                if not error:
+                    old = self.nearby
+                    self.nearby = value
+                    if value.get("paired"):
+                        names = [p["name"] for p in state.get("peers", ()) if p["peer_id"] in value["paired"]]
+                        self.notice.set("Paired with " + (", ".join(names) or "the other device") + ".")
+                        self.end_nearby = bool(value.get("open"))
+                        self._scan_on_show = self.scan_after_pair = True
+                    elif value.get("message"):
+                        self.notice.set(value["message"])
+                    elif old.get("request") and not value.get("request") and action == "nearby_poll":
+                        self.notice.set("Pairing request ended. Select the device to try again.")
+                    elif old.get("open") and not value.get("open") and action != "nearby_close":
+                        self.notice.set("Pairing ended. Choose Pair nearby to start again.")
+                    elif action == "nearby_cancel":
+                        self.notice.set("Pairing canceled.")
+                    elif action not in ("nearby_close", "nearby_poll"):
+                        self.notice.set("")
             if not error:
                 if action == "available":
                     self.remote = value
-                    self.notice.set("No shared files found on reachable devices." if not value else "")
+                    if not self.scan_after_pair:
+                        self.notice.set("No shared files found on reachable devices." if not value else "")
+                    self.scan_after_pair = False
                 elif action == "pair_code":
                     self.issued.set(value)
                     self.code_until = time.monotonic() + 300
-                    self.notice.set("Enter this code on the other device within five minutes.")
+                    self.notice.set("This manual code expires in five minutes.")
                 elif action == "pair":
                     self.code.set("")
                     self.address.set("")
@@ -210,9 +255,20 @@ class PeerController:
         now = time.monotonic()
         if force or now - self.last_poll >= 1:
             self.last_poll = now
-            if self.code_until and now >= self.code_until:
+            if self.code_until and (now >= self.code_until or self.state.get("invite_until") == 0):
                 self.issued.set("")
                 self.code_until = 0
+                self.notice.set("Manual code is no longer active.")
+            if self.end_nearby and self.pending is None:
+                self.end_nearby = False
+                self.deferred = None
+                self._submit("nearby_close")
+            elif self.deferred and self.pending is None:
+                action, args = self.deferred
+                self.deferred = None
+                self._submit(action, *args)
+            elif self.visible and self.nearby.get("open") and self.pending is None and now >= self.next_nearby_poll:
+                self._submit("nearby_poll")
             try:
                 repo = self.app.repo
                 version = repo.conn.execute("PRAGMA data_version").fetchone()[0]
@@ -312,6 +368,7 @@ class PeerController:
         self.sync_button.pack(side="right")
         ttk.Label(f, textvariable=self.peer_detail, wraplength=590).grid(row=6, sticky="w", pady=(10, 0))
         self._build_devices()
+        book.bind("<Destroy>", self._close_pairing_dialog, add="+")
         self._conflict_frame()
         self.poll(force=True)
         if self.dataset and self.conflicts:
@@ -319,31 +376,145 @@ class PeerController:
 
     def _build_devices(self):
         d = self.devices
-        ttk.Label(d, text="Pair devices once to see the files each one shares.").grid(row=0, sticky="w")
-        ttk.Label(d, textvariable=self.devices_label, wraplength=590).grid(row=1, sticky="w", pady=(4, 12))
-        box = ttk.LabelFrame(d, text="Show a code on this device", padding=8)
-        box.grid(row=2, sticky="ew")
-        self.make_code = ttk.Button(box, text="Create pairing code", command=lambda: self._submit("pair_code"))
-        self.make_code.grid(row=0, column=0, sticky="w")
-        ttk.Entry(box, textvariable=self.issued, state="readonly", width=27).grid(row=0, column=1, padx=8)
-        ttk.Label(box, textvariable=self.address_label).grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
-        box = ttk.LabelFrame(d, text="Enter a code from the other device", padding=8)
-        box.grid(row=3, sticky="ew", pady=(8, 0))
-        for row, (title, var) in enumerate((("Pairing code", self.code), ("Address (optional)", self.address))):
-            ttk.Label(box, text=title).grid(row=row, column=0, sticky="w", padx=(0, 8))
-            entry = ttk.Entry(box, textvariable=var, width=30)
-            entry.grid(row=row, column=1, sticky="w", pady=3)
-            entry.bind("<Return>", lambda event: self._pair())
-        self.pair_button = ttk.Button(box, text="Pair device", command=self._pair)
-        self.pair_button.grid(row=0, column=2, padx=8)
-        ttk.Label(box, text="Use the displayed address if discovery is unavailable.").grid(
-            row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        top = ttk.Frame(d)
+        top.grid(row=0, sticky="ew", pady=(0, 6))
+        self.near_button = ttk.Button(top, text="Pair nearby", command=self._toggle_nearby)
+        self.near_button.pack(side="left")
+        self.near_title = tk.StringVar(d)
+        ttk.Label(top, textvariable=self.near_title, wraplength=430).pack(side="left", padx=8)
+        self.near_list = ttk.Frame(d)
+        self.near_list.grid(row=1, sticky="ew", pady=(0, 5))
+        self.near_list.columnconfigure(0, weight=1)
+        self.near_tree = ttk.Treeview(self.near_list, columns=("name",), show="tree", height=3,
+                                      selectmode="browse")
+        self.near_tree.column("#0", width=260)
+        self.near_tree.column("name", width=0, stretch=False)
+        self.near_tree.grid(row=0, column=0, sticky="ew")
+        sb = ttk.Scrollbar(self.near_list, command=self.near_tree.yview)
+        sb.grid(row=0, column=1, sticky="ns")
+        self.near_tree.configure(yscrollcommand=sb.set)
+        self.near_connect = ttk.Button(self.near_list, text="Pair selected", command=self._request_nearby)
+        self.near_connect.grid(row=0, column=2, padx=(6, 0))
+        self.near_tree.bind("<<TreeviewSelect>>", lambda e: self._near_buttons())
+        self.near_tree.bind("<Return>", lambda e: self._request_nearby())
+        self.near_tree.bind("<Double-1>", lambda e: self._request_nearby())
+        self.comparison = ttk.Frame(d)
+        self.comparison.grid(row=1, sticky="ew", pady=6)
+        self.digits = tk.StringVar(d)
+        ttk.Label(self.comparison, textvariable=self.digits, font=("DejaVu Sans", 22, "bold")).pack(side="left")
+        self.match_button = ttk.Button(self.comparison, text="Numbers match")
+        self.match_button.pack(side="left", padx=(12, 5))
+        self.deny_button = ttk.Button(self.comparison, text="Cancel")
+        self.deny_button.pack(side="left")
+        self._near_items = ()
+        self.manual_open = tk.BooleanVar(d, False)
+        ttk.Checkbutton(d, text="Connection options", variable=self.manual_open,
+                        command=self._show_manual).grid(row=2, sticky="w", pady=4)
+        self.manual_box = box = ttk.Frame(d, padding=(4, 3))
+        box.grid(row=3, sticky="ew")
+        box.columnconfigure(1, weight=1)
+        ttk.Label(box, textvariable=self.address_label, wraplength=495).grid(row=0, columnspan=3, sticky="w")
+        ttk.Label(box, text="Other device address").grid(row=1, sticky="w", padx=(0, 5))
+        ttk.Entry(box, textvariable=self.address, width=26).grid(row=1, column=1, sticky="ew", pady=3)
+        self.lookup_button = ttk.Button(box, text="Find at address", command=self._lookup_nearby)
+        self.lookup_button.grid(row=1, column=2, sticky="w", padx=6)
+        ttk.Separator(box).grid(row=2, columnspan=3, sticky="ew", pady=4)
+        ttk.Label(box, text="Older Flow versions").grid(row=3, columnspan=3, sticky="w")
+        self.make_code = ttk.Button(box, text="Show manual code", command=self._make_manual_code)
+        self.make_code.grid(row=4, column=0, sticky="w")
+        ttk.Entry(box, textvariable=self.issued, state="readonly", width=28).grid(row=4, column=1, sticky="ew")
+        ttk.Label(box, text="Code from device").grid(row=5, sticky="w")
+        entry = ttk.Entry(box, textvariable=self.code, width=28)
+        entry.grid(row=5, column=1, sticky="ew", pady=3)
+        entry.bind("<Return>", lambda event: self._pair())
+        self.pair_button = ttk.Button(box, text="Use code", command=self._pair)
+        self.pair_button.grid(row=5, column=2, sticky="w", padx=6)
+        self._show_manual()
+        ttk.Label(d, textvariable=self.devices_label, wraplength=550).grid(row=4, sticky="w", pady=(8, 0))
         self.device_bar = ttk.Frame(d)
-        self.device_bar.grid(row=4, sticky="ew", pady=8)
+        self.device_bar.grid(row=5, sticky="ew", pady=8)
         self.device_pick = ttk.Combobox(self.device_bar, state="readonly", width=29)
         self.device_pick.pack(side="left")
         self.forget_button = ttk.Button(self.device_bar, text="Remove paired device", command=self._forget)
         self.forget_button.pack(side="left", padx=6)
+
+    def _show_manual(self):
+        if self.manual_open.get():
+            self.manual_box.grid()
+        else:
+            self.manual_box.grid_remove()
+
+    def _make_manual_code(self):
+        if time.monotonic() >= self.code_until:
+            self._submit("pair_code")
+
+    def _close_pairing_dialog(self, event):
+        if event.widget is self.book:
+            if self.nearby.get("open") or (self.pending or "").startswith("nearby_"):
+                self.end_nearby = True
+            if self.deferred and self.deferred[0].startswith("nearby_"):
+                self.deferred = None
+
+    def _toggle_nearby(self):
+        self._submit("nearby_close" if self.nearby.get("open") else "nearby_open")
+
+    def _lookup_nearby(self):
+        address = self.address.get().strip()
+        if address:
+            self._submit("nearby_lookup", address)
+        else:
+            self.notice.set("Enter the other device's Wi-Fi address.")
+
+    def _request_nearby(self):
+        choice = self.near_tree.selection()
+        if choice and self.nearby.get("open") and not self.nearby.get("request"):
+            self._submit("nearby_request", choice[0])
+
+    def _near_buttons(self):
+        ready = self.pending in (None, "status", "nearby_poll") and not self.app.demo and not self.deferred
+        self.near_connect.configure(state="normal" if ready and self.near_tree.selection() else "disabled")
+
+    def _near_render(self, state):
+        open_ = self.nearby.get("open")
+        request = self.nearby.get("request") if open_ else None
+        self.near_button.configure(state=state, text="Stop pairing" if open_ else "Pair nearby")
+        self.lookup_button.configure(state=state if open_ and not request else "disabled")
+        show_list = open_ and not request and self.nearby.get("devices")
+        for widget, show in ((self.comparison, request), (self.near_list, show_list)):
+            if show and not widget.winfo_manager():
+                widget.grid()
+            elif not show and widget.winfo_manager():
+                widget.grid_remove()
+        if request:
+            who = request["name"]
+            self.near_title.set(("Waiting for " + who + " to confirm." if request["approved"]
+                                 else "Compare this number with " + who + "."))
+            n = str(request["number"])
+            self.digits.set(n[:3] + " " + n[3:])
+            rid = request["id"]
+            self.match_button.configure(command=lambda: self._submit("nearby_approve", rid),
+                                        state="disabled" if request["approved"] else state)
+            self.deny_button.configure(command=lambda: self._submit("nearby_cancel", rid), state=state)
+        elif open_:
+            devices = self.nearby.get("devices", ())
+            self.near_title.set("Select a device or choose this computer on the other screen." if devices
+                                else "Open nearby pairing on both devices. If neither appears, use Connection options.")
+            rows = tuple((v["peer_id"], v["name"], v["address"]) for v in devices)
+            if self._near_items != rows:
+                selected = next(iter(self.near_tree.selection()), None)
+                self.near_tree.delete(*self.near_tree.get_children())
+                names = [v[1] for v in rows]
+                for key, name, address in rows:
+                    label = name if names.count(name) == 1 else name + " | " + address
+                    self.near_tree.insert("", "end", iid=key, text=label)
+                if selected and self.near_tree.exists(selected):
+                    self.near_tree.selection_set(selected)
+                elif len(rows) == 1:
+                    self.near_tree.selection_set(rows[0][0])
+                self._near_items = rows
+            self._near_buttons()
+        else:
+            self.near_title.set("Connect to Flow on another device on your Wi-Fi.")
 
     def _pair(self):
         if not self.code.get().strip():
@@ -460,7 +631,7 @@ class PeerController:
                      getattr(self.app.repo, "peer_origin", ""))
 
     def render(self):
-        busy = self.app.demo or self.pending is not None
+        busy = self.app.demo or self.pending not in (None, "nearby_poll", "status") or self.deferred is not None
         state = "disabled" if busy else "normal"
         local = self.local_entry()
         can_share = self.can_share()
@@ -485,7 +656,8 @@ class PeerController:
         self._buttons()
         self.find_button.configure(state=state)
         self.sync_button.configure(state=state if self.state.get("peers") and local else "disabled")
-        self.make_code.configure(state=state)
+        self._near_render(state)
+        self.make_code.configure(state="disabled" if self.code_until > time.monotonic() else state)
         self.pair_button.configure(state=state)
         peers = self.state.get("peers", [])
         self.devices_label.set("Paired: " + (", ".join(p["name"] for p in peers) or "none"))
@@ -497,9 +669,9 @@ class PeerController:
             self.forget_button.configure(state=state)
         else:
             self.device_bar.grid_remove()
-        address = self.state.get("address")
-        self.address_label.set(("This device: " + self.state["name"] + " | " + address) if address
-                               else "The device address appears with its code.")
+        addresses = self.state.get("addresses") or ([self.state["address"]] if self.state.get("address") else [])
+        self.address_label.set(("This device: " + ", ".join(addresses)) if addresses
+                               else "Start nearby pairing to see this device's address.")
         last = self.state.get("last_sync")
         self.peer_detail.set(self.state.get("error") or self.state.get("discovery_error") or
                              ("Last check: " + datetime.fromtimestamp(last).strftime("%H:%M:%S") if last

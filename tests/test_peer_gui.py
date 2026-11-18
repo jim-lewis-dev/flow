@@ -139,6 +139,68 @@ class PeerDesktopTests(unittest.TestCase):
         self.peer._open_selected()
         self.assertEqual(2, opened.call_count)
 
+    def test_nearby_pairing_requires_comparison_and_preserves_manual_fields(self):
+        from unittest.mock import Mock
+        node = Mock()
+        row = {"peer_id": "1" * 64, "name": "Custard", "address": "192.168.0.70:47621"}
+        idle = {"open": True, "devices": [row], "request": None, "paired": []}
+        request = {"id": "r-1", "name": "Custard", "number": "031245", "peer_id": row["peer_id"],
+                   "approved": False, "direction": "outgoing"}
+        node.status.return_value = {"peers": [], "files": [], "address": "192.168.0.88:47621",
+                                    "addresses": ["192.168.0.88:47621"], "name": "XPS", "invite_until": 0}
+        node.nearby_open.return_value = idle
+        node.nearby_poll.return_value = idle
+        node.nearby_request.return_value = dict(idle, request=request)
+        node.nearby_approve.return_value = dict(idle, request=dict(request, approved=True))
+        node.nearby_close.return_value = dict(idle, open=False)
+        self.enter(patch("flowledger.peer_ui.PeerNode", return_value=node))
+        self.launch()
+        self.controller.show()
+        self.peer.book.select(self.peer.devices)
+        self.app.update()
+        self.assertFalse(self.peer.manual_box.winfo_ismapped())
+        self.assertIsNone(self.peer.worker.thread)
+        self.peer.address.set("custard.local")
+        self.peer.near_button.invoke()
+        self.until(lambda: self.peer.pending is None and self.peer.near_tree.exists(row["peer_id"]))
+        self.peer.near_tree.selection_set(row["peer_id"])
+        self.app.update()
+        self.peer.near_connect.invoke()
+        self.until(lambda: self.peer.digits.get() == "031 245")
+        node.nearby_request.assert_called_once_with(row["peer_id"])
+        node.nearby_approve.assert_not_called()
+        self.assertEqual("custard.local", self.peer.address.get())
+        self.peer.match_button.invoke()
+        self.until(lambda: self.peer.pending is None and self.peer.match_button.instate(["disabled"]))
+        node.nearby_approve.assert_called_once_with("r-1")
+        self.assertIn("Waiting", self.peer.near_title.get())
+        # Closing the dialog retires that window rather than opening a new one.
+        self.controller.dialog.destroy()
+        self.until(lambda: node.nearby_close.called and self.peer.pending is None)
+        node.nearby_open.assert_called_once()
+        node.pair_code.assert_not_called()
+
+    def test_manual_code_is_not_reissued_by_refresh_click_or_expiry(self):
+        from unittest.mock import Mock
+        node = Mock()
+        node.status.return_value = {"peers": [], "files": [], "invite_until": time.time() + 300}
+        node.pair_code.return_value = "ABCD-EFGH-IJKL-MNOP-QRST"
+        self.enter(patch("flowledger.peer_ui.PeerNode", return_value=node))
+        self.launch()
+        self.controller.show()
+        self.peer.manual_open.set(True)
+        self.peer._show_manual()
+        self.peer.make_code.invoke()
+        self.until(lambda: self.peer.code_until > time.monotonic())
+        self.peer.make_code.invoke()
+        self.peer.poll(force=True)
+        node.pair_code.assert_called_once()
+        self.peer.code_until = time.monotonic() - 1
+        self.peer.poll(force=True)
+        self.assertEqual("", self.peer.issued.get())
+        self.assertFalse(self.peer.make_code.instate(["disabled"]))
+        node.pair_code.assert_called_once()
+
     def test_external_save_refreshes_ledger_and_graph_without_replacing_a_draft(self):
         from flowledger import peer_store
         self.launch()

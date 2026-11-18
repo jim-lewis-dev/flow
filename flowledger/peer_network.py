@@ -8,6 +8,7 @@ from contextlib import closing, contextmanager
 import fcntl
 import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import secrets
@@ -20,6 +21,7 @@ import threading
 import time
 
 from . import peer_wire as wire
+from .peer_nearby import NearbyPairing
 from .core import APPLICATION_ID, SCHEMA_VERSION, Repository
 
 
@@ -61,7 +63,7 @@ def _now():
     return int(time.time())
 
 
-class PeerNode:
+class PeerNode(NearbyPairing):
     def __init__(self, config_dir=None, *, name=None, host='0.0.0.0', port=wire.PORT,
                  discovery=True, interval=10, cert_factory=None):
         self.directory = Path(config_dir or default_config_dir()).expanduser().resolve()
@@ -73,7 +75,7 @@ class PeerNode:
         self._sync_lock = threading.Lock()
         self._started = False
         self._listener = self._owner = self._monitor = self._discovery = None
-        self._address = None
+        self._addresses = None
         self._identity = None
         self._stopped = threading.Event()
         self._initialize()
@@ -142,9 +144,11 @@ class PeerNode:
             listener = wire.Listener(self.host, self.port, context, self._handle)
             try:
                 with self._db() as db:
-                    self._address = wire.address(wire.route_host(self.host), listener.port)
-                    _state(db, 'address', self._address)
+                    self._addresses = [wire.address(ip, listener.port) for ip in wire.lan_hosts(self.host)]
+                    _state(db, 'address', next(iter(self._addresses), ''))
+                    _state(db, 'addresses', json.dumps(self._addresses))
                     _state(db, 'port', listener.port)
+                    _state(db, 'nearby_listener', 1)
                     _state(db, 'discovery_error', '')
                 listener.thread.start()
             except BaseException:
@@ -201,11 +205,12 @@ class PeerNode:
                         self._acquire()
                     owner = self._owner is not None
                     if owner and time.monotonic() >= due:
-                        endpoint = wire.address(wire.route_host(self.host), self._listener.port)
-                        if endpoint != self._address:
+                        endpoints = [wire.address(ip, self._listener.port) for ip in wire.lan_hosts(self.host)]
+                        if endpoints != self._addresses:
                             with self._db() as db:
-                                _state(db, 'address', endpoint)
-                            self._address = endpoint
+                                _state(db, 'address', next(iter(endpoints), ''))
+                                _state(db, 'addresses', json.dumps(endpoints))
+                            self._addresses = endpoints
                 if owner and time.monotonic() >= due:
                     self._sync_active(stop)
                     due = time.monotonic() + self.interval
@@ -249,7 +254,9 @@ class PeerNode:
     def status(self):
         with self._db() as db:
             return dict(running=self._started, owner=self._owner is not None,
+                        addresses=json.loads(_state(db, 'addresses') or '[]'),
                         address=_state(db, 'address'), port=int(_state(db, 'port') or 0),
+                        invite_until=(int(_state(db, 'invite_until') or 0) if int(_state(db, 'invite_attempts') or 0)<8 else 0),
                         name=_state(db, 'name'), peer_id=self._identity or _state(db, 'identity'),
                         peers=self.peers(), files=self.local_files(),
                         last_sync=int(_state(db, 'last_sync') or 0),
@@ -350,6 +357,8 @@ class PeerNode:
 
     def _handle(self, hdr, stream, host):
         op = hdr.get('op')
+        if isinstance(op,str) and op.startswith('nearby_'):
+            return self._nearby_handle(hdr,stream,host)
         if op == 'proof':
             with self._db() as db:
                 row = db.execute('SELECT proof FROM pending WHERE ticket=? AND expires>?',

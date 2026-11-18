@@ -1,17 +1,21 @@
 """Length-delimited Flow peer protocol over pinned TLS. No HTTP or external server."""
 from __future__ import annotations
 
+import array
 import base64
 import contextlib
+import fcntl
 import hashlib
 import hmac
 import json
+import os
 import re
 import socket
 import ssl
 import sqlite3
 import struct
 import threading
+import sys
 
 PORT = 47621
 GROUP = '239.255.46.21'
@@ -84,22 +88,34 @@ def write(sock, value, limit=FRAME):
     sock.sendall(data)
 
 
-def call(endpoint, expected, header, body=None, *, pairing=False):
-    """Never send headers, pairing secrets or ledger data until the TLS pin matches."""
+def call(endpoint, expected, header, body=None, *, pairing=False, key_proof=None):
+    """Pin the TLS peer before sending credentials or ledger data."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE  # Actual certificate pin checked before the first write.
     host, port = parse_address(endpoint)
-    with socket.create_connection((host, port), timeout=CONNECT_TIMEOUT) as sock:
+    op = header.get('op', '')
+    nearby = op.startswith('nearby_')
+    timeout = min(CONNECT_TIMEOUT, 1.5) if op == 'nearby_hello' else CONNECT_TIMEOUT
+    with socket.create_connection((host, port), timeout=timeout) as sock:
         with context.wrap_socket(sock, server_hostname=host) as stream:
             fingerprint = pin(stream.getpeercert(binary_form=True))
             actual = short_pin(fingerprint) if pairing else fingerprint
-            if not hmac.compare_digest(actual, expected):
+            # The only unauthenticated query is the public opt-in device label.
+            public_hello = (expected is None and header == {'op': 'nearby_hello'} and body is None
+                            and key_proof is None and not pairing)
+            if not public_hello and (not isinstance(expected, str) or not hmac.compare_digest(actual, expected)):
                 raise ValueError('Device certificate does not match the pairing code or saved device.')
-            stream.settimeout(IO_TIMEOUT)
+            stream.settimeout(timeout if op == 'nearby_hello' else (5 if nearby else IO_TIMEOUT))
             write(stream, dict(header, v=1), HEADER)
             # Authenticate small headers before accepting any large ledger input.
+            if key_proof is not None:
+                from .peer_nearby import exchange_proof
+                ack = read(stream, HEADER)
+                if not isinstance(ack, dict) or ack.get('ready') is not True:
+                    raise ValueError((ack.get('error') if isinstance(ack, dict) else '') or 'Other device declined pairing.')
+                exchange_proof(stream, key_proof[0], None, key_proof[1])
             if body is not None:
                 ack = read(stream, HEADER)
                 if (header['op'] == 'pull' and isinstance(ack, dict)
@@ -109,9 +125,10 @@ def call(endpoint, expected, header, body=None, *, pairing=False):
                     raise ValueError((ack.get('error') if isinstance(ack, dict) else '') or
                                      'Peer refused access to this request.')
                 write(stream, body)
-            reply = read(stream)
+            reply = read(stream, HEADER if nearby else FRAME)
             if not isinstance(reply, dict) or 'result' not in reply:
-                raise ValueError((reply.get('error') if isinstance(reply, dict) else '') or 'Invalid peer response.')
+                error = Refused if nearby else ValueError
+                raise error((reply.get('error') if isinstance(reply, dict) else '') or 'Invalid peer response.')
             return fingerprint, reply['result']
 
 
@@ -177,40 +194,105 @@ class Listener:
         self.thread.join(timeout=1)
 
 
-def route_host(host):
+def _ipv4_interfaces():
+    """Read Linux/Android interface addresses without netlink, sysfs or a default route."""
+    item_size = 40 if struct.calcsize('P') == 8 else 32  # Linux struct ifreq
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        size = 32 * item_size
+        while True:
+            buf = array.array('B', bytes(size))
+            arg = struct.pack('iP', size, buf.buffer_info()[0])
+            used = struct.unpack('iP', fcntl.ioctl(probe, 0x8912, arg))[0]  # SIOCGIFCONF
+            if used + item_size < size or size >= 1024 * item_size:
+                break
+            size *= 2
+        buf = buf.tobytes()
+        for off in range(0, used, item_size):
+            name = buf[off:off+16].split(b'\0')[0]
+            if struct.unpack_from('H', buf, off + 16)[0] != socket.AF_INET:
+                continue
+            try:
+                req = fcntl.ioctl(probe, 0x8913, name.ljust(item_size, b'\0'))  # SIOCGIFFLAGS
+            except OSError:
+                continue
+            yield (name.decode('ascii', 'replace'), struct.unpack_from('H', req, 16)[0],
+                   socket.inet_ntoa(buf[off+20:off+24]))
+
+
+def lan_hosts(host='0.0.0.0'):
+    """Prefer Wi-Fi and Ethernet; the subnet itself says nothing about being a VPN."""
     if host not in ('', '0.0.0.0', '::'):
-        return host
-    # UDP connect only selects a local route; no packet is transmitted.
+        return [host]
+    candidates = []
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.connect((GROUP, DISCOVERY_PORT))
-            return sock.getsockname()[0]
+        for name, flags, ip in _ipv4_interfaces():
+            if not flags & 1 or flags & (8 | 16):  # not UP, or LOOPBACK / POINTOPOINT
+                continue
+            if ip == '0.0.0.0' or ip.startswith('127.'):
+                continue
+            # Some VPN/container adapters look like ordinary broadcast interfaces.
+            if (name.startswith(('nordlynx', 'tailscale', 'docker', 'veth', 'virbr', 'cni',
+                                 'flannel', 'rmnet', 'p2p', 'tun', 'tap', 'wg', 'zt')) or
+                    re.fullmatch(r'br-[0-9a-f]{12,}', name)):
+                continue
+            rank = 0 if name.startswith(('wl', 'wifi', 'en', 'eth')) else 1
+            candidates.append((rank, name, ip))
     except OSError:
-        return '127.0.0.1'
+        pass
+    return list(dict.fromkeys(ip for _, _, ip in sorted(candidates)))
+
+
+def _android():
+    return (sys.platform == 'android' or hasattr(sys, 'getandroidapilevel') or
+            bool(os.environ.get('ANDROID_ROOT') and os.environ.get('ANDROID_DATA')))
 
 
 def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None):
     beacon = MAGIC + identity.encode('ascii') + b' ' + str(port).encode('ascii')
     import time
+    local = lan_hosts(interface)
+    # Android may restrict network-interface enumeration for ordinary apps.
+    # Let the OS choose a multicast interface in that case, but never present
+    # that unknown route to the user as a verified Wi-Fi address.
+    adapters = local or (['0.0.0.0'] if _android() else [])
+    if not adapters:
+        raise OSError('No active LAN interface.')
     with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('', DISCOVERY_PORT))
-        interface_ip = socket.inet_aton(socket.gethostbyname(interface or '0.0.0.0'))
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface_ip)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, socket.inet_aton(GROUP) + interface_ip)
+        group = socket.inet_aton(GROUP)
+        joined = []
+        for ip in adapters:
+            try:
+                adapter = socket.inet_aton(socket.gethostbyname(ip))
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + adapter)
+                joined.append(adapter)
+            except OSError:
+                continue
+        if not joined:
+            raise OSError('No LAN interface supports multicast.')
         sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
         sock.settimeout(0.5)
-        current_route = route_host(interface)
         if ready is not None:
             ready()
         last_send = 0
+        replied = {}
         # Beacons are untrusted hints; bound their rate before writing the local cache.
         bucket_at, tokens, last_seen = time.monotonic(), 32.0, {}
         while not stopped.is_set():
             if time.monotonic() - last_send >= 2:
-                if route_host(interface) != current_route:
-                    return  # Rejoin the multicast group after switching networks.
-                sock.sendto(beacon, (GROUP, DISCOVERY_PORT))
+                if lan_hosts(interface) != local:
+                    return  # Rejoin on the current LAN after a network change.
+                sent = False
+                for adapter in joined:
+                    try:
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, adapter)
+                        sock.sendto(beacon, (GROUP, DISCOVERY_PORT))
+                        sent = True
+                    except OSError:
+                        continue
+                if not sent:
+                    raise OSError('Could not announce on any LAN interface.')
                 last_send = time.monotonic()
             try:
                 data, source = sock.recvfrom(256)
@@ -231,5 +313,14 @@ def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None):
                         last_seen = {k: v for k, v in last_seen.items() if now - v < 4}
                     last_seen[candidate] = now
                     note(candidate, address(source[0], int(tcp_port)))
+                    # A phone may be able to send multicast even when incoming
+                    # multicast is filtered. Its existing UDP listener also accepts
+                    # the ordinary beacon as a unicast reply. Never send a secret.
+                    if source[1] == DISCOVERY_PORT and now - replied.get(source, -10) >= 10:
+                        replied = {a: t for a, t in replied.items() if now - t < 10}
+                        if len(replied) < 128:
+                            replied[source] = now
+                            with contextlib.suppress(OSError):
+                                sock.sendto(beacon, source)
             except (UnicodeError, ValueError):
                 continue
