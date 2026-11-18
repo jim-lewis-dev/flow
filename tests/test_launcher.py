@@ -1,6 +1,6 @@
 """Dataset lookup and installation preserve caller paths and existing files."""
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import os
 from pathlib import Path
@@ -141,6 +141,28 @@ sys.modules["flowledger.gui"] = module
                 self.assertEqual(result.returncode, 2)
                 self.assertIn("Choose a dataset", result.stderr)
         self.assertFalse(self.data.exists())
+
+    def test_rename_shared_files_command_does_not_open_the_gui_or_create_a_default(self):
+        output = io.StringIO()
+        module = types.ModuleType("flowledger.gui")
+        module.FlowApp = lambda *a, **k: self.fail("Cleanup must not open a database window")
+        with patch.dict(os.environ, self.env), patch.dict(sys.modules, {"flowledger.gui": module}), \
+                patch.object(sys, "argv", ["flow", "--rename-shared-files"]), \
+                patch("flowledger.shared_files.rename_shared_files", return_value=[]) as rename, \
+                redirect_stdout(output):
+            self.assertEqual(main(), 0)
+        rename.assert_called_once_with()
+        self.assertIn("already readable", output.getvalue())
+        self.assertFalse((self.data / "flow.sqlite3").exists())
+
+    def test_rename_shared_files_failure_is_reported_without_a_traceback(self):
+        error = io.StringIO()
+        with patch.object(sys, "argv", ["flow", "--rename-shared-files"]), \
+                patch("flowledger.shared_files.rename_shared_files", side_effect=ValueError("Close Flow first")), \
+                redirect_stderr(error):
+            self.assertEqual(main(), 1)
+        self.assertIn("Cannot rename shared files: Close Flow first", error.getvalue())
+        self.assertNotIn("Traceback", error.getvalue())
 
 
 if __name__ == "__main__":

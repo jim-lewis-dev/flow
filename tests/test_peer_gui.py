@@ -126,7 +126,7 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.peer.tree.selection_set(dataset)
         self.peer._open_selected()
         self.until(lambda: self.peer.pending is None and opened.called)
-        destination = copy_path(dataset)
+        destination = copy_path("Water")
         opened.assert_called_once_with(str(destination), dataset)
         self.assertNotEqual(Path(self.repo.path), destination)
         self.assertEqual("", peer_store.dataset(self.repo))
@@ -142,6 +142,27 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.assertEqual("Open local copy", self.peer.join_button.cget("text"))
         self.peer._open_selected()
         self.assertEqual(2, opened.call_count)
+
+    def test_join_name_errors_leave_existing_files_and_the_ui_usable(self):
+        from flowledger.peer_ui import copy_path
+        self.launch()
+        self.controller.show()
+        self.until(lambda: self.peer.pending is None)
+        target = copy_path("Money")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"Existing local file")
+        for name in ("Money", "money", "../Outside"):
+            with self.subTest(name=name):
+                self.peer.remote = [{"dataset": "offered", "name": name,
+                                     "peer_name": "Other", "peer_id": "remote"}]
+                self.peer.render()
+                self.peer.tree.selection_set("offered")
+                with patch.object(self.peer, "_submit") as submit:
+                    self.peer._open_selected()
+                submit.assert_not_called()
+                self.assertTrue(self.peer.notice.get())
+                self.assertEqual(target.read_bytes(), b"Existing local file")
+        self.assertFalse(self.errors)
 
     def test_nearby_pairing_uses_one_confirmation_and_preserves_address(self):
         from unittest.mock import Mock

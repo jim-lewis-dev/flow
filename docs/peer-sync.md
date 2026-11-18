@@ -31,6 +31,19 @@ a device removes its saved connection and its status errors immediately. It keep
 The other device may still remember the old pairing; it can accept a fresh
 request with a new confirmation.
 
+Desktop joins use `~/.local/share/flowledger/shared/<name>.sqlite3`, or the
+equivalent location under `$XDG_DATA_HOME`. Choose a readable, unique filename;
+existing files are never overwritten or silently numbered. If the shared name
+is not a valid filename or is already taken here, choose a different shared
+name on the device offering the file before joining.
+
+To rename older generated desktop filenames, close every Flow window on that
+computer and run `flow --rename-shared-files`. It renames only generated copies
+in the shared folder, updates the registered paths and shortcuts in the data
+folder, and keeps the dataset identity and records. Original files shared from
+other locations stay where they are. The command is safe to repeat after an
+interruption. Device pairings and the phone app need no changes.
+
 Flows, account starting balances, tags and saved node positions travel with
 their changes. The undo stack, screen selections and audit log stay local.
 Each shared file retains its edit history so a device can catch up later.

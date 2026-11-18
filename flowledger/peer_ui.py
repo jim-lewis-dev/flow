@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import datetime
-from hashlib import sha256
-import os
 from pathlib import Path
 from queue import Empty, Queue
 import sqlite3
@@ -18,12 +16,7 @@ from tkinter import ttk
 
 from . import peer_store
 from .peer_network import PeerNode, default_config_dir
-
-
-def copy_path(dataset):
-    # Remote names are for display only. Never interpret them as paths.
-    root = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share")
-    return root / "flowledger" / "shared" / (sha256(dataset.encode()).hexdigest() + ".sqlite3")
+from .shared_files import shared_path as copy_path
 
 
 def open_copy(path, dataset):
@@ -494,7 +487,15 @@ class PeerController:
             self._open(row[2], dataset)
             self.render()
         else:
-            self._submit("join", dataset, row[3], str(copy_path(dataset)))
+            try:
+                path = copy_path(row[0])
+                if path.exists() or path.is_symlink():
+                    raise ValueError("A shared file named " + path.name + " already exists here. "
+                                     "Choose a different shared name on the device offering it.")
+            except (OSError, ValueError) as exc:
+                self.notice.set(str(exc))
+                return
+            self._submit("join", dataset, row[3], str(path))
 
     def _buttons(self):
         row = (self._file_rows or {}).get(next(iter(self.tree.selection()), ""))

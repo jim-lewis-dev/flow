@@ -52,9 +52,23 @@ def main() -> int:
         parser.add_argument("name", nargs="?", help="Dataset name or path (.sqlite3 is added when omitted)")
         parser.add_argument("--db", type=Path, help="SQLite database path")
         parser.add_argument("--demo", action="store_true", help="Open the separate illustrative demo")
+        parser.add_argument("--rename-shared-files", action="store_true",
+                            help="Rename generated shared filenames and update their shortcuts; close Flow first")
         args = parser.parse_args()
-        if sum((args.name is not None, args.db is not None, args.demo)) > 1:
-            parser.error("Choose a dataset name, --db, or --demo.")
+        if sum((args.name is not None, args.db is not None, args.demo, args.rename_shared_files)) > 1:
+            parser.error("Choose a dataset name, --db, --demo, or --rename-shared-files.")
+        if args.rename_shared_files:
+            try:
+                from .shared_files import rename_shared_files
+                changed = rename_shared_files()
+                for old, new in changed:
+                    print(f"Renamed: {old} -> {new}")
+                if not changed:
+                    print("Shared filenames are already readable.")
+                return 0
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                print(f"Cannot rename shared files: {exc}", file=sys.stderr)
+                return 1
         try:
             db_path = database_path(args.name, db=args.db, demo=args.demo)
             db_path.parent.mkdir(parents=True, exist_ok=True)
