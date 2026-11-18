@@ -341,30 +341,36 @@ class PeerNode(NearbyPairing):
             if type(port) is int and 0 < port < 65536:
                 db.execute('INSERT OR REPLACE INTO sightings VALUES (?,?,?)',
                            (hdr['id'], wire.address(host, port), _now()))
-        if op == 'catalog':
-            return [{k:f[k] for k in ('dataset','name')} for f in self.local_files()]
-        if op not in ('seed', 'pull', 'push'):
+        if op not in ('catalog', 'seed', 'pull', 'push'):
             raise ValueError('Unsupported request.')
         from . import peer_store as store
+        # Pairing and discovery retain their existing format. File exchange has
+        # its own version gate, before opening a file or accepting an event body.
+        if type(hdr.get('protocol')) is not int or hdr['protocol'] != store.PROTOCOL:
+            raise wire.Refused('Update Flow on both devices to synchronize this file.')
+        def reply(result):
+            return dict(protocol=store.PROTOCOL, result=result)
+        if op == 'catalog':
+            return reply([{k:f[k] for k in ('dataset','name')} for f in self.local_files()])
         dataset = hdr['dataset']
         with self._open(dataset) as (repo, name):
             if op != 'seed' and hdr.get('baseline') != self._baseline(repo):
                 raise wire.Refused('The shared document has a different original snapshot. Check the local copies.')
             if op == 'seed':
-                return dict(name=name, seed=store.seed(repo))
+                return reply(dict(name=name, seed=store.seed(repo)))
             if op == 'pull':
                 known = list(store.inventory(repo))
                 if hdr.get('inventory') == _inventory_digest(known):
-                    return {'unchanged': True}
-            wire.write(stream, {'ready': True}, wire.HEADER)
+                    return reply({'unchanged': True})
+            wire.write(stream, {'ready': True, 'protocol': store.PROTOCOL}, wire.HEADER)
             body = wire.read(stream)
             if not isinstance(body, list):
                 raise ValueError('Invalid batch.')
             if op == 'pull':
-                return dict(known=known, events=store.missing(repo, body))
+                return reply(dict(known=known, events=store.missing(repo, body)))
             if body:
                 store.receive(repo, body)
-            return True
+            return reply(True)
 
     @contextmanager
     def _open(self, dataset):
@@ -415,6 +421,7 @@ class PeerNode(NearbyPairing):
             return dataset
 
     def _remote(self, peer_id, op, *, dataset=None, baseline=None, body=None):
+        from . import peer_store as store
         with self._db() as db:
             row = db.execute('SELECT token,address FROM peers WHERE id=?', (peer_id,)).fetchone()
             if not row:
@@ -422,7 +429,8 @@ class PeerNode(NearbyPairing):
             port = int(_state(db, 'port') or 0)
             observed = db.execute('SELECT address FROM sightings WHERE id=? AND seen>?',
                                   (peer_id, _now()-30)).fetchone()
-        header = dict(op=op, token=row['token'], id=self._identity, port=port)
+        header = dict(op=op, token=row['token'], id=self._identity, port=port,
+                      protocol=store.PROTOCOL)
         if dataset is not None:
             header['dataset'] = dataset
         if baseline is not None:

@@ -85,29 +85,25 @@ class PeerStoreTests(unittest.TestCase):
         self.assertEqual(store.inventory(self.b), [first['id'], second['id']])
         self.assertEqual(self.row_at(self.b)['name'], 'after')
 
-    def test_causal_heads_conflict_blocking_and_durable_resolution(self):
-        self.edit(self.a, name='sun')
-        self.edit(self.b, name='moon')
+    def test_causal_heads_latest_edit_and_followup_are_durable(self):
+        with patch('flowledger.peer_store.time.time_ns', return_value=1000_000_000):
+            self.edit(self.a, name='sun')
+        with patch('flowledger.peer_store.time.time_ns', return_value=2000_000_000):
+            self.edit(self.b, name='moon')
         self.send(self.a, self.b)
         self.send(self.b, self.a)
-        self.assertEqual(store.conflicts(self.b), store.conflicts(self.a))
-        conflict, = store.conflicts(self.a)
-        self.assertEqual(self.row_at(self.a)['name'], 'Night')
-        with self.assertRaisesRegex(ValueError, 'existing peer conflict'):
-            self.edit(self.a, name='accidental overwrite')
-        self.edit(self.a, notes='independent')
+        self.assertFalse(store._meta(self.b, 'peer_conflicts'))
+        self.assertEqual(self.row_at(self.a)['name'], 'moon')
+        self.edit(self.a, notes='independent', name='final')
         journal = store.missing(self.a, [])
         self.assertEqual(set(journal[-1]['parents']), {e['id'] for e in journal[:2]})
-        choice = next(c for c in conflict['choices'] if c['value'] == 'moon')
-        store.resolve(self.a, conflict['id'], choice['id'])
+        self.assertGreater(journal[-1]['stamp'], max(e['stamp'] for e in journal[:2]))
         self.send(self.a, self.b)
-        self.assertEqual(store.conflicts(self.b), [])
-        self.assertEqual((self.row_at(self.b)['name'], self.row_at(self.b)['notes']), ('moon', 'independent'))
-        with self.assertRaisesRegex(ValueError, 'no longer'):
-            store.resolve(self.a, conflict['id'], choice['id'])
+        self.assertFalse(store._meta(self.b, 'peer_conflicts'))
+        self.assertEqual((self.row_at(self.b)['name'], self.row_at(self.b)['notes']), ('final', 'independent'))
         with closing(Repository(self.b.path)) as reopen:
             self.assertEqual(self.row_at(reopen), self.row_at(self.a))
-            self.assertFalse(store.conflicts(reopen))
+            self.assertFalse(store._meta(reopen, 'peer_conflicts'))
 
     def test_undo_field_aba_other_fields_and_redo(self):
         h = SessionHistory(self.a)
@@ -196,13 +192,73 @@ class PeerStoreTests(unittest.TestCase):
         self.edit(open_editor, name='armed')
         self.assertEqual(len(store.inventory(open_editor)), 1)
         old = self.row_at(open_editor)
+        clock = store._meta(open_editor, 'peer_clock')
         with patch('flowledger.peer_store._materialize', side_effect=ValueError('rollback')):
             with self.assertRaisesRegex(ValueError, 'rollback'):
                 self.edit(open_editor, name='failed')
         self.assertEqual(self.row_at(open_editor), old)
         self.assertEqual(len(store.inventory(open_editor)), 1)
+        self.assertEqual(store._meta(open_editor, 'peer_clock'), clock)
         self.assertFalse(open_editor.conn.in_transaction)
         self.edit(open_editor, amount='0')
+
+    def test_clock_rollback_same_millisecond_receive_restart_and_relay(self):
+        with patch('flowledger.peer_store.time.time_ns', return_value=3000_000_000):
+            self.edit(self.a, name='first')
+            self.edit(self.a, name='second')
+        with patch('flowledger.peer_store.time.time_ns', return_value=1000_000_000):
+            self.edit(self.a, name='third')
+        events = store.missing(self.a, [])
+        self.assertEqual([e['stamp'] for e in events], [[3000, 0], [3000, 1], [3000, 2]])
+        self.send(self.a, self.b)
+        self.assertEqual(store.missing(self.b, []), events)
+        with closing(Repository(self.b.path)) as reopened:
+            with patch('flowledger.peer_store.time.time_ns', return_value=1000_000_000):
+                self.edit(reopened, notes='after observing')
+            newest = store.missing(reopened, [])[-1]
+            self.assertEqual(newest['stamp'], [3000, 3])
+            self.assertEqual(newest['parents'], [events[-1]['id']])
+
+    def test_timestamp_validation_batch_rollback_and_append_guard(self):
+        with patch('flowledger.peer_store.time.time_ns', return_value=1000_000_000):
+            self.edit(self.a, name='first')
+            self.edit(self.a, name='second')
+        first, second = store.missing(self.a, [])
+        invalid = [None, [], [1], [1, 2, 3], [True, 0], [1, False], [1.0, 0],
+                   [0, 0], [-1, 0], [1, -1], [store.MAX_STAMP + 1, 0], [1, store.MAX_STAMP + 1]]
+        for stamp in invalid:
+            with self.subTest(stamp=stamp):
+                with self.assertRaisesRegex(ValueError, 'timestamp'):
+                    store.receive(self.b, [dict(first, stamp=stamp)])
+        with self.assertRaisesRegex(ValueError, 'later than every parent'):
+            store.receive(self.b, [first, dict(second, stamp=first['stamp'])])
+        self.assertEqual(store.inventory(self.b), [])
+        self.assertEqual(store._meta(self.b, 'peer_clock'), [0, 0])
+        self.assertEqual(self.row_at(self.b), self.row)
+        with self.assertRaisesRegex(sqlite3.IntegrityError, 'Update Flow'):
+            self.b.conn.execute('INSERT INTO peer_events(id,payload) VALUES(?,?)',
+                                (first['id'], store._json(first)))
+        self.assertTrue(store.receive(self.b, [second, first]))
+        legacy_child = deepcopy(second)
+        legacy_child['id'] = str(uuid.uuid4())
+        legacy_child['parents'] = [second['id']]
+        del legacy_child['stamp']
+        with self.assertRaisesRegex(ValueError, 'older event cannot follow'):
+            store.receive(self.b, [legacy_child])
+
+    def test_timestamp_tie_breaks_by_event_uuid_on_every_device(self):
+        low, high = str(uuid.UUID(int=1)), str(uuid.UUID(int=2))
+        with patch('flowledger.peer_store.time.time_ns', return_value=1000_000_000):
+            self.edit(self.a, name='lower id')
+            self.edit(self.b, name='higher id')
+        left, = store.missing(self.a, [])
+        right, = store.missing(self.b, [])
+        left, right = dict(left, id=low), dict(right, id=high)
+        for name, events in [('left-first', [left, right]), ('right-first', [right, left])]:
+            repo = self.repo(name)
+            store.join(repo, self.seed)
+            store.receive(repo, events)
+            self.assertEqual(self.row_at(repo)['name'], 'higher id')
 
     def test_delta_bounds_duplicate_values_and_wrong_dataset(self):
         for amount in ('4', '5', '6'):

@@ -227,7 +227,7 @@ class MobileStore:
     def peer_file(repo):
         from flowledger import peer_store
         file_id = peer_store.dataset(repo)
-        return {'dataset': file_id, 'conflicts': peer_store.conflicts(repo)} if file_id else {}
+        return {'dataset': file_id} if file_id else {}
 
     def data_version(self):
         return self.repo.conn.execute('PRAGMA data_version').fetchone()[0] if self.repo else None
@@ -608,12 +608,6 @@ class MobileStore:
                                       for f in self.peers.status()['files']):
                 raise ValueError('This file is not shared from this phone.')
             self.peers.node().unshare(current['dataset'])
-        elif action == 'peer_resolve':
-            if not self.repo or args.get('current') != self.dataset:
-                raise ValueError('The current file changed. Review the conflict again.')
-            from flowledger import peer_store
-            if not peer_store.resolve(self.repo, args['conflict'], args['choice']):
-                raise ValueError('This conflict has changed. Review the current choices.')
         elif action in ('peer_pair', 'peer_catalog', 'peer_join', 'peer_forget'):
             # Native Android handles LAN calls outside the SQLite UI worker.
             result = self.peers.call(action, args)

@@ -30,7 +30,7 @@ final class DocumentFiles {
     interface Engine { JSONObject call(String action, JSONObject args) throws Exception; }
     private static final Set<String> WRITES = new HashSet<>(Arrays.asList(
         "add_flow", "update_flow", "copy_flow", "delete_flow", "save_anchor",
-        "save_positions", "undo", "redo", "peer_resolve"));
+        "save_positions", "undo", "redo"));
     private final Context context;
     private final File root;
     private final SharedPreferences prefs;

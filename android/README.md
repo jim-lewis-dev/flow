@@ -87,12 +87,14 @@ starting balances, audit history, units, and map positions travel together.
 Shared files exchange edits while Flow is open on reachable, paired devices.
 Two paired phones can exchange edits without a desktop. Keeping multiple files
 shared works even when a different file is open. Edits made offline remain
-in each phone file. Reopen both apps after reconnecting. Independent edits
-merge; for incompatible edits to the same field, Files shows the competing
-values. Tap the one to keep; that decision is exchanged like another edit.
+in each phone file. Reopen both apps after reconnecting. Edits merge by field,
+with the latest actual edit winning. Amount and units stay together. A delete
+wins over older edits; a later actual edit brings the record back. Keep device
+clocks correct. Update every device for this format; existing files upgrade
+automatically and devices stay paired.
 
 **Save As** takes a consistent, complete SQLite recovery copy, including the
-shared dataset identity, prior edits and unresolved choices. It then opens
+shared dataset identity and prior edits. It then opens
 the document you selected. The document is not registered for networking;
 use the original local file under **Your files** to continue sharing. A
 backup is never silently registered under the same identity as another
@@ -183,7 +185,7 @@ iPhone build, hosted cloud service, or Play Store release.
 - Python tests cover records, exact quantities, balances, graphs, map
   positions, partial dates, file switching, and validated SQLite round trips.
   Sharing checks cover device pairing, shared-file identities, joining,
-  offline edits, conflicts, local deletion, and stale responses after switching
+  offline edits, automatic merging, local deletion, and stale responses after switching
   files or forgetting a device.
 - Native Java tests cover file coordination with a mock Android document
   provider: autosave, reopening, duplicate basenames, unavailable files,
@@ -225,7 +227,7 @@ devices. An ordinary Wi-Fi multicast permission supports discovery
 when device sharing is active. It requests no broad storage permission.
 Android's document picker grants access only to files you choose. Device keys,
 trusted peers and the sharing catalog stay in a separate private installation
-directory. Peer edits and conflicts travel with the replica's SQLite data.
+directory. Peer edit history travels with the replica's SQLite data.
 
 Run the portable adapter tests:
 

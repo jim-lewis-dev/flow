@@ -67,23 +67,29 @@ sudo ufw allow from 192.168.0.0/24 to any port 47621 proto tcp
 sudo ufw allow from 192.168.0.0/24 to any port 47622 proto udp
 ```
 
-After updating, reopen Flow. Existing paired devices and shared files keep
-their identities.
+Update Flow on every device before exchanging changes with this version, then
+reopen it. Older shared files upgrade automatically when opened. Existing
+paired devices and shared files keep their identities; no re-pairing is needed.
+Older edits have no recorded edit time, so they keep a deterministic historical
+order. New timestamped edits take precedence over those older edits.
 
 Linux uses OpenSSL to create a device identity once; the phone uses Android.
 The initial snapshot is limited to 56 MiB of serialized records. After joining, edits travel in batches of up to
 2 MiB. There is no network transfer of the live SQLite file.
 
-## What happens to conflicting edits?
+## How edits merge
 
-Independent fields merge. If the last agreed amount was 20 Wh and two
-disconnected devices change it to 25 Wh and 30 Wh, a device that knows both
-changes shows **20 Wh** in the ledger, balances and graphs until resolved.
-Before it hears about the other edit it can only show its own. Amount and unit
-are considered together: Flow never pairs one device's quantity with the
-other device's unit. A delete racing with an edit needs a choice too.
+Edits merge automatically by field. A later change to notes keeps an earlier
+change to the amount. If disconnected devices both change the amount, the
+latest actual edit wins once their changes arrive. Merely saving unchanged
+values or forwarding an edit does not make them newer. Amount and units are
+one field: Flow always keeps a quantity with its unit.
 
-On desktop use **Sync > Conflicts**; on Android open **Files** and select the
-version to keep. The choice travels like an edit. If two devices independently
-choose different answers, Flow asks again. Undo belongs to the current
-session and will not overwrite a newer change it received.
+A delete wins over an older edit. An actual edit made after the delete brings
+the record back, including when that edit was made offline before its device
+received the deletion. Unchanged values do not bring a record back.
+
+Flow uses the time recorded for each edit, with a deterministic tie-breaker,
+so keep device clocks correct. Delivery order does not change the result.
+There are no choices to review. Undo belongs to the current session and will
+not overwrite a newer change it received.

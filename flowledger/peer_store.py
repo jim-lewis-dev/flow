@@ -1,21 +1,23 @@
 """SQLite journal and transaction boundary for local-first Flow files.
 
 Only the original records and immutable edits travel between devices. The
-materialized ledger, field revisions and unresolved decisions are derived
-from those edits. No device address, credential or elected writer lives here.
+materialized ledger and field revisions are derived from those edits. No
+device address, credential or elected writer lives here.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import socket
+import time
 import uuid
 
 from .core import normalize_date, normalize_flow_date, quantity_text
 from .peer_projection import project
 from .sync import SyncState, TABLES, _json, _key
 
-PROTOCOL = 2
+PROTOCOL = 3
+MAX_STAMP = 2**53 - 1
 BATCH_EVENTS = 128
 BATCH_BYTES = 2 * 1024 * 1024
 SEED_BYTES = 56 * 1024 * 1024
@@ -80,10 +82,12 @@ def _digest(rows, order):
     return hashlib.sha256(_json([rows, order]).encode()).hexdigest()
 
 
-def _validate_seed(value):
+def _validate_seed(value, *, legacy=False):
     required = {'protocol', 'dataset', 'name', 'snapshot', 'order'}
-    if not isinstance(value, dict) or set(value) != required or type(value['protocol']) is not int or value['protocol'] != PROTOCOL:
+    if not isinstance(value, dict) or set(value) != required or type(value['protocol']) is not int:
         raise ValueError('Invalid peer file snapshot.')
+    if value['protocol'] != PROTOCOL and not (legacy and value['protocol'] == 2):
+        raise ValueError('Update Flow on every device before sharing this file.')
     _uuid(value['dataset'])
     _name(value['name'])
     rows, order = value['snapshot'], value['order']
@@ -100,6 +104,18 @@ def _validate_seed(value):
         raise ValueError('This starting snapshot is too large to share in one transfer.')
 
 
+def _write_guards(repo):
+    for table in TABLES:
+        for operation in ('INSERT', 'UPDATE', 'DELETE'):
+            repo.conn.execute(f'DROP TRIGGER IF EXISTS peer_guard_{table}_{operation.lower()}')
+            repo.conn.execute(f'CREATE TRIGGER peer_guard_{table}_{operation.lower()} BEFORE {operation} ON {table} '
+                              "WHEN flow_peer_write_allowed()<>3 BEGIN "
+                              "SELECT RAISE(ABORT,'Update Flow before editing this shared file.'); END")
+    repo.conn.execute('CREATE TRIGGER IF NOT EXISTS peer_guard_events_insert BEFORE INSERT ON peer_events '
+                      'WHEN flow_peer_event_write_allowed(NEW.payload)<>1 BEGIN '
+                      "SELECT RAISE(ABORT,'Update Flow before editing this shared file.'); END")
+
+
 def _initialize(repo, value):
     sync = repo.sync
     rows, order = value['snapshot'], value['order']
@@ -108,11 +124,7 @@ def _initialize(repo, value):
     repo.conn.execute('CREATE TABLE peer_heads(id TEXT PRIMARY KEY REFERENCES peer_events(id))')
     repo.conn.execute('CREATE TABLE peer_seed(singleton INTEGER PRIMARY KEY CHECK(singleton=1),payload TEXT NOT NULL)')
     repo.conn.execute('INSERT INTO peer_seed VALUES(1,?)', (_json(value),))
-    for table in TABLES:
-        for operation in ('INSERT', 'UPDATE', 'DELETE'):
-            repo.conn.execute(f'CREATE TRIGGER peer_guard_{table}_{operation.lower()} BEFORE {operation} ON {table} '
-                              "WHEN flow_peer_write_allowed()<>1 BEGIN "
-                              "SELECT RAISE(ABORT,'Open this shared file in current Flow to edit it.'); END")
+    _write_guards(repo)
     for table in ('peer_seed', 'peer_events'):
         for operation in ('UPDATE', 'DELETE'):
             repo.conn.execute(f'CREATE TRIGGER peer_immutable_{table}_{operation.lower()} BEFORE {operation} ON {table} '
@@ -123,8 +135,33 @@ def _initialize(repo, value):
                           "WHEN NEW.key='dataset' BEGIN SELECT RAISE(ABORT,'This file uses peer sharing.'); END")
     sync._set('peer_dataset', value['dataset'])
     sync._set('peer_genesis', _digest(rows, order))
-    sync._set('peer_conflicts', [])
+    sync._set('peer_protocol', PROTOCOL)
+    sync._set('peer_clock', [0, 0])
     sync._replace_rows({k: rows[k] for k in order})
+
+
+def upgrade(repo):
+    """Replay old peer files without changing original events or their seed."""
+    if not dataset(repo):
+        return
+    version = _meta(repo, 'peer_protocol')
+    if type(version) is int and version == PROTOCOL:
+        return
+    if version != '' and (type(version) is not int or version != 2):
+        raise ValueError('Update Flow before opening this shared file.')
+    sync = repo.sync
+    with sync.muted(), repo.atomic():
+        original = json.loads(repo.conn.execute('SELECT payload FROM peer_seed WHERE singleton=1').fetchone()[0])
+        _validate_seed(original, legacy=True)
+        if original['dataset'] != dataset(repo) or _digest(original['snapshot'], original['order']) != genesis(repo):
+            raise ValueError('Shared file identity does not match its starting snapshot.')
+        events = [json.loads(row[0]) for row in repo.conn.execute('SELECT payload FROM peer_events ORDER BY sequence')]
+        stamps = _history_stamps(events, dataset(repo))
+        _write_guards(repo)
+        sync._set('peer_clock', list(max(stamps.values(), default=(0, 0))))
+        _materialize(repo, remote=True)
+        repo.conn.execute("DELETE FROM sync_meta WHERE key='peer_conflicts'")
+        sync._set('peer_protocol', PROTOCOL)
 
 
 def _setup(repo):
@@ -175,7 +212,10 @@ def join(repo, value):
 def seed(repo):
     if not dataset(repo):
         raise ValueError('This file is not shared with peers.')
-    return json.loads(repo.conn.execute('SELECT payload FROM peer_seed WHERE singleton=1').fetchone()[0])
+    value = json.loads(repo.conn.execute('SELECT payload FROM peer_seed WHERE singleton=1').fetchone()[0])
+    # The immutable protocol-2 seed remains byte-for-byte intact on disk.
+    # Only its transfer envelope changes; rows/order still hash identically.
+    return dict(value, protocol=PROTOCOL)
 
 
 def inventory(repo):
@@ -208,15 +248,25 @@ def _event_bytes(event):
     return len(json.dumps(event, ensure_ascii=True, separators=(',', ':'), allow_nan=False))
 
 
+def _stamp(value, *, legacy=False):
+    if (not isinstance(value, list) or len(value) != 2 or
+            any(type(part) is not int or not 0 <= part <= MAX_STAMP for part in value) or
+            (not legacy and value[0] == 0)):
+        raise ValueError('Invalid peer edit timestamp.')
+    return tuple(value)
+
+
 def _validate_event(value, shared):
     required = {'id', 'dataset', 'parents', 'changes'}
-    if not isinstance(value, dict) or not required <= value.keys() or value.keys() - (required | {'origin', 'resolution'}):
+    if not isinstance(value, dict) or not required <= value.keys() or value.keys() - (required | {'origin', 'resolution', 'stamp'}):
         raise ValueError('Invalid peer event.')
     _uuid(value['id'])
     if value['dataset'] != shared:
         raise ValueError('Peer event belongs to a different dataset.')
     if 'origin' in value:
         _name(value['origin'])
+    if 'stamp' in value:
+        _stamp(value['stamp'])
     parents = value['parents']
     if not isinstance(parents, list) or len({_uuid(p) for p in parents}) != len(parents) or value['id'] in parents:
         raise ValueError('Invalid peer event parents.')
@@ -225,7 +275,7 @@ def _validate_event(value, shared):
         raise ValueError('Invalid peer changes.')
     if 'resolution' in value:
         decision = value['resolution']
-        if changes or not isinstance(decision, dict) or set(decision) != {'conflict', 'choice'} or not all(
+        if 'stamp' in value or changes or not isinstance(decision, dict) or set(decision) != {'conflict', 'choice'} or not all(
                 isinstance(v, str) and len(v) == 64 and all(c in '0123456789abcdef' for c in v) for v in decision.values()):
             raise ValueError('Invalid peer conflict decision.')
     elif not changes:
@@ -243,17 +293,67 @@ def _validate_event(value, shared):
         seen.add(identity)
 
 
-def _append(repo, event):
-    repo.conn.execute('INSERT INTO peer_events(id,payload) VALUES(?,?)', (event['id'], _json(event)))
+def _effective_stamp(event, stamps):
+    parents = [stamps[parent] for parent in event['parents']]
+    if 'stamp' in event:
+        stamp = _stamp(event['stamp'])
+        if any(stamp <= parent for parent in parents):
+            raise ValueError('A peer edit timestamp must be later than every parent.')
+        return stamp
+    if any(parent[0] for parent in parents):
+        raise ValueError('Update Flow: an older event cannot follow a timestamped edit.')
+    depth = 1 + max((parent[1] for parent in parents), default=0)
+    if depth > MAX_STAMP:
+        raise ValueError('Peer event history is too deep.')
+    return (0, depth)
+
+
+def _history_stamps(events, shared):
+    from .peer_projection import _ordered
+    stamps = {}
+    for event in _ordered(events):
+        _validate_event(event, shared)
+        stamps[event['id']] = _effective_stamp(event, stamps)
+    return stamps
+
+
+def _next_stamp(repo):
+    observed = _stamp(_meta(repo, 'peer_clock') or [0, 0], legacy=True)
+    now = max(1, time.time_ns() // 1_000_000)
+    if now > MAX_STAMP:
+        raise ValueError('The device clock is outside the supported timestamp range.')
+    if now > observed[0]:
+        return [now, 0]
+    if observed[1] < MAX_STAMP:
+        return [observed[0], observed[1] + 1]
+    if observed[0] < MAX_STAMP:
+        return [observed[0] + 1, 0]
+    raise ValueError('The peer edit timestamp range is exhausted.')
+
+
+def _append(repo, event, *, effective=None, legacy=False):
+    if 'stamp' not in event and not legacy:
+        raise ValueError('Update Flow before creating another shared edit.')
+    payload = _json(event)
+    sync = repo.sync
+    sync._peer_event_payload = payload
+    try:
+        repo.conn.execute('INSERT INTO peer_events(id,payload) VALUES(?,?)', (event['id'], payload))
+    finally:
+        sync._peer_event_payload = None
     repo.conn.executemany('DELETE FROM peer_heads WHERE id=?', [(p,) for p in event['parents']])
     repo.conn.execute('INSERT INTO peer_heads VALUES(?)', (event['id'],))
+    stamp = effective if effective is not None else _stamp(event['stamp'])
+    observed = _stamp(_meta(repo, 'peer_clock') or [0, 0], legacy=True)
+    if stamp > observed:
+        sync._set('peer_clock', list(stamp))
 
 
 def _materialize(repo, *, remote):
     sync = repo.sync
     base = seed(repo)
     events = (json.loads(r[0]) for r in repo.conn.execute('SELECT payload FROM peer_events ORDER BY sequence'))
-    rows, decisions, versions = project({k: base['snapshot'][k] for k in base['order']}, events)
+    rows, _, versions = project({k: base['snapshot'][k] for k in base['order']}, events)
     if remote:
         previous = sync._versions()
         observed = sync._versions(remote=True)
@@ -266,20 +366,18 @@ def _materialize(repo, *, remote):
     with sync.muted():
         sync._replace_rows(rows)
     sync._write_versions(versions)
-    sync._set('peer_conflicts', decisions)
 
 
-def _local(repo, changes, decision=None):
+def _local(repo, changes):
     event = {'id': str(uuid.uuid4()), 'dataset': dataset(repo), 'changes': changes,
+             'stamp': _next_stamp(repo),
              'origin': _name(getattr(repo, 'peer_origin', '') or socket.gethostname() or 'Flow device'),
              'parents': [r[0] for r in repo.conn.execute('SELECT id FROM peer_heads ORDER BY id')]}
-    if decision is not None:
-        event['resolution'] = decision
     if _event_bytes(event) + 3 > BATCH_BYTES:
         raise ValueError('This change is too large to synchronize at once; split it into smaller edits.')
     _validate_event(event, event['dataset'])
     _append(repo, event)
-    _materialize(repo, remote=decision is not None)
+    _materialize(repo, remote=False)
 
 
 def capture(repo, combined):
@@ -298,6 +396,8 @@ def receive(repo, events):
     sync = repo.sync or SyncState(repo)
     added = False
     with sync.muted(), repo.atomic():
+        stored = [json.loads(row[0]) for row in repo.conn.execute('SELECT payload FROM peer_events ORDER BY sequence')]
+        stamps = _history_stamps(stored, shared)
         pending = {}
         for event in events:
             _validate_event(event, shared)
@@ -320,24 +420,10 @@ def receive(repo, events):
                 for parent in event['parents']:
                     if not repo.conn.execute('SELECT 1 FROM peer_events WHERE id=?', (parent,)).fetchone():
                         raise ValueError('Missing parent peer event; request its history first.')
-                _append(repo, event)
+                effective = _effective_stamp(event, stamps)
+                _append(repo, event, effective=effective, legacy='stamp' not in event)
+                stamps[event['id']] = effective
                 added = True
         if added:
             _materialize(repo, remote=True)
     return added
-
-
-def conflicts(repo):
-    return _meta(repo, 'peer_conflicts') or []
-
-
-def resolve(repo, conflict_id, choice_id):
-    if not dataset(repo):
-        raise ValueError('This file is not shared with peers.')
-    sync = repo.sync or SyncState(repo)
-    with sync.muted(), repo.atomic():
-        conflict = next((c for c in conflicts(repo) if c['id'] == conflict_id), None)
-        if not conflict or not any(c['id'] == choice_id for c in conflict['choices']):
-            raise ValueError('This conflict or choice is no longer available. Refresh the conflict list.')
-        _local(repo, [], {'conflict': conflict_id, 'choice': choice_id})
-    return True

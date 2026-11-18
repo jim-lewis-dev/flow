@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import uuid
@@ -218,6 +219,113 @@ class PeerNetworkTests(unittest.TestCase):
         self.assertEqual([], b.available())
         self.assertEqual([], a.peers())
         self.assertTrue(source.exists())
+
+    def test_legacy_file_requests_are_refused_before_opening_or_receiving_content(self):
+        from flowledger import peer_store
+        a, b = self.node("current"), self.node("legacy-client")
+        source, record = self.ledger("current.sqlite3")
+        dataset = a.share(source, "Water")
+        identity = self.connect(b, a)
+        target = self.root / "client.sqlite3"
+        b.join(dataset, identity, target)
+        with closing(Repository(target)) as client:
+            client.save_flow(dict(record, notes="Must not reach the current server"))
+            outgoing = peer_store.missing(client, [])
+        with closing(Repository(source)) as server:
+            baseline = peer_store.genesis(server)
+            before = server.list_flows(), peer_store.inventory(server)
+        original = source.read_bytes()
+        token = b._peer_snapshot()[0]["token"]
+        # The old client omitted this field; explicit protocol 2 is equally
+        # incompatible. Every file operation must stop before opening the file.
+        with patch.object(a, "_open", wraps=a._open) as opened:
+            for protocol in (None, 2):
+                for operation in ("catalog", "seed", "pull", "push"):
+                    with self.subTest(protocol=protocol, operation=operation):
+                        header = dict(op=operation, id=b.status()["peer_id"], token=token,
+                                      dataset=dataset, baseline=baseline)
+                        if protocol is not None:
+                            header["protocol"] = protocol
+                        body = outgoing if operation == "push" else [] if operation == "pull" else None
+                        with self.assertRaisesRegex(ValueError, "Update Flow on both devices"):
+                            peer_wire.call(a.status()["address"], identity, header, body)
+            opened.assert_not_called()
+        self.assertEqual(original, source.read_bytes())
+        with closing(Repository(source)) as server:
+            self.assertEqual(before, (server.list_flows(), peer_store.inventory(server)))
+        self.assertEqual([identity], [p["peer_id"] for p in b.peers()])
+
+    def test_current_client_refuses_legacy_replies_before_sending_file_content(self):
+        from flowledger import peer_store
+        a, b = self.node("legacy-server"), self.node("current")
+        source, record = self.ledger("server.sqlite3")
+        dataset = a.share(source, "Water")
+        identity = self.connect(b, a)
+        target = self.root / "current.sqlite3"
+        b.join(dataset, identity, target)
+        with closing(Repository(target)) as client:
+            client.save_flow(dict(record, notes="Must not reach the legacy server"))
+            outgoing = peer_store.missing(client, [])
+        with closing(Repository(source)) as server:
+            baseline = peer_store.genesis(server)
+            seed = peer_store.seed(server)
+            seed["protocol"] = 2
+            before = server.list_flows(), peer_store.inventory(server)
+        token = b._peer_snapshot()[0]["token"]
+        bodies, headers = [], []
+        completed = threading.Event()
+        unchanged = False
+
+        def legacy_handle(header, stream, host):
+            # A pre-0.8 listener authenticates the peer and ignores an unknown
+            # protocol header. Its unversioned ready ack must not release data.
+            self.assertEqual(token, header["token"])
+            headers.append(header)
+            operation = header["op"]
+            if operation == "catalog":
+                return [dict(dataset=dataset, name="Water")]
+            if operation == "seed":
+                return dict(name="Water", seed=seed)
+            if operation == "pull" and unchanged:
+                return {"unchanged": True}
+            peer_wire.write(stream, {"ready": True}, peer_wire.HEADER)
+            try:
+                body = peer_wire.read(stream)
+                bodies.append(body)
+                if operation == "push":
+                    with closing(Repository(source)) as server:
+                        peer_store.receive(server, body)
+                return True
+            except OSError:
+                return True  # The current client closed without sending a body.
+            finally:
+                completed.set()
+
+        with patch.object(a._listener, "handle", side_effect=legacy_handle):
+            for operation in ("catalog", "seed", "pull", "push"):
+                with self.subTest(operation=operation):
+                    completed.clear()
+                    body = outgoing if operation == "push" else [] if operation == "pull" else None
+                    with self.assertRaisesRegex(ValueError, "Update Flow on both devices"):
+                        b._remote(identity, operation, dataset=dataset, baseline=baseline, body=body)
+                    if body is not None:
+                        self.assertTrue(completed.wait(2))
+            unchanged = True
+            with self.assertRaisesRegex(ValueError, "Update Flow on both devices"):
+                b._remote(identity, "pull", dataset=dataset, baseline=baseline, body=[])
+            destination = self.root / "not-installed.sqlite3"
+            # Refuse an old seed before creating any staged or final file.
+            with self.assertRaisesRegex(ValueError, "Update Flow on both devices"):
+                b.join("another-dataset", identity, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual([], b.available())
+            self.assertIn("Update Flow on both devices", b.status()["error"])
+        self.assertTrue(headers)
+        self.assertTrue(all(h["protocol"] == peer_store.PROTOCOL for h in headers))
+        self.assertEqual([], bodies)
+        with closing(Repository(source)) as server:
+            self.assertEqual(before, (server.list_flows(), peer_store.inventory(server)))
+        self.assertEqual([identity], [p["peer_id"] for p in b.peers()])
 
     def test_relay_without_original_listener_preserves_edits_and_local_only_files(self):
         a, b, c = self.node("a"), self.node("b"), self.node("c")

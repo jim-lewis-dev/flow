@@ -135,7 +135,7 @@ flow /path/to/travel.sqlite3
 
 Close Flow before copying a standalone database to another computer. The file carries records, starting balances, audit history, and map positions.
 
-Under **Sync**, pair devices, share a file, and join it on the others. Each device saves locally and exchanges changes while Flow is open. Any paired device holding the file can pass along edits, so no particular computer needs to stay on. See [share a file](docs/peer-sync.md) for pairing, offline work, and conflict handling.
+Under **Sync**, pair devices, share a file, and join it on the others. Each device saves locally and exchanges changes while Flow is open. Any paired device holding the file can pass along edits, so no particular computer needs to stay on. Edits merge by field, with the latest actual edit winning. See [share a file](docs/peer-sync.md) for pairing, offline work, and merging.
 
 The **Data** tab offers CSV/JSON import and export, plus full database backup and restore. Imports preview duplicates and conflicts. CSV/JSON files contain flows only; [examples](examples/README.md) show the format.
 

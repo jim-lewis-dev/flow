@@ -16,7 +16,6 @@
   <div class="history"><button id="undo" class="icon" aria-label="Undo" disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 6 6v3"></path></svg></button><button id="redo" class="icon" aria-label="Redo" disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0-6 6v3"></path></svg></button></div>
 </header>
 <div id="storage-warning" class="storage-warning" role="alert" hidden><span id="storage-message"></span><button id="retry-save" class="text-button">Retry save</button></div>
-<div id="peer-review-bar" class="storage-warning" hidden><button id="peer-review" class="text-button"></button></div>
 <main>
   <section id="flows" class="page active" aria-label="Flows">
     <div class="section-heading"><h1>Flows</h1><span id="count" class="muted"></span></div>
@@ -51,7 +50,6 @@
     <section id="device-sharing" class="sync-panel">
       <h2>Device sharing</h2>
       <p id="peer-file-state" class="small muted"></p>
-      <div id="peer-conflicts" aria-live="polite"></div>
       <p id="peer-copy" class="small muted" hidden>Sharing creates a separate phone copy with the same name. The selected document stays in place.</p>
       <div class="file-actions"><button id="peer-share" class="primary">Share this file</button><button id="peer-unshare" class="outline" hidden>Stop sharing this file</button></div>
       <details id="pair-panel"><summary>Pair device</summary>

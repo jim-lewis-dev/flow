@@ -1,12 +1,14 @@
-"""Causal projection properties independent of clocks, delivery and SQLite."""
+"""Latest-edit-wins projection, historical replay, and relational integrity."""
 from copy import deepcopy
 from itertools import permutations
 from pathlib import Path
 from random import Random
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from flowledger.core import DEFAULT_ANCHOR, Repository
+from flowledger.peer_legacy import project as legacy_project
 from flowledger.peer_projection import project
 from flowledger.sync import SyncState, _key
 
@@ -15,13 +17,17 @@ def change(table, key, before, after):
     return dict(table=table, key=list(key), before=before, after=after)
 
 
-def event(name, *changes, parents=()):
-    return dict(id=name, dataset='seed', parents=list(parents), changes=list(changes))
+def event(name, *changes, parents=(), stamp=100):
+    result = dict(id=name, dataset='seed', parents=list(parents), changes=list(changes))
+    if stamp is not None:
+        result['stamp'] = [stamp, 0] if isinstance(stamp, int) else stamp
+    return result
 
 
 def decision(name, conflict, value, *parents):
     choice = next(c for c in conflict['choices'] if c['value'] == value)
-    return dict(event(name, parents=parents), resolution={'conflict': conflict['id'], 'choice': choice['id']})
+    return dict(event(name, parents=parents, stamp=None),
+                resolution={'conflict': conflict['id'], 'choice': choice['id']})
 
 
 class ProjectionTests(unittest.TestCase):
@@ -38,14 +44,16 @@ class ProjectionTests(unittest.TestCase):
         self.identity = _key('flows', self.key)
         self.base = self.initial[self.identity]['row']
 
-    def edit(self, event_id, parents=(), before=None, **updates):
-        before = before or self.base
-        return event(event_id, change('flows', self.key, before, dict(before, **updates)), parents=parents)
+    def edit(self, event_id, parents=(), before=None, stamp=100, **updates):
+        before = self.base if before is None else before
+        return event(event_id, change('flows', self.key, before, dict(before, **updates)),
+                     parents=parents, stamp=stamp)
 
     def assert_orders(self, events):
         reference = project(self.initial, events)
         for order in permutations(events):
             self.assertEqual(reference, project(self.initial, order))
+        self.assertEqual([], reference[1])
         return reference
 
     def assert_relations(self, rows):
@@ -54,190 +62,208 @@ class ProjectionTests(unittest.TestCase):
         self.assertIsNone(self.repo.conn.execute('PRAGMA foreign_key_check').fetchone())
         self.assertEqual(rows, self.db._rows())
 
-    def test_disjoint_fields_commute_and_equal_values_agree(self):
-        a = self.edit('a', notes='New note')
-        b = self.edit('b', name='New title')
-        same = self.edit('s', notes='New note')
-        rows, conflicts, versions = self.assert_orders([a, b, same])
-        self.assertEqual([], conflicts)
-        self.assertEqual('New note', rows[self.identity]['row']['notes'])
-        self.assertEqual('New title', rows[self.identity]['row']['name'])
-        self.assertNotEqual('a', versions[self.identity]['notes'])
+    def test_actual_changed_fields_merge_without_repainting_newer_values(self):
+        note = self.edit('note', stamp=300, notes='New note')
+        title = self.edit('title', stamp=200, name='New title')
+        stale = self.edit('stale', stamp=100, notes='Old note')
+        rows, _, versions = self.assert_orders([title, note, stale])
+        self.assertEqual(('New title', 'New note'),
+                         tuple(rows[self.identity]['row'][key] for key in ('name', 'notes')))
+        self.assertEqual('note', versions[self.identity]['notes'])
+        self.assertEqual('title', versions[self.identity]['name'])
         self.assertNotIn('__row__', versions[self.identity])
         self.assert_relations(rows)
 
-    def test_conflicting_choices_name_only_peers_that_proposed_each_value(self):
-        a = dict(self.edit('a', notes='one'), origin='Laptop')
-        b = dict(self.edit('b', notes='two'), origin='Phone')
-        c = dict(self.edit('c', notes='one'), origin='Tablet')
-        _, [conflict], _ = self.assert_orders([a, b, c])
-        choices = {v['value']: v for v in conflict['choices']}
-        self.assertEqual(['Laptop', 'Tablet'], choices['one']['origins'])
-        self.assertEqual(['a', 'c'], choices['one']['events'])
-        self.assertEqual(['Phone'], choices['two']['origins'])
+    def test_timestamp_then_counter_then_event_id_break_ties(self):
+        a = self.edit('z', stamp=[100, 0], notes='first counter')
+        b = self.edit('a', stamp=[100, 1], notes='next counter')
+        c = self.edit('b', stamp=[100, 1], notes='event tie')
+        rows, _, versions = self.assert_orders([a, b, c])
+        self.assertEqual('event tie', rows[self.identity]['row']['notes'])
+        self.assertEqual('b', versions[self.identity]['notes'])
 
-    def test_prior_is_common_ancestor_not_earliest_seed_or_first_delivery(self):
-        root = self.edit('root', notes='common')
-        prior = root['changes'][0]['after']
-        a = self.edit('a', parents=['root'], before=prior, notes='left')
-        b = self.edit('b', parents=['root'], before=prior, notes='right')
-        later = self.edit('a2', parents=['a'], before=a['changes'][0]['after'], notes='later')
-        rows, [c], versions = self.assert_orders([root, a, b, later])
-        self.assertEqual('common', rows[self.identity]['row']['notes'])
-        self.assertEqual('common', c['base'])
-        self.assertEqual({'later', 'right'}, {choice['value'] for choice in c['choices']})
-        resolve = decision('resolve', c, 'later', 'a2', 'b')
-        rows, conflicts, updated = project(self.initial, [resolve, b, later, a, root])
-        self.assertFalse(conflicts)
-        self.assertEqual('later', rows[self.identity]['row']['notes'])
-        self.assertNotEqual(versions[self.identity]['notes'], updated[self.identity]['notes'])
-
-    def test_concurrent_resolutions_agree_conflict_and_can_be_resolved_again(self):
-        a, b, c = [self.edit(i, name=i) for i in 'abc']
-        _, [first], _ = project(self.initial, [a, b])
-        left = decision('r1', first, 'a', 'a', 'b')
-        right = decision('r2', first, 'b', 'a', 'b')
-        same = decision('rs', first, 'a', 'a', 'b')
-        self.assertFalse(project(self.initial, [a, b, left, same])[1])
-        rows, [again], _ = self.assert_orders([a, b, left, right])
-        self.assertEqual('Baseline', again['base'])
-        self.assertEqual('Baseline', rows[self.identity]['row']['name'])
-        final = decision('rf', again, 'b', 'r1', 'r2')
-        merged = [a, b, left, right, final]
-        _, [unseen], _ = project(self.initial, merged + [c])
-        self.assertEqual({'b', 'c'}, {choice['value'] for choice in unseen['choices']})
-        finish = decision('last', unseen, 'c', 'c', 'rf')
-        rows, conflicts, _ = project(self.initial, [finish, c, *merged])
-        self.assertFalse(conflicts)
-        self.assertEqual('c', rows[self.identity]['row']['name'])
-        with self.assertRaisesRegex(ValueError, 'observed'):
-            project(self.initial, [a, b, dict(left, parents=['a'])])
-        with self.assertRaisesRegex(ValueError, 'selected value'):
-            project(self.initial, [a, b, dict(left, resolution=dict(left['resolution'], choice='made-up'))])
-
-    def test_quantity_and_unit_stay_together_and_resolving_derives_anchors(self):
-        a = self.edit('a', amount='3')
-        b = self.edit('b', units='hours')
-        rows, [c], _ = self.assert_orders([a, b])
-        self.assertEqual({'amount': '2', 'units': 'USD'}, c['base'])
-        self.assertEqual(('2', 'USD'), tuple(rows[self.identity]['row'][key] for key in ('amount', 'units')))
-        alive = dict(amount='2', units='hours')
-        rows, conflicts, versions = project(self.initial, [a, b, decision('r', c, alive, 'a', 'b')])
-        self.assertFalse(conflicts)
-        self.assertEqual('r', versions[self.identity]['amount'])
-        self.assertEqual('r', versions[self.identity]['units'])
+    def test_quantity_and_unit_are_one_atomic_field(self):
+        amount = self.edit('amount', stamp=100, amount='3')
+        unit = self.edit('unit', stamp=200, units='hours')
+        rows, _, versions = self.assert_orders([amount, unit])
+        self.assertEqual(('2', 'hours'), tuple(rows[self.identity]['row'][key] for key in ('amount', 'units')))
+        self.assertEqual('unit', versions[self.identity]['amount'])
+        self.assertEqual('unit', versions[self.identity]['units'])
         self.assert_relations(rows)
         self.assertIsNotNone(self.repo.get_account('A', 'hours'))
 
-    def test_independent_endpoint_and_unit_create_missing_pair_then_accept_real_balance(self):
-        a = self.edit('a', from_key='c')
-        b = self.edit('b', units='kg')
-        rows, conflicts, _ = self.assert_orders([a, b])
-        self.assertFalse(conflicts)
-        self.assert_relations(rows)
-        key = ['c', 'kg']
-        derived = rows[_key('account_balances', key)]['row']
-        balance = event('balance', change('account_balances', key, derived, dict(derived, opening_amount='42')), parents=['a', 'b'])
-        rows, conflicts, _ = project(self.initial, [balance, b, a])
-        self.assertFalse(conflicts)
-        self.assertEqual('42', rows[_key('account_balances', key)]['row']['opening_amount'])
+    def test_coordinates_are_one_atomic_field(self):
+        key = ['a']
+        base = dict(account_key='a', x=1.0, y=2.0)
+        create = event('create', change('account_positions', key, None, base))
+        x = event('x', change('account_positions', key, base, dict(base, x=3.0)), parents=['create'], stamp=200)
+        y = event('y', change('account_positions', key, base, dict(base, y=4.0)), parents=['create'], stamp=300)
+        rows, _, versions = self.assert_orders([create, x, y])
+        identity = _key('account_positions', key)
+        self.assertEqual(dict(base, y=4.0), rows[identity]['row'])
+        self.assertEqual(versions[identity]['x'], versions[identity]['y'])
         self.assert_relations(rows)
 
-    def test_deleted_flow_and_tag_only_edit_can_keep_tags_or_remove_graph(self):
+    def test_ordered_tags_are_atomic_and_unrelated_name_merges(self):
+        def add_tag(name, tag, stamp):
+            key = self.key + [tag]
+            return event(name, change('flow_tags', key, None,
+                         dict(flow_id=self.key[0], tag_key=tag, position=1)), stamp=stamp)
+        a, b = add_tag('a', 'hot', 100), add_tag('b', 'cold', 200)
+        rename = self.edit('rename', name='other', stamp=300)
+        rows, _, versions = self.assert_orders([a, b, rename])
+        links = {entity['key'][1] for entity in rows.values() if entity['table'] == 'flow_tags'}
+        self.assertEqual({'first', 'cold'}, links)
+        self.assertEqual('other', rows[self.identity]['row']['name'])
+        self.assertEqual('b', versions[self.identity]['tags'])
+        self.assertEqual('b', versions[_key('flow_tags', self.key + ['hot'])]['__row__'])
+        self.assert_relations(rows)
+
+    def test_older_incoming_edit_cannot_resurrect_a_deleted_row(self):
+        old = self.edit('old', stamp=100, notes='stale note')
+        delete = event('delete', change('flows', self.key, self.base, None), stamp=200)
+        rows, _, versions = self.assert_orders([old, delete])
+        self.assertNotIn(self.identity, rows)
+        self.assertFalse(any(record['table'] == 'flow_tags' for record in rows.values()))
+        self.assertEqual('delete', versions[self.identity]['__row__'])
+        self.assert_relations(rows)
+
+    def test_newer_note_resurrects_complete_row_and_preserves_older_field_winners(self):
+        title = self.edit('title', stamp=100, name='New title')
+        delete = event('delete', change('flows', self.key, self.base, None), stamp=200)
+        note = self.edit('note', stamp=300, notes='New note')
+        rows, _, versions = self.assert_orders([note, title, delete])
+        self.assertEqual(dict(self.base, name='New title', notes='New note'), rows[self.identity]['row'])
+        self.assertIn(_key('flow_tags', self.key + ['first']), rows)
+        self.assertEqual('note', versions[self.identity]['__row__'])
+        current = rows[self.identity]['row']
+        date = self.edit('date', parents=['title', 'delete', 'note'], before=current,
+                         stamp=400, date='2026-02-02 00:00:00')
+        updated = project(self.initial, [delete, title, note, date])
+        self.assertEqual('note', updated[2][self.identity]['__row__'])
+        self.assert_relations(rows)
+
+    def test_newer_tag_only_edit_resurrects_row_and_complete_tag_list(self):
         key = self.key + ['first']
         tag = self.initial[_key('flow_tags', key)]['row']
         another = self.key + ['second']
         new_tag = dict(flow_id=self.key[0], tag_key='second', position=1)
-        delete = event('d', change('flow_tags', key, tag, None), change('flows', self.key, self.base, None))
-        add = event('a', change('flow_tags', another, None, new_tag))
-        rows, [c], _ = self.assert_orders([delete, add])
-        self.assertEqual(self.initial, rows)
-        keep = next(option['value'] for option in c['choices'] if option['value'] is not None)
-        rows, conflicts, _ = project(self.initial, [decision('k', c, keep, 'd', 'a'), delete, add])
-        self.assertFalse(conflicts)
+        delete = event('delete', change('flow_tags', key, tag, None),
+                       change('flows', self.key, self.base, None), stamp=100)
+        add = event('add', change('flow_tags', another, None, new_tag), stamp=200)
+        rows, _, _ = self.assert_orders([delete, add])
+        self.assertEqual(self.base, rows[self.identity]['row'])
         self.assert_relations(rows)
         self.assertEqual(['First', 'second'], self.repo.get_flow(self.key[0])['tags'])
-        rows, conflicts, _ = project(self.initial, [decision('x', c, None, 'd', 'a'), delete, add])
+
+    def test_noop_snapshot_is_not_a_liveness_edit(self):
+        delete = event('delete', change('flows', self.key, self.base, None), stamp=100)
+        noop = event('noop', change('flows', self.key, self.base, self.base), stamp=200)
+        rows, _, _ = self.assert_orders([delete, noop])
+        self.assertNotIn(self.identity, rows)
+
+    def test_delete_and_create_in_same_event_do_not_mix_liveness(self):
+        transaction = event('transaction', change('flows', self.key, self.base, None),
+                            change('categories', ['new'], None, {'category_key': 'new', 'name': 'New'}))
+        rows, _, _ = project(self.initial, [transaction])
+        self.assertNotIn(self.identity, rows)
+        self.assertIn(_key('categories', ['new']), rows)
+        self.assert_relations(rows)
+
+    def test_independent_endpoint_and_unit_derive_support_then_accept_real_balance(self):
+        endpoint = self.edit('endpoint', from_key='c', stamp=100)
+        unit = self.edit('unit', units='kg', stamp=200)
+        rows, _, _ = self.assert_orders([endpoint, unit])
+        self.assert_relations(rows)
+        key = ['c', 'kg']
+        derived = rows[_key('account_balances', key)]['row']
+        balance = event('balance', change('account_balances', key, derived, dict(derived, opening_amount='42')),
+                        parents=['endpoint', 'unit'], stamp=300)
+        rows, conflicts, _ = project(self.initial, [balance, unit, endpoint])
         self.assertFalse(conflicts)
-        self.assert_relations(rows)
-        self.assertFalse(any(record['table'] == 'flow_tags' for record in rows.values()))
-
-    def test_ordered_tag_list_conflict_and_unrelated_name_merge(self):
-        def add_tag(name, tag):
-            key = self.key + [tag]
-            return event(name, change('flow_tags', key, None, dict(flow_id=self.key[0], tag_key=tag, position=1)))
-        a, b = add_tag('a', 'hot'), add_tag('b', 'cold')
-        rename = self.edit('rename', name='other')
-        rows, [c], versions = self.assert_orders([a, b, rename])
-        self.assertEqual(['tags'], c['fields'])
-        self.assertEqual({'first': 0}, c['base'])
-        self.assertEqual('other', rows[self.identity]['row']['name'])
-        self.assertIn(_key('flow_tags', self.key + ['hot']), versions)
+        self.assertEqual('42', rows[_key('account_balances', key)]['row']['opening_amount'])
         self.assert_relations(rows)
 
-    def test_delete_or_keep_preserves_all_compatible_living_edits(self):
-        left = self.edit('left', name='New name')
-        right = self.edit('right', notes='New note')
-        delete = event('gone', change('flows', self.key, self.base, None))
-        rows, [c], _ = self.assert_orders([left, right, delete])
-        self.assertEqual(self.base, rows[self.identity]['row'])
-        self.assertEqual(2, len(c['choices']))
-        keep = next(v for v in c['choices'] if v['value'] is not None)
-        self.assertEqual(['left', 'right'], keep['events'])
-        rows, conflicts, _ = project(self.initial, [decision('restore', c, keep['value'],
-                                              'left', 'right', 'gone'), delete, left, right])
-        self.assertFalse(conflicts)
-        self.assertEqual(('New name', 'New note'), tuple(rows[self.identity]['row'][k] for k in ('name', 'notes')))
-        self.assert_relations(rows)
-
-    def test_independently_created_same_row_retains_shared_prior_value(self):
-        fid = 'ebb8e61e-6798-4417-a8ae-f76969a45204'
-        key = [fid]
-        original = dict(self.base, flow_id=fid)
-        born = change('flows', key, None, original)
-        left, right = event('l', born), event('r', born)
-        l1 = event('l1', change('flows', key, original, dict(original, units='kg')), parents=['l'])
-        l2 = event('l2', change('flows', key, l1['changes'][0]['after'], dict(original, units='ton')), parents=['l1'])
-        r1 = event('r1', change('flows', key, original, dict(original, amount='7')), parents=['r'])
-        rows, [c], _ = project(self.initial, [l2, r1, left, l1, right])
-        self.assertEqual({'amount': '2', 'units': 'USD'}, c['base'])
-        self.assertEqual(original, rows[_key('flows', key)]['row'])
-        self.assert_relations(rows)
-
-    def test_absent_reference_anchor_does_not_overwrite_explicit_concurrent_balance(self):
+    def test_newer_automatic_anchor_does_not_overwrite_explicit_concurrent_balance(self):
         key = ['a', 'kg']
         default = dict(account_key='a', units='kg', opening_amount=None, opening_at=DEFAULT_ANCHOR)
         real = dict(default, opening_amount='15')
-        a = event('a', change('account_balances', key, None, default))
-        b = event('b', change('account_balances', key, None, real))
-        rows, conflicts, _ = self.assert_orders([a, b])
-        self.assertFalse(conflicts)
-        self.assertEqual(real, rows[_key('account_balances', key)]['row'])
+        auto = event('auto', change('account_balances', key, None, default), stamp=200)
+        explicit = event('explicit', change('account_balances', key, None, real), stamp=100)
+        rows, _, versions = self.assert_orders([auto, explicit])
+        identity = _key('account_balances', key)
+        self.assertEqual(real, rows[identity]['row'])
+        self.assertEqual('explicit', versions[identity]['opening_amount'])
+        self.assert_relations(rows)
 
-    def test_retains_deleted_support_used_by_another_live_flow(self):
+    def test_deleted_support_is_retained_only_for_surviving_relations(self):
         key = ['a', 'USD']
         identity = _key('account_balances', key)
         drop = event('drop', change('account_balances', key, self.initial[identity]['row'], None),
-                     change('flows', self.key, self.base, None))
+                     change('flows', self.key, self.base, None), stamp=300)
         fid = 'ebb8e61e-6798-4417-a8ae-f76969a45204'
-        extra = event('add', change('flows', [fid], None, dict(self.base, flow_id=fid)))
-        rows, conflicts, _ = self.assert_orders([drop, extra])
-        self.assertFalse(conflicts)
+        extra = event('add', change('flows', [fid], None, dict(self.base, flow_id=fid)), stamp=100)
+        rows, _, _ = self.assert_orders([drop, extra])
         self.assertEqual(rows[identity], self.initial[identity])
+        self.assertIsNone(rows.get(self.identity))
         self.assert_relations(rows)
-        self.assertIsNotNone(self.repo.get_flow(fid))
-        self.assertIsNone(self.repo.get_flow(self.key[0]))
 
-    def test_rejected_plain_overwrite_does_not_block_disjoint_edit(self):
-        a, b = self.edit('a', name='left'), self.edit('b', name='right')
-        note = self.edit('n', parents=['a', 'b'], notes='independent')
-        rows, [c], _ = self.assert_orders([a, b, note])
-        self.assertEqual('independent', rows[self.identity]['row']['notes'])
-        self.assertEqual(['name'], c['fields'])
-        with self.assertRaisesRegex(ValueError, 'existing peer conflict'):
-            project(self.initial, [a, b, self.edit('x', parents=['a', 'b'], name='overwrite')])
+    def test_before_image_uses_causal_view_not_arrival_order(self):
+        first = self.edit('first', stamp=100, name='First')
+        second = self.edit('second', stamp=200, name='Second')
+        before = dict(self.base, name='Second')
+        note = self.edit('note', parents=['first', 'second'], before=before, stamp=300, notes='merged')
+        rows, _, _ = self.assert_orders([note, second, first])
+        self.assertEqual(dict(before, notes='merged'), rows[self.identity]['row'])
+        invalid = self.edit('bad', parents=['first', 'second'], stamp=300, notes='wrong prior')
+        with self.assertRaisesRegex(ValueError, 'wrong prior'):
+            project(self.initial, [invalid, first, second])
 
-    def test_duplicate_events_are_idempotent_but_changed_payload_rejected(self):
+    def test_revision_tokens_capture_aba_and_only_changed_atomic_groups(self):
+        first = self.edit('first', stamp=100, units='kg', name='other')
+        prior = first['changes'][0]['after']
+        second = self.edit('second', parents=['first'], before=prior, stamp=200, name=self.base['name'])
+        rows, _, versions = self.assert_orders([first, second])
+        fields = versions[self.identity]
+        self.assertEqual('second', fields['name'])
+        self.assertEqual('first', fields['amount'])
+        self.assertEqual('first', fields['units'])
+        self.assertFalse({'notes', 'tags', '__row__'} & fields.keys())
+        stale = self.edit('stale', stamp=50, name='losing')
+        self.assertEqual((rows, [], versions), project(self.initial, [first, second, stale]))
+
+    def test_tag_only_undo_is_guarded_across_flow_delete_and_resurrection(self):
+        from flowledger import peer_store as store
+        from flowledger.history import SessionHistory
+        from flowledger.sync import SyncConflict
+
+        store.share(self.repo, 'Water')
+        history = SessionHistory(self.repo)
+        self.addCleanup(history.close)
+        with patch.object(store.time, 'time_ns', return_value=100_000_000):
+            history.perform('Add tag', lambda: self.repo.save_flow(dict(self.flow, tags=['First', 'Second'])))
+        peers = []
+        for name in ('delete', 'revive'):
+            peer = Repository(Path(self.repo.path).with_name(name + '.flow'))
+            self.addCleanup(peer.close)
+            store.join(peer, store.seed(self.repo))
+            store.receive(peer, store.missing(self.repo, []))
+            peers.append(peer)
+        delete, revive = peers
+        with patch.object(store.time, 'time_ns', return_value=200_000_000):
+            delete.delete_flow(self.key[0])
+        with patch.object(store.time, 'time_ns', return_value=300_000_000):
+            revive.save_flow(dict(revive.get_flow(self.key[0]), notes='Resurrected'))
+        store.receive(self.repo, store.missing(delete, store.inventory(self.repo)))
+        store.receive(self.repo, store.missing(revive, store.inventory(self.repo)))
+        self.assertEqual(['First', 'Second'], self.repo.get_flow(self.key[0])['tags'])
+        before = store.inventory(self.repo)
+        with self.assertRaisesRegex(SyncConflict, 'newer change'):
+            history.undo()
+        self.assertEqual(before, store.inventory(self.repo))
+        self.assertEqual(['First', 'Second'], self.repo.get_flow(self.key[0])['tags'])
+
+    def test_duplicate_events_are_idempotent_and_inputs_remain_immutable(self):
         a = self.edit('a', amount='3')
         b = self.edit('b', name='new')
         before = deepcopy([self.initial, a, b])
@@ -250,106 +276,90 @@ class ProjectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Cycle'):
             project(self.initial, [dict(a, parents=['b']), dict(b, parents=['a'])])
 
-    def test_four_replicas_delete_recreate_and_resolve_without_partial_rows(self):
-        # IDs may reappear after undo. Repeated competing decisions restoring
-        # a row should never build a quantity or tag list out of a tombstone.
+    def test_invalid_or_noncausal_stamps_are_rejected(self):
+        a = self.edit('a', stamp=[100, 1], notes='first')
+        for stamp in ([100, 0], [100, 1], [99, 9]):
+            with self.subTest(stamp=stamp), self.assertRaisesRegex(ValueError, 'follow its parents'):
+                project(self.initial, [a, self.edit('b', parents=['a'], before=a['changes'][0]['after'],
+                                                     stamp=stamp, notes='second')])
+        for stamp in ([0, 1], [-1, 0], [1, -1], [True, 0], [1, False], [1.0, 0],
+                      [2**53, 0], [1, 2**53], [1], (1, 0)):
+            with self.subTest(stamp=stamp), self.assertRaisesRegex(ValueError, 'Invalid peer edit stamp'):
+                project(self.initial, [self.edit('a', stamp=stamp, notes='first')])
+
+    def test_legacy_conflict_and_recorded_decision_are_translated_without_a_queue(self):
+        a = self.edit('a', stamp=None, notes='one')
+        b = self.edit('b', stamp=None, notes='two')
+        _, [conflict], _ = legacy_project(self.initial, [a, b])
+        resolved = decision('resolve', conflict, 'one', 'a', 'b')
+        rows, _, versions = self.assert_orders([b, a, resolved])
+        self.assertEqual('one', rows[self.identity]['row']['notes'])
+        self.assertEqual('resolve', versions[self.identity]['notes'])
+        with self.assertRaisesRegex(ValueError, 'observed'):
+            project(self.initial, [a, b, dict(resolved, parents=['a'])])
+        with self.assertRaisesRegex(ValueError, 'selected value'):
+            project(self.initial, [a, b, dict(resolved, resolution=dict(resolved['resolution'], choice='fake'))])
+        with self.assertRaisesRegex(ValueError, 'legacy resolution'):
+            project(self.initial, [a, b, dict(resolved, stamp=[100, 0])])
+
+    def test_old_offline_edits_validate_original_common_before_and_remain_available(self):
+        a = self.edit('a', stamp=None, name='one')
+        b = self.edit('b', stamp=None, name='two')
+        old_note = self.edit('old-note', stamp=None, parents=['a', 'b'], notes='old offline note')
+        rows, _, _ = self.assert_orders([a, b, old_note])
+        self.assertEqual(dict(self.base, name='two', notes='old offline note'), rows[self.identity]['row'])
+        new_before = dict(self.base, name='two')
+        current = self.edit('current', parents=['a', 'b'], before=new_before, stamp=1, name='new title')
+        rows, _, _ = self.assert_orders([a, b, current, old_note])
+        self.assertEqual(dict(self.base, name='new title', notes='old offline note'), rows[self.identity]['row'])
+        old_late = self.edit('old-late', parents=['old-note'], before=dict(self.base, notes='old offline note'),
+                             stamp=None, notes='later old note')
+        rows, _, _ = project(self.initial, [a, b, current, old_note, old_late])
+        self.assertEqual('later old note', rows[self.identity]['row']['notes'])
+        with self.assertRaisesRegex(ValueError, 'cannot follow stamped'):
+            project(self.initial, [current, a, b, dict(old_note, parents=['current'])])
+
+    def test_new_stamped_edit_always_wins_over_deeper_old_history(self):
+        old = self.edit('old', stamp=None, notes='old')
+        deeper = self.edit('deeper', stamp=None, parents=['old'], before=old['changes'][0]['after'], notes='deeper')
+        new = self.edit('new', stamp=1, notes='current')
+        rows, _, _ = self.assert_orders([deeper, new, old])
+        self.assertEqual('current', rows[self.identity]['row']['notes'])
+
+    def test_legacy_delete_resolution_translates_to_liveness_without_null_fields(self):
+        note = self.edit('old-note', stamp=None, notes='before delete')
+        delete = event('old-delete', change('flows', self.key, self.base, None), stamp=None)
+        _, [conflict], _ = legacy_project(self.initial, [note, delete])
+        resolved = decision('old-resolution', conflict, None, 'old-note', 'old-delete')
+        revive = self.edit('revive', stamp=100, name='New name')
+        rows, _, _ = self.assert_orders([note, delete, resolved, revive])
+        self.assertEqual(dict(self.base, notes='before delete', name='New name'), rows[self.identity]['row'])
+        self.assert_relations(rows)
+
+    def test_four_replicas_delete_recreate_and_replay_without_partial_rows(self):
         rng = Random(19)
-        for run in range(12):
+        for run in range(10):
             seed = self.initial if run % 2 else {
                 k: v for k, v in self.initial.items() if v['table'] not in ('flows', 'flow_tags')}
             devices = [{} for _ in range(4)]
-            for step in range(35):
+            for step in range(45):
                 own = rng.choice(devices)
                 if rng.random() < .45:
                     own.update(rng.choice(devices))
                 rows, conflicts, _ = project(seed, own)
+                self.assertFalse(conflicts)
                 parents = set(own) - {p for e in own.values() for p in e['parents']}
                 name = str(step)
-                if conflicts:
-                    c = rng.choice(conflicts)
-                    self.assertGreaterEqual(len(c['choices']), 2)
-                    e = decision(name, c, rng.choice(c['choices'])['value'], *sorted(parents))
+                before = rows.get(self.identity, {}).get('row')
+                if before is not None and rng.random() < .25:
+                    after = None
                 else:
-                    before = rows.get(self.identity, {}).get('row')
-                    if before is not None and rng.random() < .25:
-                        after = None
-                    else:
-                        after = dict(before or self.base)
-                        field = rng.choice(['amount', 'units', 'notes', 'name'])
-                        after[field] = str(rng.randrange(7))
-                    e = event(name, change('flows', self.key, before, after), parents=sorted(parents))
-                own[name] = e
+                    after = dict(before or self.base)
+                    field = rng.choice(['amount', 'units', 'notes', 'name'])
+                    after[field] = str(rng.randrange(7))
+                own[name] = event(name, change('flows', self.key, before, after),
+                                  parents=sorted(parents), stamp=100 + step)
             merged = {i: e for device in devices for i, e in device.items()}
             result = project(seed, merged)
             self.assertEqual(result, project(seed, reversed(list(merged.values()))))
             self.assert_relations(result[0])
-
-    def test_sqlite_replay_of_a_stale_conflict_never_reverts_a_newer_resolution(self):
-        from flowledger import peer_store as store
-
-        store.share(self.repo, 'Water')
-        peers = []
-        for i in range(3):
-            device = Repository(Path(self.repo.path).with_name('peer-%d.flow' % i))
-            self.addCleanup(device.close)
-            store.join(device, store.seed(self.repo))
-            peers.append(device)
-        # Three devices start with the same visible quantity.
-        for device, amount in zip(peers, ('3', '4', '5')):
-            device.save_flow(dict(self.flow, amount=amount))
-        branches = [store.missing(device, []) for device in peers]
-        store.receive(self.repo, branches[1] + branches[0])
-        [first] = store.conflicts(self.repo)
-        choose = next(c for c in first['choices'] if c['value']['amount'] == '4')
-        store.resolve(self.repo, first['id'], choose['id'])
-        self.assertEqual('4', self.repo.get_flow(self.key[0])['amount'])
-
-        store.receive(self.repo, branches[2])
-        [second] = store.conflicts(self.repo)
-        self.assertNotEqual(first['id'], second['id'])
-        self.assertEqual('2', self.repo.get_flow(self.key[0])['amount'])
-        self.assertEqual({'4', '5'}, {v['value']['amount'] for v in second['choices']})
-        before_ids = store.inventory(self.repo)
-        with self.assertRaisesRegex(ValueError, 'no longer'):
-            store.resolve(self.repo, first['id'], choose['id'])
-        self.assertEqual(before_ids, store.inventory(self.repo))
-        self.assertEqual([second], store.conflicts(self.repo))
-        final = next(v for v in second['choices'] if v['value']['amount'] == '5')
-        store.resolve(self.repo, second['id'], final['id'])
-        # A delayed device can relay every old intent and the new decisions.
-        # Repeated copies of the two losing changes cannot repaint the ledger.
-        old = branches[1] + branches[0]
-        self.assertFalse(store.receive(self.repo, old))
-        for device in peers:
-            store.receive(device, store.missing(self.repo, store.inventory(device)))
-            self.assertFalse(store.receive(device, old))
-            self.assertEqual(self.repo.get_flow(self.key[0]), device.get_flow(self.key[0]))
-            self.assertEqual(self.repo.sync.field_tokens('flows', self.key), device.sync.field_tokens('flows', self.key))
-            self.assertFalse(store.conflicts(device))
-        self.assertEqual('5', self.repo.get_flow(self.key[0])['amount'])
-
-    def test_sqlite_field_revisions_report_aba_and_cross_unit_changes_only_where_affected(self):
-        from flowledger import peer_store as store
-
-        store.share(self.repo, 'Water')
-        device = Repository(Path(self.repo.path).with_name('device.flow'))
-        self.addCleanup(device.close)
-        store.join(device, store.seed(self.repo))
-        stale = self.repo.sync.field_tokens('flows', self.key)
-        device.save_flow(dict(self.flow, units='kg', name='other'))
-        device.save_flow(dict(self.flow, units='kg'))
-        events = store.missing(device, [])
-        with self.assertRaisesRegex(ValueError, 'Missing parent'):
-            store.receive(self.repo, events[1:])
-        self.assertEqual([], store.inventory(self.repo))
-        self.assertEqual(self.flow, self.repo.get_flow(self.key[0]))
-        store.receive(self.repo, list(reversed(events)))
-        fresh = self.repo.sync.field_tokens('flows', self.key)
-        for field in ('name', 'units', 'amount'):
-            self.assertNotEqual(stale[field], fresh[field])
-        for field in ('notes', 'tags', '__row__'):
-            self.assertEqual(stale[field], fresh[field])
-        current = self.repo.get_flow(self.key[0])
-        self.assertEqual(self.flow['name'], current['name'])
-        self.assertEqual(self.flow['amount'], current['amount'])
-        self.assertEqual('kg', current['units'])

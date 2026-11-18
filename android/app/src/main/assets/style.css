@@ -35,7 +35,7 @@
 .storage-warning .text-button{display:block}
 @media(max-width:370px){.bottom-nav{padding-left:3px;padding-right:3px}.bottom-nav button{margin:2px 0}.map-detail-list{gap:10px}}
 
-.sync-panel{margin:20px 0;padding:14px;border:1px solid #dce5df;border-radius:10px}.sync-panel summary{cursor:pointer;font-weight:600}.sync-panel summary span{display:block;font-weight:400;margin-top:4px}.sync-conflict{padding:10px 0;border-top:1px solid #dce5df}.sync-conflict pre{white-space:pre-wrap;overflow-wrap:anywhere}.sync-conflict button{margin:4px 4px 4px 0}
+.sync-panel{margin:20px 0;padding:14px;border:1px solid #dce5df;border-radius:10px}.sync-panel summary{cursor:pointer;font-weight:600}.sync-panel summary span{display:block;font-weight:400;margin-top:4px}
 
 
 .flow-combobox{min-width:0}.flow-choices{margin-top:4px;max-height:190px;overflow-y:auto;overscroll-behavior:contain;border:1px solid var(--line);border-radius:10px;background:var(--white)}.flow-choice{display:block;width:100%;min-height:44px;padding:10px;text-align:left;font-size:16px;font-weight:400;overflow-wrap:anywhere;border-bottom:1px solid var(--line);touch-action:pan-y}.flow-choice:last-child{border-bottom:0}.flow-choice[aria-selected="true"],.flow-choice:active{background:var(--pale)}
@@ -47,7 +47,7 @@
 #device-sharing h2{margin-top:0}#device-sharing details{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
 #device-sharing .field{margin:10px 0}
 .peer-file,.peer-device{border-top:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere}
-.peer-file strong,.peer-file small{display:block}.peer-conflict-choice{display:block;text-align:left;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
+.peer-file strong,.peer-file small{display:block}
 
 #nearby-verify{border-left:3px solid var(--green);padding:8px 10px;overflow-wrap:anywhere}
 #nearby-candidates .outline{width:100%;text-align:left;overflow-wrap:anywhere;margin-bottom:6px}

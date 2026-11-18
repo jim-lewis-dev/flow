@@ -67,13 +67,16 @@ class SyncState:
         self.repo = repo
         self._muted = 0
         self._capturing = False
+        self._peer_event_payload = None
         self._prefix = 'flow_sync_' + uuid.uuid4().hex
         self._journal = self._prefix + '_journal'
         self._triggers = []
         self._install_tables()
         conn = repo.conn
         # Persistent guards prevent clients without event capture from writing.
-        conn.create_function('flow_peer_write_allowed', 0, lambda: int(self._muted > 0 or self._capturing))
+        conn.create_function('flow_peer_write_allowed', 0, lambda: 3 if self._muted > 0 or self._capturing else 0)
+        conn.create_function('flow_peer_event_write_allowed', 1,
+                             lambda payload: int(self._peer_event_payload is not None and payload == self._peer_event_payload))
         conn.create_function(self._prefix + '_active', 0, lambda: int(self._capturing and not self._muted))
         conn.create_function(self._prefix + '_row', -1, lambda *v: _json(v))
         conn.execute(f'CREATE TEMP TABLE {self._journal}(sequence INTEGER PRIMARY KEY,table_name TEXT,before_json TEXT,after_json TEXT)')
@@ -85,6 +88,8 @@ class SyncState:
                 conn.execute(f"CREATE TEMP TRIGGER {name} AFTER {op} ON main.{table} WHEN {self._prefix}_active() BEGIN INSERT INTO {self._journal}(table_name,before_json,after_json) VALUES('{table}',{before},{after}); END")
                 self._triggers.append(name)
         repo.sync = self
+        from .peer_store import upgrade
+        upgrade(repo)
 
     def _install_tables(self):
         self.repo.conn.executescript('''

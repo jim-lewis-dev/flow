@@ -93,6 +93,18 @@ def call(endpoint, expected, header, body=None, *, key_proof=None):
     host, port = parse_address(endpoint)
     op = header.get('op', '')
     nearby = op.startswith('nearby_')
+    protocol = header.get('protocol') if op in ('catalog', 'seed', 'pull', 'push') else None
+    def check_protocol(value):
+        if (not isinstance(value, dict) or type(value.get('protocol')) is not int
+                or value['protocol'] != protocol):
+            raise Refused('Update Flow on both devices to synchronize this file.')
+    def result(value):
+        if protocol is not None:
+            check_protocol(value)
+            if 'result' not in value:
+                raise Refused('Invalid peer response.')
+            return value['result']
+        return value
     timeout = min(CONNECT_TIMEOUT, 1.5) if op == 'nearby_hello' else CONNECT_TIMEOUT
     with socket.create_connection((host, port), timeout=timeout) as sock:
         with context.wrap_socket(sock, server_hostname=host) as stream:
@@ -113,18 +125,23 @@ def call(endpoint, expected, header, body=None, *, key_proof=None):
                 exchange_proof(stream, key_proof[0], None, key_proof[1])
             if body is not None:
                 ack = read(stream, HEADER)
-                if (header['op'] == 'pull' and isinstance(ack, dict)
-                        and ack.get('result') == {'unchanged': True}):
-                    return fingerprint, ack['result']
+                if header['op'] == 'pull' and isinstance(ack, dict) and 'result' in ack:
+                    unchanged = result(ack['result'])
+                    if unchanged == {'unchanged': True}:
+                        return fingerprint, unchanged
                 if not isinstance(ack, dict) or ack.get('ready') is not True:
                     raise ValueError((ack.get('error') if isinstance(ack, dict) else '') or
                                      'Peer refused access to this request.')
+                # An old listener ignores unknown header fields. Verify its
+                # acknowledgement before sending any file content to it.
+                if protocol is not None:
+                    check_protocol(ack)
                 write(stream, body)
             reply = read(stream, HEADER if nearby else FRAME)
             if not isinstance(reply, dict) or 'result' not in reply:
                 error = Refused if nearby else ValueError
                 raise error((reply.get('error') if isinstance(reply, dict) else '') or 'Invalid peer response.')
-            return fingerprint, reply['result']
+            return fingerprint, result(reply['result'])
 
 
 class Listener:

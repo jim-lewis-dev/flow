@@ -73,7 +73,7 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.assertFalse(default_config_dir().exists())
         self.assertFalse(self.peer.share_button.instate(["disabled"]))
         self.assertEqual([self.controller.book.tab(tab, "text") for tab in self.controller.book.tabs()],
-                         ["Shared files", "Devices", "Conflicts"])
+                         ["Shared files", "Devices"])
 
     def test_demo_does_not_start_a_listener_even_with_an_existing_configuration(self):
         from flowledger.peer_network import default_config_dir
@@ -265,7 +265,7 @@ class PeerDesktopTests(IsolatedGuiTestCase):
             self.app.delete_selected()
             self.assertIsNone(self.repo.get_flow(fid))
 
-    def test_conflict_ui_preserves_base_and_applies_the_chosen_version(self):
+    def test_received_latest_edit_refreshes_ledger_without_a_choice_tab(self):
         from flowledger import peer_store
         self.launch()
         peer_store.share(self.repo, "Water")
@@ -277,20 +277,11 @@ class PeerDesktopTests(IsolatedGuiTestCase):
             peer_store.receive(self.repo, peer_store.missing(other, list(peer_store.inventory(self.repo))))
             self.peer.poll(force=True)
             self.controller.show()
-            self.assertEqual(self.controller.book.select(), str(self.peer.choices))
-            text = self.peer.preview.get("1.0", "end")
-            for word in ("Previous value", "Original meter", "local meter", "other meter",
-                         "Workshop desktop", "Field phone"):
-                self.assertIn(word, text)
-            self.assertEqual("Original meter", self.repo.get_flow(self.record["flow_id"])["notes"])
-            conflict = self.peer.conflicts[0]
-            i = next(i for i, ch in enumerate(conflict["choices"]) if ch["value"] == "other meter")
-            self.peer.choice_pick.current(i)
-            self.peer.choose_button.invoke()
-            self.until(lambda: self.peer.pending is None and not self.peer.conflicts)
             self.assertEqual("other meter", self.repo.get_flow(self.record["flow_id"])["notes"])
-            self.assertEqual([], self.peer.conflicts)
-            self.assertTrue(self.peer.choose_button.instate(["disabled"]))
+            self.assertEqual("other meter", self.app.ledger_rows[self.record["flow_id"]]["notes"])
+            self.assertEqual([self.controller.book.tab(tab, "text") for tab in self.controller.book.tabs()],
+                             ["Shared files", "Devices"])
+            self.assertEqual("Peer file", self.peer.short_status())
 
 
 if __name__ == "__main__":

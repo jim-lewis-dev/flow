@@ -54,7 +54,7 @@ class MobilePeerTests(unittest.TestCase):
         return store.dispatch('add_flow', {'flow':dict(date='2026-11-01',name=name,
             from_account='Battery',to_account='Laptop',amount='10',units='Wh')})['record']
 
-    def test_two_phones_can_pair_join_edit_and_review(self):
+    def test_two_phones_can_pair_join_and_keep_the_latest_edit(self):
         a,b=self.a,self.b
         fid=self.flow(a)['flow_id']
         shared=a.dispatch('peer_share', {'current':a.dataset})['state']
@@ -81,21 +81,22 @@ class MobilePeerTests(unittest.TestCase):
         b.peers.node().sync_once()
         refresh=b.dispatch('peer_poll',{})
         self.assertIn('state',refresh)
-        conflict=refresh['state']['peer_file']['conflicts'][0]
-        self.assertEqual({c['value']['amount'] for c in conflict['choices']},{'11','12'})
+        self.assertEqual(refresh['state']['peer_file'],{'dataset':dataset})
+        self.assertEqual(refresh['state']['flows'][0]['amount'],'12')
+        self.assertEqual(a.repo.get_flow(fid)['amount'],'12')
         # Save As uses this exact snapshot. A restore retains the same lineage
-        # and both pending choices; exporting does not publish another copy.
+        # and latest values; exporting does not publish another copy.
         from flowledger import peer_store
         snapshot=b.dispatch('prepare_export',{})
         with closing(Repository(snapshot['path'])) as backup:
             self.assertEqual(peer_store.dataset(backup),dataset)
-            self.assertEqual(peer_store.conflicts(backup),[conflict])
+            self.assertEqual(backup.get_flow(fid)['amount'],'12')
         self.assertEqual(len(b.peers.status()['files']),1)
-        choice=next(c for c in conflict['choices'] if c['value']['amount']=='12')
-        b.dispatch('peer_resolve',dict(current=b.dataset,conflict=conflict['id'],choice=choice['id']))
+        with self.assertRaisesRegex(ValueError,'Unknown action'):
+            b.dispatch('peer_resolve',dict(current=b.dataset,conflict='old',choice='old'))
         b.peers.node().sync_once()
         self.assertEqual(a.repo.get_flow(fid)['amount'],'12')
-        self.assertFalse(a.state()['peer_file']['conflicts'])
+        self.assertEqual(a.state()['peer_file'],{'dataset':dataset})
         b.peers.foreground(False)
         self.assertFalse(b.peers.status()['running'])
         b.peers.foreground(True)

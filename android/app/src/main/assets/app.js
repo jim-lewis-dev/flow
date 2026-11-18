@@ -24,7 +24,7 @@ function advanceRevision(previous,next,shown,all=false){
 let deletingFile=null;
 const queuedFlowFields=new Map(), queuedAnchorFields=new Map();
 let syncBusy=false, syncPaused=false, syncTimer=null, syncAgain=false;
-const writeActions=new Set(['add_flow','update_flow','copy_flow','delete_flow','save_anchor','save_positions','undo','redo','peer_resolve']);
+const writeActions=new Set(['add_flow','update_flow','copy_flow','delete_flow','save_anchor','save_positions','undo','redo']);
 let graphPairs=[], graphInitialized=false, rangeEdited=false, graphGeneration=0, graphData=null, zoom={lo:0,hi:1};
 const pending=new Map(), session=String(Date.now())+'-'+Math.random(); let sequence=0, noticeTimer;
 const localNow=()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; };
@@ -444,15 +444,7 @@ function peerControls(){
   $('peer-share').disabled=fileBusy||peerBusy||!state?.dataset;
   $('peer-unshare').hidden=!shared;
   for(const id of ['peer-unshare','peer-catalog'])$(id).disabled=fileBusy||peerBusy;
-  document.querySelectorAll('.peer-join,.peer-forget,.peer-conflict-choice').forEach(n=>n.disabled=fileBusy||peerBusy);
-}
-function peerValue(value){
-  if(value===null)return 'Deleted';
-  if(value==='')return '(empty)';
-  if(typeof value!=='object')return String(value);
-  if(Array.isArray(value))return value.join(', ')||'(none)';
-  if('amount' in value&&'units' in value&&Object.keys(value).length===2)return value.amount+' '+value.units;
-  return Object.entries(value).map(([k,v])=>k.replaceAll('_',' ')+': '+peerValue(v)).join('; ')||'(none)';
+  document.querySelectorAll('.peer-join,.peer-forget').forEach(n=>n.disabled=fileBusy||peerBusy);
 }
 function renderPeerDevice(){
   const s=state?.device||{}, count=s.peers?.length||0;
@@ -479,23 +471,9 @@ function renderPeerDevice(){
 }
 function renderPeerFile(){
   const doc=state.dataset?.startsWith('document:'), shared=deviceFile(), replica=state.peer_file||{};
-  const conflicts=replica.conflicts?.length||0;
-  $('peer-review-bar').hidden=!conflicts;
-  $('peer-review').textContent=conflicts===1?'Review 1 conflicting change':'Review '+conflicts+' conflicting changes';
   $('peer-copy').hidden=!doc;
   $('peer-file-state').textContent=!state.dataset?'Open a local file to share it.':shared?'Shared with your paired devices: '+shared.name:
     doc&&replica.dataset?'Document copy of a shared file. Reopen the registered phone file to exchange changes.':replica.dataset?'Sharing is stopped on this phone. Local edits are saved.':'Only on this device until you share it.';
-  $('peer-conflicts').replaceChildren(...(replica.conflicts||[]).map(c=>{
-    const row=el('div','sync-conflict');
-    const flow=c.table==='flows'?state.flows.find(f=>f.flow_id===c.key?.[0]):null;
-    row.append(el('strong','',flow?.name?flow.name+' | '+(c.group||[]).join(' / '):c.title||'Conflicting changes'),
-      el('p','small muted','Devices saved different values. Choose the value to keep.'));
-    for(const choice of c.choices||[]){
-      const b=el('button','outline peer-conflict-choice',choice.label||peerValue(choice.value));
-      b.onclick=()=>withPeer(async()=>{accept(await api('peer_resolve',{current:state.dataset,conflict:c.id,choice:choice.id}));notice(deviceFile()?'Choice saved. It will sync with paired devices.':'Choice saved in this file.');});
-      row.append(b);
-    }return row;
-  }));
   renderPeerDevice();
 }
 function renderPeerCatalog(){
@@ -519,7 +497,6 @@ async function withPeer(callback){
   try{await callback();}catch(error){notice(error.message,true);}
   finally{peerBusy=false;peerControls();}
 }
-bind('peer-review','click',()=>{navigate('files');$('peer-conflicts').scrollIntoView({block:'center'});});
 bind('peer-share','click',()=>withPeer(async()=>{
   const r=await fileAction('peer_share',{current:state.dataset});
   if(r.state)notice('File shared. Paired devices can now find it under Shared files.');

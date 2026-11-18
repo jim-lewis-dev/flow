@@ -1,4 +1,4 @@
-"""Desktop device pairing, opted-in files, and peer conflict choices."""
+"""Desktop device pairing and opted-in files."""
 from __future__ import annotations
 
 from contextlib import closing
@@ -37,19 +37,6 @@ def open_copy(path, dataset):
                      cwd=Path(__file__).resolve().parents[1], start_new_session=True)
 
 
-def describe(value, group):
-    if value is None:
-        return "No record" if group == ["__row__"] else "(none)"
-    if group == ["tags"] and isinstance(value, dict):
-        return ", ".join(sorted(value, key=value.get)) or "(no tags)"
-    if isinstance(value, dict):
-        if set(value) == {"amount", "units"}:
-            return str(value["amount"]) + " " + str(value["units"])
-        return "\n".join(k.replace("_", " ").capitalize() + ": " +
-                         describe(v, [k]) for k, v in value.items() if k != "flow_id")
-    return str(value) if value != "" else "(empty)"
-
-
 class _Worker:
     """One queue owns network startup, I/O, and teardown; no Tk objects cross it."""
     def __init__(self):
@@ -78,19 +65,9 @@ class _Worker:
                 action, args = item
                 value, error, status = None, "", {}
                 try:
-                    if node is None and action != "resolve":
+                    if node is None:
                         node = PeerNode()
-                    if action == "resolve":
-                        from .core import Repository
-                        path, dataset, conflict, choice, origin = args
-                        if not Path(path).is_file():
-                            raise ValueError("The selected file is no longer at this location.")
-                        with closing(Repository(path)) as repo:
-                            if peer_store.dataset(repo) != dataset:
-                                raise ValueError("The selected file has changed.")
-                            repo.peer_origin = origin
-                            value = peer_store.resolve(repo, conflict, choice)
-                    elif action == "resume":
+                    if action == "resume":
                         if node.peers() or node.local_files():
                             node.start()
                     elif action == "join":
@@ -147,7 +124,6 @@ class PeerController:
         self.last_poll = self.last_status = 0
         self.version = None
         self.dataset = ""
-        self.conflicts = []
         self.book = None
         self.notice = tk.StringVar(app)
         self.shared_name = tk.StringVar(app)
@@ -157,7 +133,7 @@ class PeerController:
         self.address = tk.StringVar(app)
         self.peer_detail = tk.StringVar(app)
         self.selected_info = tk.StringVar(app)
-        self._file_rows = self._conflict_key = None
+        self._file_rows = None
         if not app.demo and (default_config_dir() / "devices.sqlite3").is_file():
             self._submit("resume")
 
@@ -226,8 +202,6 @@ class PeerController:
                     self.scan_after_pair = False
                 elif action == "share":
                     self.notice.set("This file is available to paired devices.")
-                elif action == "resolve":
-                    self.notice.set("Choice saved." if value else "This conflict has already changed.")
                 elif action == "unshare":
                     self.notice.set("Sharing stopped. Your local file and other devices' copies are kept.")
                 elif action == "forget":
@@ -267,12 +241,9 @@ class PeerController:
                         first_share = bool(self.version is not None and self.dataset != dataset)
                         if first_share:
                             self.app.history.clear()
-                        self.conflicts = peer_store.conflicts(repo)
                         if first_share or version != self.version:
                             self.app._refresh_synced_records()
                             self.app.view_history.remember("experimental")
-                    else:
-                        self.conflicts = []
                     self.dataset, self.version = dataset, version
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.error = str(exc)
@@ -300,8 +271,6 @@ class PeerController:
                      if f["dataset"] == self.dataset and f["path"] == self.app.repo.path), None)
 
     def short_status(self):
-        if self.conflicts:
-            return "Conflict"
         if self.dataset:
             return "Shared" if self.local_entry() else "Peer file"
         return None
@@ -309,10 +278,9 @@ class PeerController:
     def attach(self, book):
         self.book = book
         self._scan_on_show = True
-        self._file_rows = self._conflict_key = None
-        self.files, self.devices, self.choices = (ttk.Frame(book, padding=12) for _ in range(3))
-        for frame, name in ((self.files, "Shared files"), (self.devices, "Devices"),
-                            (self.choices, "Conflicts")):
+        self._file_rows = None
+        self.files, self.devices = (ttk.Frame(book, padding=12) for _ in range(2))
+        for frame, name in ((self.files, "Shared files"), (self.devices, "Devices")):
             book.add(frame, text=name)
             frame.columnconfigure(0, weight=1)
         f = self.files
@@ -355,10 +323,7 @@ class PeerController:
         ttk.Label(f, textvariable=self.peer_detail, wraplength=590).grid(row=6, sticky="w", pady=(10, 0))
         self._build_devices()
         book.bind("<Destroy>", self._close_pairing_dialog, add="+")
-        self._conflict_frame()
         self.poll(force=True)
-        if self.dataset and self.conflicts:
-            book.select(self.choices)
 
     def _build_devices(self):
         d = self.devices
@@ -537,69 +502,6 @@ class PeerController:
         self.join_button.configure(text="Open local copy" if row and row[2] else "Join on this device",
                                    state="normal" if row and not self.pending else "disabled")
 
-    def _conflict_frame(self):
-        f = self.choices
-        self.choice_title = tk.StringVar(self.app)
-        ttk.Label(f, textvariable=self.choice_title, wraplength=600).grid(row=0, sticky="w")
-        box = ttk.Frame(f)
-        box.grid(row=1, sticky="nsew", pady=8)
-        f.rowconfigure(1, weight=1)
-        self.preview = tk.Text(box, wrap="word", height=6, state="disabled", font=("DejaVu Sans", 10))
-        sc = ttk.Scrollbar(box, command=self.preview.yview)
-        self.preview.configure(yscrollcommand=sc.set)
-        sc.pack(side="right", fill="y")
-        self.preview.pack(side="left", fill="both", expand=True)
-        bar = ttk.Frame(f)
-        bar.grid(row=2, sticky="ew")
-        self.choice_pick = ttk.Combobox(bar, state="readonly", width=35)
-        self.choice_pick.pack(side="left", fill="x", expand=True)
-        self.choose_button = ttk.Button(bar, text="Keep selected version", command=self._resolve)
-        self.choose_button.pack(side="left", padx=(8, 0))
-
-    def _show_conflict(self):
-        c = self.conflicts[0] if self.conflicts else None
-        key = (c["id"] if c else "", len(self.conflicts))
-        if self._conflict_key == key:
-            return
-        self._conflict_key = key
-        self.book.tab(self.choices, text="Conflicts" + (" (" + str(len(self.conflicts)) + ")" if c else ""))
-        if not c:
-            title, body, labels = "No conflicts in this file.", "", []
-        else:
-            title = "1 of %d | %s" % (len(self.conflicts), c["title"])
-            if c.get("table") == "flows":
-                record = self.app.repo.get_flow(c["key"][0])
-                if record:
-                    title = title.replace(c["key"][0], record["name"] or c["key"][0])
-            group = c.get("group", [])
-            parts = ["Previous value\n" + describe(c["base"], group)]
-            labels = []
-            for i, choice in enumerate(c["choices"], 1):
-                value = ("Delete record" if choice["value"] is None and group == ["__row__"]
-                         else describe(choice["value"], group))
-                origin_text = ", ".join(choice.get("origins", []))
-                label = ("Version %d" % i) + ((" | " + origin_text) if origin_text else "")
-                parts.append(label + "\n" + value)
-                labels.append(label + ": " + value.replace("\n", " ")[:70])
-            body = "\n\n".join(parts)
-        self.choice_title.set(title)
-        self.preview.configure(state="normal")
-        self.preview.delete("1.0", "end")
-        self.preview.insert("1.0", body)
-        self.preview.configure(state="disabled")
-        self.choice_pick.configure(values=labels)
-        self.choice_pick.set("")
-        self.choose_button.configure(state="normal" if c else "disabled")
-
-    def _resolve(self):
-        i = self.choice_pick.current()
-        if i < 0 or not self.conflicts:
-            self.notice.set("Select the version to keep.")
-            return
-        c = self.conflicts[0]
-        self._submit("resolve", self.app.repo.path, self.dataset, c["id"], c["choices"][i]["id"],
-                     getattr(self.app.repo, "peer_origin", ""))
-
     def render(self):
         busy = self.app.demo or self.pending not in (None, "nearby_poll", "status") or self.deferred is not None
         state = "disabled" if busy else "normal"
@@ -643,5 +545,3 @@ class PeerController:
         self.peer_detail.set(self.state.get("error") or self.state.get("discovery_error") or
                              ("Last check: " + datetime.fromtimestamp(last).strftime("%H:%M:%S") if last
                               else "Paired devices exchange edits when they are reachable."))
-        self._show_conflict()
-        self.choose_button.configure(state="normal" if self.conflicts and not busy else "disabled")
