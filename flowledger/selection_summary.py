@@ -12,7 +12,7 @@ def _label_order(value: str) -> tuple[str, str]:
 
 
 def _totals(amounts_by_unit) -> str:
-    return " · ".join(
+    return " | ".join(
         f"{format_quantity(decimal_sum(amounts_by_unit[unit]))} {unit}"
         for unit in sorted(amounts_by_unit, key=_label_order))
 
@@ -49,13 +49,13 @@ def format_selection_summary(flows: Iterable[dict]) -> str:
     first, last = min(dates), max(dates)
     date_range = _display_date(first)
     if last != first:
-        date_range += " → " + _display_date(last)
+        date_range += " -> " + _display_date(last)
     statuses = Counter(flow["status"] for flow in records)
-    status_counts = " · ".join(f"{status} {statuses[status]}"
+    status_counts = " | ".join(f"{status} {statuses[status]}"
                                 for status in STATUSES if statuses[status])
     count = len(records)
     lines = [f"{count} selected {'flow' if count == 1 else 'flows'}",
-             "Selected record totals · all selected statuses",
+             "Selected record totals | all selected statuses",
              "Dates: " + date_range,
              "Statuses: " + status_counts,
              "Total quantities: " + _totals(totals)]

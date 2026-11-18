@@ -119,7 +119,7 @@ class GraphUiTests(unittest.TestCase):
         self.assertEqual(len(controls.master.winfo_children()), 1)
         export = next(widget for widget in controls.winfo_children()
                       if widget.winfo_class() == "TButton" and
-                      widget.cget("text") == "Export Graph…")
+                      widget.cget("text") == "Export Graph...")
         self.assertLessEqual(export.winfo_y() + export.winfo_height(), controls.winfo_height())
         self.assertGreater(choices.winfo_height(), 40)
         selected = choices.curselection()
@@ -165,7 +165,7 @@ class GraphUiTests(unittest.TestCase):
         self.assertIn('Checking: 988 USD', self.hover("2026-10-01 12:00:00", 988))
         self.assertTrue(self.app.chart_tooltip.get_visible())
         text = self.hover("2026-10-01", 994)
-        self.assertIn('1,000 USD → 988 USD', text)
+        self.assertIn('1,000 USD -> 988 USD', text)
         self.assertNotIn('994', text)
         self.app._hide_chart_tooltip()
         self.assertFalse(self.app.chart_tooltip.get_visible())

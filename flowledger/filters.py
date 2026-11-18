@@ -139,8 +139,8 @@ class CheckFilter(ttk.Frame):
         elif count == 1:
             caption = f"{self.label}: {self._selected[0]}"
         else:
-            caption = f"{self.label} · {count}"
-        self.button.configure(text=(caption if len(caption) <= 25 else caption[:24] + "…") + " ▾")
+            caption = f"{self.label} | {count}"
+        self.button.configure(text=(caption if len(caption) <= 25 else caption[:22] + "...") + " v")
         if self._tooltip_popup is not None:
             self._tooltip_label.configure(text=self.tooltip_text())
             self._position_tooltip()

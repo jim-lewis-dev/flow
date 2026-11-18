@@ -171,7 +171,7 @@ class ExchangeTests(unittest.TestCase):
 
     def test_json_and_csv_roundtrip_preserves_exact_values_and_ids(self):
         saved = self.save(amount="123456789012345.67", date="2026-10-02 12:34:56",
-                          notes='Comma, newline\n"quoted" café', tags=["Boat | trailer", "Road trip"])
+                          notes='Comma, newline\n"quoted" caf\u00e9', tags=["Boat | trailer", "Road trip"])
         for suffix in (".json", ".csv"):
             with self.subTest(suffix=suffix):
                 target = self.path("export" + suffix)

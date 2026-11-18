@@ -298,7 +298,7 @@ class NumericEntryGuiTests(unittest.TestCase):
         zero = self.seed(amount="0", date="2026-10-04", notes="A zero-quantity comment")
         self.app.sort_ledger("amount")
         self.assertEqual(list(self.app.ledger_rows), [negative["flow_id"], zero["flow_id"], positive["flow_id"]])
-        self.assertEqual(self.app.report_summary.get(), "Complete · 5.00 USD")
+        self.assertEqual(self.app.report_summary.get(), "Complete | 5.00 USD")
         self.app.search_var.set("-3.00")
         self.app.refresh_ledger()
         self.assertEqual(list(self.app.ledger_rows), [negative["flow_id"]])

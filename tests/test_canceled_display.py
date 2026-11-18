@@ -70,7 +70,7 @@ class CanceledDisplayTests(unittest.TestCase):
                 [("a","kg","10.123456789","2026-10-01 01:02:03"),("b","kg",None,"2026-10-01")])
             conn.execute("INSERT INTO flows VALUES(?,?,?,?,?,?,?,?,?,?)",
                 ("00000000-0000-0000-0000-000000000001","2026-10-02 03:04:05","a","b",
-                 "0.125123456","kg","Void","Saved row","Notes\ncafé","uncategorized"))
+                 "0.125123456","kg","Void","Saved row","Notes\ncaf\u00e9","uncategorized"))
             conn.execute("INSERT INTO tags VALUES('boat','Boat')")
             conn.execute("INSERT INTO flow_tags VALUES('00000000-0000-0000-0000-000000000001','boat',0)")
             conn.execute("INSERT INTO audit VALUES(1,'2026-10-02','flow','old','create',NULL,?)",
@@ -88,7 +88,7 @@ class CanceledDisplayTests(unittest.TestCase):
             self.assertEqual(saved["status"], "Canceled")
             self.assertEqual(saved["flow_id"], "00000000-0000-0000-0000-000000000001")
             self.assertEqual((saved["amount"],saved["units"],saved["date"],saved["notes"],saved["tags"]),
-                ("0.125123456","kg","2026-10-02 03:04:05","Notes\ncafé",["Boat"]))
+                ("0.125123456","kg","2026-10-02 03:04:05","Notes\ncaf\u00e9",["Boat"]))
             self.assertEqual(repo.get_account("A","kg")["opening_amount"], "10.123456789")
             self.assertEqual([tuple(row) for row in repo.conn.execute("SELECT * FROM audit")], audit)
             self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0],8)

@@ -36,7 +36,7 @@ class CheckFilterTests(unittest.TestCase):
 
     def test_explicit_selection_callbacks_caption_and_all(self):
         self.assertEqual(self.filter.get(), ())
-        self.assertEqual(self.filter.button.cget("text"), "Categories: All ▾")
+        self.assertEqual(self.filter.button.cget("text"), "Categories: All v")
         popup = self.open()
         self.filter.checkbuttons["Boat"].invoke()
         self.filter.checkbuttons["Dining"].invoke()
@@ -44,7 +44,7 @@ class CheckFilterTests(unittest.TestCase):
         self.assertIs(self.filter.popup, popup)
         self.assertEqual(self.changes, [("Boat",), ("Boat", "Dining")])
         self.assertEqual(self.filter.get(), ("Boat", "Dining"))
-        self.assertEqual(self.filter.button.cget("text"), "Categories · 2 ▾")
+        self.assertEqual(self.filter.button.cget("text"), "Categories | 2 v")
         self.assertFalse(self.filter._all_variable.get())
         self.filter.all_button.invoke()
         self.assertEqual(self.filter.get(), ())
@@ -94,7 +94,7 @@ class CheckFilterTests(unittest.TestCase):
         self.root.update()
         self.assertEqual(list(self.filter.checkbuttons), ["Music"])
         self.assertEqual(self.filter.get(), ())
-        self.assertEqual(self.filter.button.cget("text"), "Categories: All ▾")
+        self.assertEqual(self.filter.button.cget("text"), "Categories: All v")
         self.assertTrue(self.filter._all_variable.get())
         self.assertFalse(self.filter.set_selected(["Dining"], notify=True))
         self.assertEqual(self.changes, [])
@@ -112,7 +112,7 @@ class CheckFilterTests(unittest.TestCase):
     def test_programmatic_selection_is_silent_unless_requested(self):
         self.filter.set_selected(["Boat"])
         self.assertEqual(self.changes, [])
-        self.assertEqual(self.filter.button.cget("text"), "Categories: Boat ▾")
+        self.assertEqual(self.filter.button.cget("text"), "Categories: Boat v")
         self.filter.set_selected(["Boat"], notify=True)
         self.assertEqual(self.changes, [])
         long_name = "A category whose full name is much longer than the button"
@@ -120,7 +120,7 @@ class CheckFilterTests(unittest.TestCase):
         self.filter.set_selected([long_name], notify=True)
         self.assertEqual(len(self.changes), 1)
         self.assertLessEqual(len(self.filter.button.cget("text")), 27)
-        self.assertIn("…", self.filter.button.cget("text"))
+        self.assertIn("...", self.filter.button.cget("text"))
 
     def test_popup_is_positioned_before_mapping_and_checking_does_not_remap(self):
         maps = []
@@ -324,7 +324,7 @@ class CheckFilterTests(unittest.TestCase):
                             case_sensitive=True)
         units.pack()
         self.root.update()
-        self.assertEqual(units.button.cget("text"), "Units: All ▾")
+        self.assertEqual(units.button.cget("text"), "Units: All v")
         units.open_popup()
         units.search_variable.set("mw")
         self.root.update()
@@ -345,11 +345,11 @@ class CheckFilterTests(unittest.TestCase):
         from flowledger.filters import CheckFilter
         for label in ("From", "To", "Status", "Categories", "Tags", "Units"):
             choice = CheckFilter(self.root, label)
-            self.assertEqual(choice.button.cget("text"), f"{label}: All ▾")
+            self.assertEqual(choice.button.cget("text"), f"{label}: All v")
             self.assertEqual(choice.tooltip_text(), "All")
             choice.destroy()
         custom = CheckFilter(self.root, "From", all_label="From: All")
-        self.assertEqual(custom.button.cget("text"), "From: All ▾")
+        self.assertEqual(custom.button.cget("text"), "From: All v")
 
 
 if __name__ == "__main__":

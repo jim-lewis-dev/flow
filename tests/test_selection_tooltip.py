@@ -119,9 +119,9 @@ class SelectionTooltipTests(unittest.TestCase):
         self.assertIn("Pending 1", summary)
         self.assertIn("Planned 1", summary)
         self.assertIn("Canceled 1", summary)
-        self.assertIn("Total quantities: 2 kg · 1,006 USD", summary)
+        self.assertIn("Total quantities: 2 kg | 1,006 USD", summary)
         self.assertIn("Checking: 7 USD", summary)
-        self.assertIn("Supplies: 2 kg · 0 USD", summary)
+        self.assertIn("Supplies: 2 kg | 0 USD", summary)
         self.assertNotIn("1008", summary, "Quantities of different units cannot be added")
 
     def test_keyboard_selection_dismisses_open_summary_without_changing_records(self):

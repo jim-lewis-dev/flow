@@ -49,7 +49,7 @@ window.FlowExperimental = class {
     on('map-play', 'click', () => this.playing ? this.pause() : this.play());
     on('map-speed', 'input', () => {
       this.speed = Number(this.$('map-speed').value);
-      this.$('map-speed-label').textContent = this.speed + '×';
+      this.$('map-speed-label').textContent = this.speed + 'x';
       if (!this.speed) this.pause();
       this.controls();
     });
@@ -163,7 +163,7 @@ window.FlowExperimental = class {
     const oldDate = this.groups()[this.index]?.date;
     this.loading = true;
     this.pause();
-    this.message('Loading map…');
+    this.message('Loading map...');
     try {
       const data = await this.api('experimental', args);
       if (generation !== this.generation || state.dataset !== this.getState()?.dataset) return;
@@ -277,7 +277,9 @@ window.FlowExperimental = class {
     this.$('map-next').disabled = blocked || !count || end;
     this.$('map-last').disabled = blocked || !count || end;
     this.$('map-play').disabled = blocked || !count || !this.speed;
-    this.$('map-play').textContent = this.playing ? '❚❚' : '▶';
+    const playIcon = this.svgNode('svg', {class:'ui-icon', viewBox:'0 0 24 24', 'aria-hidden':'true', focusable:'false', fill:'currentColor'});
+    playIcon.append(this.svgNode('path', {d:this.playing ? 'M6 4h4v16H6zM14 4h4v16h-4z' : 'M7 4v16l14-8z'}));
+    this.$('map-play').replaceChildren(playIcon);
     this.$('map-play').setAttribute('aria-label', this.playing ? 'Pause' : 'Play');
     this.$('map-play').title = this.playing ? 'Pause' : 'Play';
     const group = this.groups()[this.index];
@@ -345,7 +347,7 @@ window.FlowExperimental = class {
       group.append(this.svgNode('rect', {x:-width/2, y:-nodeHeight/2, width, height:nodeHeight, rx:Math.min(15,nodeHeight/2),
         fill:node.opening_amount === null ? '#f9faf6' : '#e2ecdc', stroke:'#82a58f', 'stroke-width':1.3}));
       group.append(this.svgNode('text', {x:0, y:fontSize*.35, 'text-anchor':'middle', fill:'#234c3c', 'font-size':fontSize,
-        'font-weight':600, 'pointer-events':'none'}, node.name.length > 17 ? node.name.slice(0,16)+'…' : node.name));
+        'font-weight':600, 'pointer-events':'none'}, node.name.length > 17 ? node.name.slice(0,16)+'...' : node.name));
       group.append(this.svgNode('title', {}, node.name));
       group.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.showNode(node.name); }
@@ -387,7 +389,7 @@ window.FlowExperimental = class {
       pulse.append(this.svgNode('circle', {cx:point.x, cy:point.y, r:Math.max(20, flow.radius), fill:'transparent'}));
       pulse.append(this.svgNode('circle', {cx:point.x, cy:point.y, r:Math.min(14, Math.max(5, flow.radius)),
         fill:colors[flow.status] || colors.Complete, stroke:'#fff', 'stroke-width':2, 'pointer-events':'none'}));
-      pulse.append(this.svgNode('title', {}, `${flow.amount_display} ${flow.units} · ${flow.name}`));
+      pulse.append(this.svgNode('title', {}, `${flow.amount_display} ${flow.units} | ${flow.name}`));
       pulse.addEventListener('keydown', event => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); this.showFlow(flow); }
       });
@@ -514,12 +516,12 @@ window.FlowExperimental = class {
   async showNode(name) {
     this.pause();
     const generation = ++this.detailGeneration, dataset = this.getState()?.dataset;
-    this.detail(name, [], 'Loading account details…');
+    this.detail(name, [], 'Loading account details...');
     try {
       const result = await this.api('experimental_details', {...this.requestArgs, name, step:this.index});
       if (generation !== this.detailGeneration || dataset !== this.getState()?.dataset || !this.$('map-detail').open) return;
       const qty = value => `${value} ${result.units}`;
-      const pairs = [[result.at ? 'At' : 'Period', result.at || `${this.data.start} – ${this.data.end}`],
+      const pairs = [[result.at ? 'At' : 'Period', result.at || `${this.data.start} - ${this.data.end}`],
         ['Received', qty(result.incoming_display)], ['Sent', qty(result.outgoing_display)],
         ['Starting balance', result.opening_amount === null ? 'Unknown' : qty(result.opening_display)]];
       if (result.at) pairs.splice(1, 0, ['Balance', result.balance === null ? 'Unknown' : qty(result.balance_display)]);

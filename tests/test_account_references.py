@@ -91,7 +91,7 @@ class AccountVisibilityGuiTests(unittest.TestCase):
         self.assertEqual({name for name, units in self.app.chart_account_pairs}, expected)
         for field in ("from_account", "to_account"):
             self.assertEqual(set(self.app.form_widgets[field].values), expected)
-        self.assertEqual(self.app.account_summary.get(), f"{len(expected)} accounts · {len(expected)} balances")
+        self.assertEqual(self.app.account_summary.get(), f"{len(expected)} accounts | {len(expected)} balances")
 
     def select_flow(self):
         self.app.ledger.selection_set(self.flow["flow_id"])

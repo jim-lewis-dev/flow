@@ -23,7 +23,7 @@ class MultiRowTests(unittest.TestCase):
             name=f"Row {index}", from_account="A", to_account="B",
             amount="-12.345678901" if index == 0 else "0" if index == 1 else str(index),
             units="USD", status="Pending" if index == 1 else "Complete",
-            category="Dining", tags=["Trip", "Boat, trailer"], notes="First\nSecond café"))
+            category="Dining", tags=["Trip", "Boat, trailer"], notes="First\nSecond caf\u00e9"))
             for index in range(4)]
         self.errors = []
         errors = self.errors

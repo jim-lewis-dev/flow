@@ -95,9 +95,10 @@ class GraphAutoFitTests(unittest.TestCase):
                 self.select((name, "kg"))
                 bottom, top = self.app.axes.get_ylim()
                 self.app.canvas.draw()
-                tick_texts = [tick.get_text().replace("−", "-").replace(",", "")
+                tick_texts = [tick.get_text().replace(",", "")
                               for tick in self.app.axes.get_yticklabels() if tick.get_text().strip()]
                 self.assertTrue(tick_texts)
+                self.assertTrue(all(text.isascii() for text in tick_texts), tick_texts)
                 self.assertTrue(any(float(text) > 0 if name == "Tiny positive" else float(text) < 0
                                     for text in tick_texts), tick_texts)
                 if name == "Tiny positive":

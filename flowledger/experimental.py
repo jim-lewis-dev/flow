@@ -40,8 +40,8 @@ BASIS = {
 MAX_SPEED = 5
 MIN_ZOOM = 0.25
 MAX_ZOOM = 4.0
-MAP_HINT = ("Drag nodes · Drag background or scroll to pan · Ctrl-scroll to zoom"
-            " · Double-click background to fit · Click pulses to edit")
+MAP_HINT = ("Drag nodes | Drag background or scroll to pan | Ctrl-scroll to zoom"
+            " | Double-click background to fit | Click pulses to edit")
 
 
 class ExperimentalView(ttk.Frame):
@@ -68,7 +68,7 @@ class ExperimentalView(ttk.Frame):
         self.basis_var = tk.StringVar(self, "Confirmed")
         # Integer playback rates: zero pauses; one is the original 1 s/step.
         self.speed_var = tk.IntVar(self, 1)
-        self.speed_label_var = tk.StringVar(self, "1×")
+        self.speed_label_var = tk.StringVar(self, "1x")
         self.progress_var = tk.StringVar(self, "No flows selected")
         self.message_var = tk.StringVar(self, "")
         self.hover_var = tk.StringVar(self, MAP_HINT)
@@ -297,7 +297,7 @@ class ExperimentalView(ttk.Frame):
         self.units_var.set(state.get("units", ""))
         self.basis_var.set(state.get("basis", "Confirmed"))
         self.speed_var.set(max(0, min(MAX_SPEED, int(state.get("speed", 1)))))
-        self.speed_label_var.set(f"{self.speed_var.get()}×")
+        self.speed_label_var.set(f"{self.speed_var.get()}x")
         positions = state.get("positions", self._positions)
         self._positions = {name: (float(pos[0]), float(pos[1]))
                            for name, pos in positions.items()}
@@ -447,7 +447,7 @@ class ExperimentalView(ttk.Frame):
     def _speed_changed(self, value=None) -> None:
         """Apply the slider immediately; record one undo action on release."""
         speed = self.speed_var.get()
-        self.speed_label_var.set(f"{speed}×")
+        self.speed_label_var.set(f"{speed}x")
         if speed == 0:
             self.pause()
         elif self._playing:
@@ -805,11 +805,11 @@ class ExperimentalView(ttk.Frame):
         if not total:
             self.progress_var.set("No flows selected")
         elif self._index < 0:
-            self.progress_var.set(f"Ready · 0 of {total} times · {len(self._events)} flows")
+            self.progress_var.set(f"Ready | 0 of {total} times | {len(self._events)} flows")
         else:
             stamp, simultaneous = self._groups[self._index]
-            self.progress_var.set(f"{stamp} · {self._index + 1} of {total} times"
-                                  f" · {len(simultaneous)} flow{'s' if len(simultaneous) != 1 else ''}")
+            self.progress_var.set(f"{stamp} | {self._index + 1} of {total} times"
+                                  f" | {len(simultaneous)} flow{'s' if len(simultaneous) != 1 else ''}")
         self.start_button.configure(state="normal" if total else "disabled")
         self.previous_button.configure(state="normal" if self._index >= 0 else "disabled")
         self.next_button.configure(state="normal" if self._index < total - 1 else "disabled")
@@ -987,12 +987,12 @@ class ExperimentalView(ttk.Frame):
         if key in self._hover_node_cache:
             return self._hover_node_cache[key]
         account = self._account_anchors.get((name.casefold(), unit))
-        lines = [f"{name} · {unit}"]
+        lines = [f"{name} | {unit}"]
         if account is None or account["opening_amount"] is None:
             lines.append("Starting balance: Unknown")
         else:
             lines.append(f"Starting balance: {format_quantity(account['opening_amount'])} {unit}"
-                         f" · {account['opening_at']}")
+                         f" | {account['opening_at']}")
         if self._index >= 0:
             stamp = self._groups[self._index][0]
             balance = (ledger_balance_at(account, self._balance_flows, stamp,
@@ -1013,7 +1013,7 @@ class ExperimentalView(ttk.Frame):
         outgoing = decimal_sum(quantity for (source, _), quantity in movements
                                if source.casefold() == name.casefold())
         lines.append(f"{scope}: In {format_quantity(incoming)} {unit}"
-                     f" · Out {format_quantity(outgoing)} {unit}")
+                     f" | Out {format_quantity(outgoing)} {unit}")
         result = "\n".join(lines)
         self._hover_node_cache[key] = result
         return result
@@ -1021,16 +1021,16 @@ class ExperimentalView(ttk.Frame):
     @staticmethod
     def _flow_hover_text(flow: dict) -> str:
         lines = [flow["name"] or "(Unnamed flow)",
-                 f"{normalize_date(flow['date'])} · {flow['status']}",
-                 f"{flow['from_account']} → {flow['to_account']}"
-                 f" · {format_quantity(flow['amount'])} {flow['units']}"]
+                 f"{normalize_date(flow['date'])} | {flow['status']}",
+                 f"{flow['from_account']} -> {flow['to_account']}"
+                 f" | {format_quantity(flow['amount'])} {flow['units']}"]
         if flow["category"]:
             lines.append(f"Category: {flow['category']}")
         if flow["tags"]:
             lines.append("Tags: " + ", ".join(flow["tags"]))
         notes = " ".join(flow["notes"].split())
         if notes:
-            lines.append("Notes: " + (notes[:197] + "…" if len(notes) > 200 else notes))
+            lines.append("Notes: " + (notes[:197] + "..." if len(notes) > 200 else notes))
         return "\n".join(lines)
 
     def _position_hover(self) -> None:
@@ -1086,12 +1086,12 @@ class ExperimentalView(ttk.Frame):
         if flow is not None:
             target = ("flow", flow["flow_id"])
             details = self._flow_hover_text(flow)
-            brief = (f"{flow['name']} · {flow['status']} · {flow['from_account']} → "
-                     f"{flow['to_account']} · {format_quantity(flow['amount'])} {flow['units']}")
+            brief = (f"{flow['name']} | {flow['status']} | {flow['from_account']} -> "
+                     f"{flow['to_account']} | {format_quantity(flow['amount'])} {flow['units']}")
         elif name is not None:
             target = ("node", name)
             details = self._node_hover_text(name)
-            brief = details.replace("\n", " · ")
+            brief = details.replace("\n", " | ")
         else:
             self.hide_hover()
             return

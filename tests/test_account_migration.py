@@ -25,7 +25,7 @@ class AccountMigrationTests(unittest.TestCase):
             conn.execute("UPDATE flows SET time_specified=1")
             conn.execute("UPDATE accounts SET archived=1 WHERE account_key='shop'")
             conn.execute("INSERT INTO accounts VALUES('unknown','Unknown',NULL,'2026-10-05 15:00:00',0,1)")
-            conn.execute("UPDATE flows SET notes=? WHERE name='Lunch'", ("First line\nSecond line: café",))
+            conn.execute("UPDATE flows SET notes=? WHERE name='Lunch'", ("First line\nSecond line: caf\u00e9",))
             conn.execute("INSERT INTO tags VALUES('trip','Trip')")
             conn.execute("INSERT INTO flow_tags VALUES('00000000-0000-0000-0000-000000000001','trip',0)")
             conn.execute("INSERT INTO flows VALUES('00000000-0000-0000-0000-000000000003',"
@@ -191,7 +191,7 @@ class AccountMigrationTests(unittest.TestCase):
                     self.assertEqual([flow['date'] for flow in actual],
                                      ['2026-10-02 00:00:00','2026-10-02 12:34:56','2026-10-04'])
                     self.assertTrue(all(set(flow)==FLOW_FIELDS for flow in actual))
-                    self.assertEqual(actual[0]['notes'],'First line\nSecond line: café')
+                    self.assertEqual(actual[0]['notes'],'First line\nSecond line: caf\u00e9')
                     self.assertEqual(actual[0]['tags'],['Trip'])
                     self.assertEqual(actual[2]['status'],'Planned')
                     self.assertEqual([flow['flow_id'] for flow in actual], [

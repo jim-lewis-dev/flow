@@ -121,7 +121,7 @@ class ControlFixGuiTests(unittest.TestCase):
         for key, label in labels.items():
             with self.subTest(filter=key):
                 choice = self.app.ledger_filters[key]
-                self.assertEqual(choice.button.cget("text"), f"{label}: All ▾")
+                self.assertEqual(choice.button.cget("text"), f"{label}: All v")
                 self.assertEqual(choice.tooltip_text(), "All")
                 values = ("First selected long value", "Second selected value", "Third selected value")
                 choice.set_values(values)
@@ -169,7 +169,7 @@ class ControlFixGuiTests(unittest.TestCase):
         self.select_filter("Category", "Inventory")
         self.select_filter("Tag", "Measured")
         self.assertEqual(set(self.app.ledger_rows), {self.flows[0]["flow_id"]})
-        self.assertEqual(self.app.report_summary.get(), "Complete · 0.1250 kg")
+        self.assertEqual(self.app.report_summary.get(), "Complete | 0.1250 kg")
 
     def test_units_choices_follow_saved_flows_including_void_and_not_other_filters(self):
         expected = {flow["units"] for flow in self.flows}

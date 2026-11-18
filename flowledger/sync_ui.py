@@ -89,7 +89,7 @@ class SyncController:
                             self.app.history.clear()
                         self.app._refresh_synced_records()
                         self.app.view_history.remember("experimental")
-                        self.app.status_message.set("Connected · Undo history starts here" if first_join else "Connected")
+                        self.app.status_message.set("Connected | Undo history starts here" if first_join else "Connected")
                         if self.dialog is not None and self.dialog.winfo_exists():
                             self.connection_text.delete("1.0", "end")
                     else:
@@ -130,17 +130,17 @@ class SyncController:
         elif self._conflicts:
             short, text = "Conflict", "Choose which version to keep. Other saved edits remain on this device."
         elif self.catching_up:
-            short, text = "Syncing", "Receiving changes…"
+            short, text = "Syncing", "Receiving changes..."
         elif self.running and (pending or not self.connected):
-            short, text = "Syncing", "Synchronizing changes…"
+            short, text = "Syncing", "Synchronizing changes..."
         elif not status["enabled"]:
-            short, text = "Sync", "Not connected · This file saves locally"
+            short, text = "Sync", "Not connected | This file saves locally"
         elif pending:
-            short, text = "Sync", f"{pending} pending change{'s' if pending != 1 else ''} · Saved locally"
+            short, text = "Sync", f"{pending} pending change{'s' if pending != 1 else ''} | Saved locally"
         elif self.connected:
             short, text = "Up to date", "Up to date"
         else:
-            short, text = "Offline", "Saved locally · Waiting for the coordinator"
+            short, text = "Offline", "Saved locally | Waiting for the coordinator"
         self.app.sync_button.configure(text=short)
         self.detail.set(text)
         if self.dialog is not None and self.dialog.winfo_exists():
@@ -223,11 +223,11 @@ class SyncController:
                 name = record["name"] if record else key[0]
                 lines.append("Flow: " + name)
             elif table == "account_balances":
-                lines.append("Account: " + " · ".join(map(str, key)))
+                lines.append("Account: " + " | ".join(map(str, key)))
             elif table == "account_positions":
-                lines.append("Account position: " + " · ".join(map(str, key)))
+                lines.append("Account position: " + " | ".join(map(str, key)))
             else:
-                lines.append(table.replace("_", " ").title() + ": " + " · ".join(map(str, key)))
+                lines.append(table.replace("_", " ").title() + ": " + " | ".join(map(str, key)))
             local, remote = change.get("after"), change.get("remote")
             if local is None:
                 lines.append("This device: deleted")
@@ -236,7 +236,7 @@ class SyncController:
                 remote = remote or {}
                 for field, value in local.items():
                     lines.append(f"{labels.get(field, field.replace('_', ' ').title())}: "
-                                 f"this device {value!s} · coordinator {remote.get(field, '(missing)')!s}")
+                                 f"this device {value!s} | coordinator {remote.get(field, '(missing)')!s}")
             lines.append("")
         return "\n".join(lines).rstrip()
 

@@ -24,7 +24,7 @@ for the ordinary APK installation path.
 If the earlier preview is installed, install this APK over it; there is no need
 to uninstall it. The package and signing key are unchanged.
 
-The app appears as **flow**. Open **Files → Try the camp example** to explore
+The app appears as **flow**. Open **Files -> Try the camp example** to explore
 battery energy in Wh and water in L without using your own records.
 
 ## Your file, on your phone
@@ -37,7 +37,7 @@ and reopens it next time.
   An existing name is rejected, never silently numbered or overwritten.
 - **Open file:** choose a Flow file anywhere Android's picker provides writable
   access. Valid edits save back to that selected file. Opening it again uses
-  the same file; it does not create “flow 2.”
+  the same file; it does not create "flow 2."
 - **Your files:** switch between phone files and previously opened files. The
   location distinguishes files with identical names.
 - **Delete:** remove a file from Flow's private phone folder. Other devices and
@@ -65,7 +65,7 @@ Existing phone files from earlier previews are preserved. Files kept only in
 Flow's private folder need Save As before uninstalling or clearing app data.
 Installing an update over the existing app preserves them.
 
-Files use schema 8, including saved account positions. Schema 5–7 files are
+Files use schema 8, including saved account positions. Schema 5-7 files are
 upgraded when opened; older files need current desktop Flow first. Records,
 starting balances, audit history, units, and map positions travel together.
 
@@ -73,7 +73,7 @@ starting balances, audit history, units, and map positions travel together.
 
 Set up one coordinator using the desktop
 [synchronization guide](../docs/synchronization.md).
-On the phone, open **Files → Synchronization**, enter a local filename, paste
+On the phone, open **Files -> Synchronization**, enter a local filename, paste
 the coordinator's connection text, and tap **Join shared file**. An empty or
 matching local file connects in place; a new name creates a local copy. A
 different existing file is never overwritten.
@@ -146,7 +146,7 @@ use floating point.
 
 ## Experimental
 
-Choose **Files → Try the camp example**, then **Experimental**. Switch between
+Choose **Files -> Try the camp example**, then **Experimental**. Switch between
 **Wh** for the battery and equipment, and **L** for water use.
 
 - Play or pause; step one timestamp forward or back; jump to the start or end.
@@ -250,5 +250,5 @@ An unrelated debug key cannot update an installed signed preview in place.
 
 ## License
 
-[MIT](../LICENSE) © 2026 Jim Lewis. Python and Chaquopy retain their own bundled
+[MIT](../LICENSE) (c) 2026 Jim Lewis. Python and Chaquopy retain their own bundled
 license notices.

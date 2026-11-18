@@ -168,7 +168,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.ledger_filters["Tag"].set_selected(("Trip",))
         self.app.refresh_ledger()
         self.assertEqual(list(self.app.ledger_rows), [wanted["flow_id"]])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 12.00 USD')
+        self.assertEqual(self.app.report_summary.get(), 'Complete | 12.00 USD')
 
     def test_invalid_flow_stays_editable_and_does_not_create_vocabulary(self):
         self.enter(from_account="Checking", to_account="Brand new shop", amount="invalid", category="New hobby")
@@ -192,7 +192,7 @@ class GuiIntegrationTests(unittest.TestCase):
         self.assertEqual(set(self.app.ledger_rows), wanted)
         self.assertEqual({flow["flow_id"] for flow in self.app.report_rows}, wanted)
         self.assertEqual([value.get() for value in self.app.metric_vars], ["1", "1", "2"])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 12.00 USD')
+        self.assertEqual(self.app.report_summary.get(), 'Complete | 12.00 USD')
         # Tags match exact elements, including a comma inside one quoted tag.
         quoted = self.seed_flow(category="Boat", tags=["Boat, trailer"], amount="8")
         self.app.ledger_filters["Tag"].set_selected(("Boat, trailer", "Maintenance"))
@@ -321,11 +321,11 @@ class GuiIntegrationTests(unittest.TestCase):
         self.seed_flow(status="Planned", amount="8")
         self.seed_flow(status="Canceled", amount="5")
         self.assertEqual([v.get() for v in self.app.metric_vars], ["1", "1", "4"])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 40.00 USD')
+        self.assertEqual(self.app.report_summary.get(), 'Complete | 40.00 USD')
         self.app.ledger_filters["Status"].set_selected(("Pending",))
         self.app.refresh_ledger()
         self.assertEqual([v.get() for v in self.app.metric_vars], ["0", "1", "1"])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 0 flows')
+        self.assertEqual(self.app.report_summary.get(), 'Complete | 0 flows')
 
     def test_account_gui_and_graph_do_not_infer_ownership(self):
         self.seed_flow()

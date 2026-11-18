@@ -219,7 +219,7 @@ class UnitsGuiTests(unittest.TestCase):
         rows = self.graph((("Checking", "USD"), ("Checking", "kg")), combined=True)
         self.assertEqual(set(rows), {("Checking", "USD"), ("Combined: Checking", "USD")})
         self.assertEqual(rows["Combined: Checking", "USD"][-1][1], Decimal("90"))
-        self.assertIn("Checking · kg", self.app.chart_message.get())
+        self.assertIn("Checking | kg", self.app.chart_message.get())
         self.assertTrue(any("Starting balance required" in text.get_text()
                             for text in self.app.chart_axes["kg"].texts))
 
@@ -256,7 +256,7 @@ class UnitsGuiTests(unittest.TestCase):
                 key = self.app._account_key(self.repo.get_account("Checking", units))
                 self.assertEqual(self.app.accounts_tree.set(key, "confirmed"), confirmed)
                 self.assertEqual(self.app.accounts_tree.set(key, "pending"), pending)
-        self.assertEqual(self.app.account_summary.get(), "3 accounts · 4 balances")
+        self.assertEqual(self.app.account_summary.get(), "3 accounts | 4 balances")
 
     def test_add_starting_balance_for_an_existing_name_keeps_other_units(self):
         self.app.show_view("accounts")
@@ -389,7 +389,7 @@ class UnitsGuiTests(unittest.TestCase):
     def test_complete_volume_lists_units_separately(self):
         self.seed()
         self.seed(units="USD", to_account="Shop", amount="10")
-        self.assertEqual(self.app.report_summary.get(), "Complete · 10.00 USD · 0.1250 kg")
+        self.assertEqual(self.app.report_summary.get(), "Complete | 10.00 USD | 0.1250 kg")
         self.assertNotIn("10.125", self.app.report_summary.get())
 
     def test_graph_reports_float_overflow_and_underflow_without_changing_records(self):
@@ -402,7 +402,7 @@ class UnitsGuiTests(unittest.TestCase):
                 before = "\n".join(self.repo.conn.iterdump())
                 rows = self.graph((("Checking", units),))
                 self.assertEqual(rows, {})
-                self.assertEqual(self.app.chart_message.get(), f"Outside graph display range: Checking · {units}.")
+                self.assertEqual(self.app.chart_message.get(), f"Outside graph display range: Checking | {units}.")
                 self.assertTrue(self.app.chart_message_label.winfo_ismapped())
                 self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)
                 self.assertEqual("\n".join(self.repo.conn.iterdump()), before)

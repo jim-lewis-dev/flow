@@ -201,10 +201,10 @@ class CalendarEntry(ttk.Frame):
         body.pack(fill="both", expand=True)
         header = ttk.Frame(body)
         header.pack(fill="x", pady=(0, 6))
-        self.previous_button = ttk.Button(header, text="‹", width=3,
+        self.previous_button = ttk.Button(header, text="<", width=3,
                                           command=lambda: self._change_month(-1))
         self.previous_button.pack(side="left")
-        self.next_button = ttk.Button(header, text="›", width=3,
+        self.next_button = ttk.Button(header, text=">", width=3,
                                       command=lambda: self._change_month(1))
         self.next_button.pack(side="right")
         self._heading = ttk.Label(header, anchor="center", width=18)

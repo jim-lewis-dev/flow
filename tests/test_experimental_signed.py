@@ -81,11 +81,11 @@ class SignedExperimentalTests(unittest.TestCase):
         self.view.jump_end()
         self.assertGreater(self.center(positive["flow_id"])[0], positive_start[0])
         self.assertLess(self.center(negative["flow_id"])[0], negative_start[0])
-        self.assertIn("In 2 kg · Out 5 kg", self.view._node_hover_text("A"))
-        self.assertIn("In 5 kg · Out 2 kg", self.view._node_hover_text("B"))
+        self.assertIn("In 2 kg | Out 5 kg", self.view._node_hover_text("A"))
+        self.assertIn("In 5 kg | Out 2 kg", self.view._node_hover_text("B"))
         self.assertIn("97 kg", self.view._node_hover_text("A"))
         self.assertIn("13 kg", self.view._node_hover_text("B"))
-        self.assertIn("A → B · -2 kg", self.view._flow_hover_text(negative))
+        self.assertIn("A -> B | -2 kg", self.view._flow_hover_text(negative))
         self.assert_records_unchanged(before)
 
     def test_all_negative_range_sizes_by_magnitude_and_keeps_original_hover_record(self):
@@ -100,9 +100,9 @@ class SignedExperimentalTests(unittest.TestCase):
         self.assertLess(small_box[2] - small_box[0], large_box[2] - large_box[0])
         pulse_record = self.view._pulse_items[self.oval(large["flow_id"])]
         self.assertEqual(pulse_record, large)
-        for value in ("Large reverse", "A → B · -100 kg", "Note for Large reverse"):
+        for value in ("Large reverse", "A -> B | -100 kg", "Note for Large reverse"):
             self.assertIn(value, self.view._flow_hover_text(pulse_record))
-        self.assertIn("In 101 kg · Out 0 kg", self.view._node_hover_text("A"))
+        self.assertIn("In 101 kg | Out 0 kg", self.view._node_hover_text("A"))
         self.assert_records_unchanged(before)
 
     def test_zero_comment_is_stationary_hollow_hoverable_and_in_time_steps(self):
@@ -126,13 +126,13 @@ class SignedExperimentalTests(unittest.TestCase):
         self.view.canvas.event_generate("<Motion>", x=x, y=y)
         self.pump()
         self.assertIn("Inspection", self.view.hover_var.get())
-        self.assertIn("A → B · 0 kg", self.view.hover_var.get())
+        self.assertIn("A -> B | 0 kg", self.view.hover_var.get())
         self.view.canvas.event_generate("<ButtonPress-1>", x=x, y=y)
         self.view.canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
         self.pump()
         self.assertEqual(self.selected, [comment["flow_id"]])
         self.assertIn("100 kg", self.view._node_hover_text("A"))
-        self.assertIn("In 0 kg · Out 0 kg", self.view._node_hover_text("A"))
+        self.assertIn("In 0 kg | Out 0 kg", self.view._node_hover_text("A"))
         self.view.next()
         self.assertEqual(self.view._index, 1)
         self.assertEqual(self.view.flow_list.get_children(),

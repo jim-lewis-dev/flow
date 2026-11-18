@@ -204,7 +204,7 @@ class UnitMigrationTests(unittest.TestCase):
             conn.execute("INSERT INTO categories VALUES('uncategorized','Uncategorized')")
             conn.execute("INSERT INTO tags VALUES('family','Family')")
             conn.execute("INSERT INTO flows VALUES('00000000-0000-0000-0000-000000000001','2026-10-02','cash','shop',"
-                         "9223372036854775807,'Complete','Supply','Keep café notes','uncategorized')")
+                         "9223372036854775807,'Complete','Supply','Keep caf\u00e9 notes','uncategorized')")
             conn.execute("INSERT INTO flow_tags VALUES('00000000-0000-0000-0000-000000000001','family',0)")
             conn.execute("INSERT INTO audit VALUES(1,'2026-10-02','flow','old','create',NULL,?)",
                          (json.dumps({"amount_cents": 9223372036854775807}),))
@@ -222,7 +222,7 @@ class UnitMigrationTests(unittest.TestCase):
         saved = repo.list_flows()[0]
         self.assertEqual(saved["flow_id"], "00000000-0000-0000-0000-000000000001")
         self.assertEqual((saved["amount"], saved["units"]), ("92233720368547758.07", "USD"))
-        self.assertEqual((saved["date"], saved["notes"], saved["tags"]), ("2026-10-02", "Keep café notes", ["Family"]))
+        self.assertEqual((saved["date"], saved["notes"], saved["tags"]), ("2026-10-02", "Keep caf\u00e9 notes", ["Family"]))
         self.assertEqual(repo.get_account("Cash")["opening_amount"], "-92233720368547758.07")
         self.assertIsNone(repo.get_account("Shop")["opening_amount"])
         self.assertEqual(json.loads(repo.history()[0]["after_json"]), {"amount_cents": 9223372036854775807})

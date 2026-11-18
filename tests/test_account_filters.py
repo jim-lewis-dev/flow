@@ -104,7 +104,7 @@ class AccountFilterTests(unittest.TestCase):
         self.app.refresh_ledger()
         self.assertEqual(self.names(), {"Lunch"})
         self.assertEqual([value.get() for value in self.app.metric_vars], ["1", "0", "1"])
-        self.assertEqual(self.app.report_summary.get(), 'Complete · 12.00 USD')
+        self.assertEqual(self.app.report_summary.get(), 'Complete | 12.00 USD')
 
     def test_choices_use_saved_endpoints_independent_of_other_filters(self):
         expected_from = {"Checking", "AmEx", "Shop", "Checking Reserve", "Cash"}
@@ -202,7 +202,7 @@ class AccountFilterTests(unittest.TestCase):
         from tkinter import ttk
         primary = self.app.search_entry.master
         dates = next(widget for widget in primary.winfo_children()
-                     if isinstance(widget, ttk.Button) and widget.cget("text") == "Dates…")
+                     if isinstance(widget, ttk.Button) and widget.cget("text") == "Dates...")
         for width, height in ((1920, 1200), (1920, 1080), (1280, 800), (1120, 700)):
             with self.subTest(width=width, height=height):
                 self.app.geometry(f"{width}x{height}+0+0")

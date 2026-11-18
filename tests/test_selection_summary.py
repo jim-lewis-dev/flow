@@ -20,22 +20,22 @@ class SelectionSummaryTests(unittest.TestCase):
                         status="Planned")]
         original = deepcopy(records)
         self.assertEqual(format_selection_summary(records), """4 selected flows
-Selected record totals · all selected statuses
-Dates: 2026-10-01 → 2026-10-03 04:05:06
-Statuses: Complete 1 · Pending 1 · Planned 1 · Canceled 1
-Total quantities: 1.25 kg · 8.05 USD
+Selected record totals | all selected statuses
+Dates: 2026-10-01 -> 2026-10-03 04:05:06
+Statuses: Complete 1 | Pending 1 | Planned 1 | Canceled 1
+Total quantities: 1.25 kg | 8.05 USD
 
 From
-  A: 0 kg · 8.05 USD
+  A: 0 kg | 8.05 USD
   D: 1.25 kg
 
 To
-  B: 1.25 kg · 10.1 USD
+  B: 1.25 kg | 10.1 USD
   C: -2.05 USD
 
 Categories
   Inspection: 0 kg
-  Supplies: 1.25 kg · 8.05 USD""")
+  Supplies: 1.25 kg | 8.05 USD""")
         self.assertEqual(records, original)
 
     def test_canceled_quantities_count_without_reversing_negative_endpoints(self):
@@ -65,17 +65,17 @@ Categories
                    flow(from_account="Alpha", to_account="beta", category="Copper", units="usd", amount="4")]
         text = format_selection_summary(records)
         self.assertEqual(text, format_selection_summary(reversed(records)))
-        self.assertIn("Total quantities: 3 USD · 6 usd", text)
-        self.assertIn("From\n  Alpha: 3 USD · 4 usd\n  zebra: 2 usd", text)
-        self.assertIn("To\n  beta: 3 USD · 4 usd\n  Delta: 2 usd", text)
-        self.assertIn("Categories\n  Copper: 3 USD · 4 usd\n  zinc: 2 usd", text)
+        self.assertIn("Total quantities: 3 USD | 6 usd", text)
+        self.assertIn("From\n  Alpha: 3 USD | 4 usd\n  zebra: 2 usd", text)
+        self.assertIn("To\n  beta: 3 USD | 4 usd\n  Delta: 2 usd", text)
+        self.assertIn("Categories\n  Copper: 3 USD | 4 usd\n  zinc: 2 usd", text)
 
     def test_empty_and_single_timestamp_selections_stay_compact(self):
         self.assertEqual(format_selection_summary([]), "")
         text = format_selection_summary([flow(date="2026-10-1 4", amount="0")])
         self.assertTrue(text.startswith("1 selected flow\n"))
         self.assertIn("Dates: 2026-10-01 04:00:00\n", text)
-        self.assertNotIn(" → ", text)
+        self.assertNotIn(" -> ", text)
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ For a flow of quantity `q` and unit `u`:
 
 Within a unit, the sum across all accounts is unchanged by a transfer. No conversion or addition across units occurs. The starting balance is the confirmed value *immediately before flows at its timestamp*. Earlier completed activity is already reflected in that anchor. If you edit completed history from before the anchor, revisit the anchor as needed.
 
-A negative `q` reverses the effect while preserving the recorded account names: `A → B: -5 kg` adds 5 kg to A and removes 5 kg from B. Zero changes no balances and retains the flow's date, status, and notes. From and To remain required but may be the same account. In that case the balance change is zero, both directional totals include the quantity, and category totals count the record once. Category totals sum signed amounts within each category/status/unit group.
+A negative `q` reverses the effect while preserving the recorded account names: `A -> B: -5 kg` adds 5 kg to A and removes 5 kg from B. Zero changes no balances and retains the flow's date, status, and notes. From and To remain required but may be the same account. In that case the balance change is zero, both directional totals include the quantity, and category totals count the record once. Category totals sum signed amounts within each category/status/unit group.
 
 Confirmed includes Complete flows. Including Pending also includes Pending; Including Planned adds Planned. Canceled contributes nothing. Graphs create separate plots for different units, and a combined line sums selected accounts only within one unit. An unknown starting balance prevents a trustworthy line for that pair; it is not silently treated as zero.
 

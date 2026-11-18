@@ -173,7 +173,7 @@ class RepositoryTests(unittest.TestCase):
                     self.assertEqual(list(self.repo.conn.iterdump()), before)
 
     def test_saved_multiline_unicode_name_and_notes_roundtrip_csv_and_json(self):
-        saved = self.flow(name='Café 🚤\n"Lunch", crew', notes='\tFirst line: αβ\nSecond line: 旅行\r\nLast line.\n')
+        saved = self.flow(name='Caf\u00e9 \U0001f6a4\n"Lunch", crew', notes='\tFirst line: \u03b1\u03b2\nSecond line: \u65c5\u884c\r\nLast line.\n')
         for suffix in (".csv", ".json"):
             with self.subTest(suffix=suffix):
                 exported = Path(self.temp.name) / ("flows" + suffix)

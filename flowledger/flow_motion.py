@@ -62,7 +62,7 @@ def _log10_positive(value: Decimal) -> float:
 
 
 def pulse_radius(amount: str | Decimal, max_amount: str | Decimal) -> float:
-    """Give a visible 5–17 pixel pulse using compressed quantity scaling.
+    """Give a visible 5-17 pixel pulse using compressed quantity scaling.
 
     The compression is for drawing only. Quantity comparisons and the ledger
     retain their exact Decimal values, including fractions and large numbers.

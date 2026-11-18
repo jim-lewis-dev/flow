@@ -1,6 +1,11 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n.className=cls; if(text!==undefined)n.textContent=text; return n; };
+function uiIcon(path, cls='', label='') {
+  const n=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  for(const [key,value] of Object.entries({class:'ui-icon '+cls,viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':1.8,'stroke-linecap':'round','stroke-linejoin':'round',focusable:'false',...(label?{role:'img','aria-label':label}:{'aria-hidden':'true'})}))n.setAttribute(key,value);
+  const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.setAttribute('d',path);n.append(p);return n;
+}
 const fields=['date','name','from_account','to_account','amount','units','status','category','tags','notes'];
 const required=[['date','Date'],['to_account','To'],['from_account','From'],['amount','Amount'],['units','Units']];
 const filterDefs=[['from_account','From','accounts'],['to_account','To','accounts'],['units','Units','units'],['status','Status','statuses'],['category','Categories','categories'],['tags','Tags','tags']];
@@ -96,17 +101,17 @@ function renderFlows(){
     if(f.date.slice(0,10)!==day){day=f.date.slice(0,10);nodes.push(el('div','day-heading',formatDate(day)));}
     const row=el('button','flow-row');row.dataset.id=f.flow_id;row.setAttribute('aria-label',`${f.name}, ${f.amount} ${f.units}, ${f.from_account} to ${f.to_account}`);
     const top=el('div','flow-top'),qty=el('span','flow-quantity',f.amount_display);qty.append(el('span','flow-unit',f.units));top.append(el('span','flow-name',f.name),qty);
-    const route=el('div','flow-route');route.append(document.createTextNode(f.from_account),el('span','arrow','→'),document.createTextNode(f.to_account));
+    const route=el('div','flow-route');route.append(document.createTextNode(f.from_account),uiIcon('M4 12h16m-6-6 6 6-6 6','arrow'),document.createTextNode(f.to_account));
     const meta=el('div','flow-meta');meta.append(el('span','status '+f.status,f.status),el('span','',f.category));
     if(f.date.length>10)meta.append(el('span','',f.date.slice(11)));
     if(f.tags.length)meta.append(el('span','',f.tags.map(t=>'#'+t).join(' ')));
-    if(f.notes)meta.append(el('span','','≡'));
+    if(f.notes)meta.append(uiIcon('M5 6h14M5 12h14M5 18h14','notes-icon','Has notes'));
     row.append(top,route,meta);row.onclick=()=>openEditor(f);nodes.push(row);
   }
   if(!flows.length){const n=el('div','empty');n.append(el('strong','',state.flows.length?'No matching flows':'No flows yet'),document.createTextNode(state.flows.length?'Change the search or reset the filters.':'Add a transfer, or open a file from Files.'));nodes.push(n);}
   $('flow-list').replaceChildren(...nodes);
 }
-function formatDate(d){const parts=d.split('-').map(Number),date=new Date(parts[0],parts[1]-1,parts[2]);return Number.isNaN(+date)?d:date.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});}
+function formatDate(d){const parts=d.split('-').map(Number),date=new Date(parts[0],parts[1]-1,parts[2]);return Number.isNaN(+date)?d:date.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}
 function renderAccounts(){
   if(document.activeElement!==$('as-of'))$('as-of').value=displayDate(state.as_of);
   $('basis').value=state.basis;
@@ -283,7 +288,7 @@ async function loadGraph(){
   if(!state?.dataset)return;const gen=++graphGeneration;
   if(!graphInitialized){const a=state.accounts.find(a=>a.opening_amount!==null);graphPairs=a?[[a.name,a.units]]:[];graphInitialized=true;}
   graphPairs=graphPairs.filter(p=>state.accounts.some(a=>a.name===p[0]&&a.units===p[1]));
-  $('graph-select').textContent=`Accounts & Units${graphPairs.length?' · '+graphPairs.length:''}`;
+  $('graph-select').textContent=`Accounts & Units${graphPairs.length?' | '+graphPairs.length:''}`;
   const args={pairs:graphPairs,basis:$('graph-basis').value};
   if(rangeEdited){if($('graph-start').value)args.start=$('graph-start').value;if($('graph-end').value)args.end=$('graph-end').value;}
   try{const data=await api('graph',args);if(gen!==graphGeneration)return;graphData=data;if(!rangeEdited){$('graph-start').value=data.start.slice(0,10);$('graph-end').value=data.end.slice(0,10);}drawGraphs();}
@@ -307,13 +312,13 @@ function drawGraphs(){
     const pad=(yhi-ylo||Math.abs(yhi)||1)*.1;ylo-=pad;yhi+=pad;
     const x=t=>fullLo===fullHi?202:60+((t-lo)/Math.max(1,hi-lo))*284,y=v=>226-(v-ylo)/(yhi-ylo)*204;
     const clipId='clip-'+cards.length;const defs=svgNode('defs',{}),clip=svgNode('clipPath',{id:clipId});clip.append(svgNode('rect',{x:60,y:16,width:284,height:215}));defs.append(clip);svg.append(defs);
-    for(let i=0;i<5;i++){const v=ylo+(yhi-ylo)*i/4,yp=y(v);svg.append(svgNode('line',{x1:60,x2:344,y1:yp,y2:yp,stroke:'#e8ece5'}),svgNode('text',{x:53,y:yp+4,'text-anchor':'end',fill:'#68776f','font-size':10},new Intl.NumberFormat(undefined,{maximumSignificantDigits:4,notation:Math.abs(v)>99999?'compact':'standard'}).format(v)));}
+    for(let i=0;i<5;i++){const v=ylo+(yhi-ylo)*i/4,yp=y(v);svg.append(svgNode('line',{x1:60,x2:344,y1:yp,y2:yp,stroke:'#e8ece5'}),svgNode('text',{x:53,y:yp+4,'text-anchor':'end',fill:'#68776f','font-size':10},new Intl.NumberFormat('en-US',{maximumSignificantDigits:4,notation:Math.abs(v)>99999?'compact':'standard'}).format(v)));}
     series.forEach((s,i)=>{let d='';s.points.forEach((p,j)=>{const xp=x(timeOf(p[0])),yp=y(Number(p[1]));d+=j?`H${xp}V${yp}`:`M${xp},${yp}`;});svg.append(svgNode('path',{d,fill:'none',stroke:colors[i%colors.length],'stroke-width':2.5,'clip-path':`url(#${clipId})`}));});
     if(fullLo===fullHi)series.forEach((s,i)=>svg.append(svgNode('circle',{cx:202,cy:y(Number(s.points.at(-1)[1])),r:4,fill:colors[i%colors.length]})));
-    for(const [t,anchor]of [[lo,'start'],[hi,'end']])svg.append(svgNode('text',{x:anchor==='start'?60:344,y:251,'text-anchor':anchor,fill:'#68776f','font-size':10},new Date(t).toLocaleDateString(undefined,{month:'short',day:'numeric'})));
+    for(const [t,anchor]of [[lo,'start'],[hi,'end']])svg.append(svgNode('text',{x:anchor==='start'?60:344,y:251,'text-anchor':anchor,fill:'#68776f','font-size':10},new Date(t).toLocaleDateString('en-US',{month:'short',day:'numeric'})));
     const cursor=svgNode('line',{x1:0,x2:0,y1:18,y2:228,stroke:'#9daaa1','stroke-dasharray':'3 3',visibility:'hidden'});svg.append(cursor);
     const points=new Map();let gesture=null;
-    function inspect(clientX){const rect=svg.getBoundingClientRect(),vx=(clientX-rect.left)/rect.width*360;const t=lo+Math.max(0,Math.min(1,(vx-60)/284))*(hi-lo);cursor.setAttribute('x1',x(t));cursor.setAttribute('x2',x(t));cursor.setAttribute('visibility','visible');const nodes=[el('strong','',new Date(t).toLocaleString()),el('br')];series.forEach((s,i)=>{let chosen=s.points[0];for(const p of s.points){if(timeOf(p[0])<=t)chosen=p;else break;}if(i)nodes.push(el('br'));nodes.push(document.createTextNode(`${s.name}: ${chosen[2]} ${unit}`));});readout.replaceChildren(...nodes);}
+    function inspect(clientX){const rect=svg.getBoundingClientRect(),vx=(clientX-rect.left)/rect.width*360;const t=lo+Math.max(0,Math.min(1,(vx-60)/284))*(hi-lo);cursor.setAttribute('x1',x(t));cursor.setAttribute('x2',x(t));cursor.setAttribute('visibility','visible');const nodes=[el('strong','',new Date(t).toLocaleString('en-US',{hour12:false})),el('br')];series.forEach((s,i)=>{let chosen=s.points[0];for(const p of s.points){if(timeOf(p[0])<=t)chosen=p;else break;}if(i)nodes.push(el('br'));nodes.push(document.createTextNode(`${s.name}: ${chosen[2]} ${unit}`));});readout.replaceChildren(...nodes);}
     svg.onpointerdown=e=>{svg.setPointerCapture(e.pointerId);points.set(e.pointerId,e.clientX);inspect(e.clientX);gesture={initial:new Map(points),zoom:{...zoom}};};
     svg.onpointermove=e=>{if(!points.has(e.pointerId)){if(e.pointerType==='mouse')inspect(e.clientX);return;}points.set(e.pointerId,e.clientX);inspect(e.clientX);};
     svg.onpointerup=e=>{if(!gesture)return;const initial=[...gesture.initial.values()],current=[...points.values()],width=svg.getBoundingClientRect().width;let span=gesture.zoom.hi-gesture.zoom.lo,center=(gesture.zoom.hi+gesture.zoom.lo)/2;
@@ -329,14 +334,14 @@ function drawGraphs(){
 function renderSync(){
   const sync=state.sync||{};
   $('sync-reconnect').hidden=!sync.enabled;
-  $('sync-state').textContent=!sync.enabled?'Not connected':sync.error?`Offline · ${sync.pending||0} pending`:sync.more?'Catching up':sync.conflicts?.length?'Needs review':sync.pending?`${sync.pending} pending`:sync.connected?'Up to date':'Waiting to sync';
+  $('sync-state').textContent=!sync.enabled?'Not connected':sync.error?`Offline | ${sync.pending||0} pending`:sync.more?'Catching up':sync.conflicts?.length?'Needs review':sync.pending?`${sync.pending} pending`:sync.connected?'Up to date':'Waiting to sync';
   $('sync-state').title=sync.error||sync.endpoint||'';
   $('sync-help').textContent=sync.error||(sync.enabled?'Edits save here first and synchronize while Flow is open.':'Use the connection text from the coordinator. A matching local file connects in place; a new name creates a local copy.');
   $('sync-conflicts').replaceChildren(...(sync.conflicts||[]).map(conflict=>{
     const row=el('div','sync-conflict');
     row.append(el('p','',conflict.message||'An edit overlaps a change from another device.'));
     const labels={date:'Date',from_key:'From',to_key:'To',amount:'Amount',units:'Units',status:'Status',name:'Name',notes:'Notes',category_key:'Category',opening_amount:'Starting balance',opening_at:'Starting date',x:'Horizontal position',y:'Vertical position',position:'Tag order'};
-    const valueText=value=>value===null||value===undefined?'—':String(value);
+    const valueText=value=>value===null||value===undefined?'-':String(value);
     for(const change of conflict.changes||[]){
       const flow=change.table==='flows'?state.flows.find(f=>f.flow_id===change.key[0]):null;
       const title=flow?flow.name:change.table==='flows'?'Flow':change.table==='flow_tags'?`Tag: ${change.key[1]}`:change.key.join(' / ');
@@ -350,7 +355,7 @@ function renderSync(){
       }
       row.append(details);
     }
-    for(const [choice,label] of [['local','Keep this device’s edit'],['remote','Use received change']]){
+    for(const [choice,label] of [['local',"Keep this device's edit"],['remote','Use received change']]){
       const b=el('button','outline',label);b.onclick=async()=>{try{await act('sync_resolve',{operation_id:conflict.operation_id||conflict.id,choice});scheduleSync(0);}catch(_){}};row.append(b);
     }return row;
   }));

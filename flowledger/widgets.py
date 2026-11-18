@@ -39,7 +39,7 @@ class FilterCombo(ttk.Frame):
         self._dismissed = False
         self.entry = ttk.Entry(self, textvariable=self.variable)
         self.entry.pack(side="left", fill="x", expand=True)
-        self.arrow = ttk.Button(self, text="▾", width=2, command=self._toggle_popup,
+        self.arrow = ttk.Button(self, text="v", width=2, command=self._toggle_popup,
                                 style="Small.TButton", takefocus=False)
         self.arrow.pack(side="right")
         self.entry.bind("<FocusIn>", self._focus_in)
@@ -186,7 +186,7 @@ class FilterCombo(ttk.Frame):
             self.listbox.pack(side="left", fill="both", expand=True)
             self.listbox.bind("<ButtonPress-1>", lambda event: "break")
             self.listbox.bind("<ButtonRelease-1>", self._click)
-            self._hint = tk.Label(self.popup, text="↑ ↓ choose   ·   Enter accepts   ·   Esc closes",
+            self._hint = tk.Label(self.popup, text="Up/Down choose   |   Enter accepts   |   Esc closes",
                      bg="#f1f6f3", fg="#668079", font=("DejaVu Sans", 8),
                      anchor="w", padx=8, pady=4)
             self._hint.pack(fill="x")
@@ -216,14 +216,14 @@ class FilterCombo(ttk.Frame):
             self.listbox.insert("end", value)
         self.matches = self.matches[:80]
         if not self.matches:
-            self.listbox.insert("end", "New value — press Enter to use")
+            self.listbox.insert("end", "New value - press Enter to use")
             self.listbox.itemconfig(0, fg="#668079")
         self.nav_index = None
         self.listbox.configure(height=max(1, min(6, len(self.matches))))
         if preserve_scroll:
             self.listbox.yview(top_index)
         screen_width, screen_height = self.winfo_screenwidth(), self.winfo_screenheight()
-        width = min(screen_width, max(self.winfo_width(), 300))
+        width = min(screen_width, max(self.winfo_width(), self._hint.winfo_reqwidth() + 2, 300))
         # Widget geometry requests are synchronous; the packer is not. Use
         # the children's requests so placement never needs a nested event loop.
         height = min(screen_height, self.listbox.winfo_reqheight() + self._hint.winfo_reqheight() + 2)

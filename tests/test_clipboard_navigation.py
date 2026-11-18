@@ -23,9 +23,9 @@ class ClipboardNavigationTests(unittest.TestCase):
             self.repo.save_flow(dict(
                 flow_id=str(uuid.UUID(int=index * 1000)),
                 date="2026-10-13 01:02:03", name=f"Original {index:03}",
-                from_account="Checking", to_account="Café", amount="12.3456789",
+                from_account="Checking", to_account="Caf\u00e9", amount="12.3456789",
                 units="USD", status="Pending", category="Dining",
-                tags=["Trip", "Boat, trailer"], notes=f"Row {index}\nSecond café"))
+                tags=["Trip", "Boat, trailer"], notes=f"Row {index}\nSecond caf\u00e9"))
         self.errors = []
         errors = self.errors
 

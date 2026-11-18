@@ -74,7 +74,7 @@ class FlowSortTests(unittest.TestCase):
                          flow_sort_key(self.record(date="2026-10-02T0:0:0")))
 
     def test_text_is_casefolded_but_units_and_status_order_are_preserved(self):
-        record = self.record(from_account="Straße", to_account="Target", category="General", name="Trip")
+        record = self.record(from_account="Stra\u00dfe", to_account="Target", category="General", name="Trip")
         self.assertEqual(flow_sort_key(record), flow_sort_key({**record,
             "from_account": "STRASSE", "to_account": "target", "category": "GENERAL", "name": "TRIP"}))
         self.assertNotEqual(flow_sort_key({**record, "units": "MW"}),

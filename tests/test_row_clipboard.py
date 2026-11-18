@@ -19,9 +19,9 @@ class RowClipboardTests(unittest.TestCase):
         self.repo=Repository(Path(self.directory.name)/"clipboard.sqlite3")
         self.repo.save_account("A","100.123456789","2026-10-01")
         self.repo.save_account("B","0","2026-10-01")
-        self.original=self.repo.save_flow(dict(date="2026-10-02 01:02:03", name="Café",
+        self.original=self.repo.save_flow(dict(date="2026-10-02 01:02:03", name="Caf\u00e9",
             from_account="A",to_account="B",amount="12.3456789",units="USD",
-            status="Pending",category="Dining",tags=["Trip","Boat, trailer"],notes="First\nSecond café"))
+            status="Pending",category="Dining",tags=["Trip","Boat, trailer"],notes="First\nSecond caf\u00e9"))
         self.errors=[]
         errors=self.errors
         class CheckedApp(FlowApp):
@@ -131,7 +131,7 @@ class RowClipboardTests(unittest.TestCase):
         self.assertEqual(self.app.ledger_filters["Units"].get(),("kg",))
         self.assertEqual(self.app.ledger.get_children(),(kilogram["flow_id"],))
         self.assertIn("Hidden by current filters",self.app.status_message.get())
-        self.assertEqual(self.app.form_vars["name"].get(),"Café")
+        self.assertEqual(self.app.form_vars["name"].get(),"Caf\u00e9")
 
     def test_invalid_clipboard_leaves_records_and_history_unchanged(self):
         before="\n".join(self.repo.conn.iterdump())
@@ -154,10 +154,10 @@ class RowClipboardTests(unittest.TestCase):
         entry.focus_force();self.pump()
         entry.selection_range(0,"end")
         self.key("<Control-c>",entry)
-        self.assertEqual(self.app.clipboard_get(),"Café")
+        self.assertEqual(self.app.clipboard_get(),"Caf\u00e9")
         entry.icursor("end");entry.selection_clear()
         self.key("<Control-v>",entry)
-        self.assertEqual(entry.get(),"CaféCafé")
+        self.assertEqual(entry.get(),"Caf\u00e9Caf\u00e9")
         entry.event_generate("<Return>");self.pump()
         self.assertEqual(len(self.repo.list_flows()),1)
         self.app.ledger_editor.open(self.original["flow_id"],"notes")
