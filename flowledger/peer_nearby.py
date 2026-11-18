@@ -1,7 +1,7 @@
 """Local, opt-in pairing. Selecting the other device starts a request; its
 recipient confirms a number bound to both certificates and fresh randomness. Only the
 initiating device needs to make TCP connections. All state used by a GUI and
-its background service is shared through the private device catalog.
+its network worker is shared through the private device catalog.
 """
 import hashlib
 import hmac
@@ -165,7 +165,7 @@ class NearbyPairing:
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             if not db.execute("SELECT 1 FROM meta WHERE key='nearby_listener' AND value='1'").fetchone():
-                raise ValueError('Restart other Flow windows or flow-peer.service on this computer, then try again.')
+                raise ValueError('Close other Flow windows on this computer, reopen Flow, then try again.')
             if not _active(db):
                 _set(db, 'pending', None)
                 _set(db, 'candidates', {})

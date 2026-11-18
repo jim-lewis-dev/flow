@@ -39,7 +39,24 @@ class PeerNetworkTests(unittest.TestCase):
         return path, record
 
     def connect(self, client, server):
-        return client.pair(server.pair_code(), server.status()["address"])
+        client.nearby_open()
+        server.nearby_open()
+        identity = server.status()["peer_id"]
+        client.nearby_lookup(server.status()["address"])
+        self.complete_pairing(client, server, identity)
+        return identity
+
+    def complete_pairing(self, client, server, identity):
+        request = client.nearby_request(identity)["request"]
+        incoming = server.nearby_poll()["request"]
+        self.assertEqual(request["number"], incoming["number"])
+        self.assertEqual([], client.peers())
+        server.nearby_approve(incoming["id"])
+        client.nearby_poll()
+        self.assertIn(identity, [p["peer_id"] for p in client.peers()])
+        self.assertIn(client.status()["peer_id"], [p["peer_id"] for p in server.peers()])
+        client.nearby_close()
+        server.nearby_close()
 
     def test_catalog_only_contains_opted_in_files_and_never_overwrites_a_file(self):
         a, b = self.node("a"), self.node("b")
@@ -79,7 +96,7 @@ class PeerNetworkTests(unittest.TestCase):
         self.assertEqual([], b.available())
         self.assertTrue(source.exists())
 
-    def test_multicast_discovery_pairs_by_code_without_exposing_file_or_device_names(self):
+    def test_multicast_discovery_pairs_by_name_without_broadcasting_file_or_device_names(self):
         # Use the loopback interface so discovery never advertises a test service on
         # the developer's LAN and still tests two real multicast sockets and TLS.
         observer = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -103,10 +120,11 @@ class PeerNetworkTests(unittest.TestCase):
         a, b = peers
         source, _ = self.ledger("discover.sqlite3")
         dataset = a.share(source, "Discovered file")
-        code = a.pair_code()
+        a.nearby_open()
+        b.nearby_open()
         self.assertEqual([], b.available())
         a_id = a.status()["peer_id"]
-        # Discard startup beacons from before the file and invitation existed.
+        # Discard startup beacons from before the file and pairing window existed.
         observer.setblocking(False)
         try:
             while True:
@@ -121,33 +139,44 @@ class PeerNetworkTests(unittest.TestCase):
                 self.assertNotIn(b"Discovery A", beacon)
                 self.assertNotIn(b"Discovered file", beacon)
                 self.assertNotIn(dataset.encode("ascii"), beacon)
-                self.assertNotIn(code.replace("-", "")[12:].encode("ascii"), beacon)
                 break
             if time.monotonic() >= deadline:
                 self.fail("Did not observe the publishing device's multicast beacon.")
-        self.assertEqual(a_id, b.pair(code))
+        deadline = time.monotonic() + 8
+        while a_id not in {p["peer_id"] for p in b.nearby_poll()["devices"]}:
+            if time.monotonic() >= deadline:
+                self.fail("The device did not appear through multicast discovery.")
+            time.sleep(.05)
+        self.complete_pairing(b, a, a_id)
         self.assertEqual([dataset], [f["dataset"] for f in b.available()])
 
-    def test_wrong_endpoint_expired_and_reused_codes_never_authorize(self):
-        a, b, other = self.node("seed"), self.node("phone"), self.node("other")
-        code = a.pair_code()
-        with self.assertRaises((ValueError, OSError, RuntimeError)):
-            b.pair(code, other.status()["address"])
-        self.assertEqual([], b.peers())
-        self.assertEqual([], other.peers())
-        # Mint an invitation well in the past without shortening real timeouts.
-        with patch("flowledger.peer_network.time.time", return_value=time.time() - 86400):
-            expired = a.pair_code()
-        with self.assertRaises((ValueError, OSError, RuntimeError)):
-            b.pair(expired, a.status()["address"])
-        self.assertEqual([], a.peers())
+    def test_retired_pairing_requests_cannot_authorize_or_read_proofs(self):
+        node = self.node("device")
+        node.nearby_open()
+        state = node.status()
+        for header in ({"op": "pair", "code": "OLDINVITATION"},
+                       {"op": "proof", "ticket": "old-ticket"}):
+            with self.subTest(operation=header["op"]):
+                with self.assertRaisesRegex(ValueError, "Access refused"):
+                    peer_wire.call(state["address"], state["peer_id"], header)
+        self.assertEqual([], node.peers())
+        self.assertIsNone(node.nearby_poll()["request"])
 
-        code = a.pair_code()
-        b.pair(code, a.status()["address"])
-        with self.assertRaises((ValueError, OSError, RuntimeError)):
-            other.pair(code, a.status()["address"])
-        self.assertEqual([], other.peers())
-        self.assertEqual(1, len(a.peers()))
+    def test_retired_invitation_state_is_removed_without_forgetting_devices(self):
+        a, b = self.node("a"), self.node("b")
+        self.connect(b, a)
+        before = a.peers()
+        a.stop()
+        with a._db() as db:
+            db.execute("CREATE TABLE pending(ticket TEXT PRIMARY KEY, proof TEXT, expires INTEGER)")
+            db.execute("INSERT INTO pending VALUES('ticket','proof',9999999999)")
+            db.executemany("INSERT INTO meta VALUES(?,?)", [(key, "private-value") for key in
+                           ("invite_hash", "invite_until", "invite_attempts")])
+        restarted = self.node("a")
+        self.assertEqual(before, restarted.peers())
+        with restarted._db() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='pending'").fetchone())
+            self.assertFalse(db.execute("SELECT 1 FROM meta WHERE key LIKE 'invite_%'").fetchone())
 
     def test_missing_or_replaced_file_does_not_become_a_new_shared_database(self):
         a, b = self.node("owner"), self.node("reader")
@@ -312,9 +341,9 @@ class PeerNetworkTests(unittest.TestCase):
         self.assertEqual([peer_id], [p["peer_id"] for p in b.peers()])
         self.assertEqual([dataset], [f["dataset"] for f in b.available()])
 
-    def test_gui_and_service_process_share_one_listener_and_survive_owner_exit(self):
-        # The first process is the GUI. The second attaches to its existing listener
-        # and takes ownership when the GUI exits, without publishing a second port.
+    def test_two_application_processes_share_one_listener_and_survive_owner_exit(self):
+        # Two windows attach to one listener. The second takes ownership
+        # when the first exits, without publishing a second port.
         config = self.root / "one-installation"
         script = (
             "import json, os, sys\n"
@@ -335,8 +364,8 @@ class PeerNetworkTests(unittest.TestCase):
                 self.assertFalse(background.status()["owner"])
                 self.assertEqual(original["port"], background.status()["port"])
                 other = self.node("other")
-                # The follower issues an invitation; the owning process redeems it
-                # on the single bound socket using the shared device configuration.
+                # One window accepts the nearby request through the other
+                # window's single bound socket and shared device configuration.
                 self.connect(other, background)
                 self.assertEqual(1, len(background.peers()))
                 # Exit without PeerNode.stop: OS ownership must be sufficient,

@@ -32,7 +32,7 @@ import java.util.HashMap;
 import java.util.Map;
 import static org.junit.Assert.*;
 
-/** Tests the real Android file coordinator, not the native picker UI or SQLite.
+/** Tests Android document handling without the native picker UI or SQLite.
  * MobileStore's SQLite validation/migration is covered by tests/test_mobile.py.
  */
 @RunWith(RobolectricTestRunner.class)
@@ -220,9 +220,12 @@ public class DocumentFilesTest {
     @Test public void joinedLocalFileReopensWithoutWritingToPreviousDocument() throws Exception {
         Uri uri = document("Documents/money.sqlite3", "manual-file");
         files.open(uri);
-        JSONObject joined = state(files.request("sync_join", new JSONObject().put("name", "shared.sqlite3")));
+        // Joining downloads the local file on the peer worker, then opens it
+        // through the same document-safe switch as any existing local file.
+        write(new File(root, "shared.sqlite3").toPath(), "shared-seed");
+        JSONObject joined = state(files.request("open_dataset", new JSONObject().put("name", "shared.sqlite3")));
         assertEquals("shared.sqlite3", joined.getString("dataset"));
-        assertEquals("On this phone - Flow files", joined.getString("file_location"));
+        assertEquals("Local - on this phone", joined.getString("file_location"));
         edit("queued-local-edit");
         assertEquals("manual-file", content(uri));
         restart();
@@ -327,10 +330,9 @@ public class DocumentFilesTest {
                 File target = new File(root, args.getString("name"));
                 Files.delete(target.toPath());
                 if (target.equals(current)) { current = null; key = name = ""; }
-            } else if ("sync_join".equals(action)) {
+            } else if ("open_dataset".equals(action)) {
                 name = args.getString("name");
                 File target = new File(root, name);
-                write(target.toPath(), "shared-seed");
                 select(target, name, name);
             } else if ("install_document".equals(action) || "open_document".equals(action)) {
                 File cache = new File(root, ".documents/" + args.getString("key") + ".sqlite3");

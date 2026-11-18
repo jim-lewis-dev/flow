@@ -6,12 +6,10 @@ SQLite format** as desktop Flow.
 
 This is an Android preview, with a touch interface for flows, account balances,
 graphs, an animated account map, and database files. It runs offline. Optional
-local-network synchronization keeps a phone file and desktop copies current
-through a coordinator on one of your computers.
+device sharing exchanges selected files directly between paired phones and
+computers. Every device saves locally and can pass along the changes it knows.
 
-Start with the camp example to check the controls on your phone. This build has
-not been tested on a physical Galaxy S24; see the checks below for the testing
-completed before delivery.
+Start with the camp example to explore the controls without using your own records.
 
 ## Install on a Galaxy S24
 
@@ -40,9 +38,10 @@ and reopens it next time.
   the same file; it does not create "flow 2."
 - **Your files:** switch between phone files and previously opened files. The
   location distinguishes files with identical names.
-- **Delete:** remove a file from Flow's private phone folder. Other devices and
-  the coordinator are unchanged. Unsent changes must synchronize first. Deleting
-  the open file leaves no file open; choose or create one in Files.
+- **Delete:** remove a file from Flow's private phone folder. Stop sharing it
+  first if it is shared. This deletes the local copy and any changes only it
+  holds; other devices are unchanged. Deleting the open file leaves no file
+  open; choose or create one in Files.
 - **Save As:** choose a new file and location, then continue working there.
   The previous file remains unchanged. Use this to put a phone-only file in
   Downloads or Documents for transfer.
@@ -69,38 +68,44 @@ Files use schema 8, including saved account positions. Schema 5-7 files are
 upgraded when opened; older files need current desktop Flow first. Records,
 starting balances, audit history, units, and map positions travel together.
 
-## Synchronize with a computer
+## Share directly with another phone or computer
 
-Set up one coordinator using the desktop
-[synchronization guide](../docs/synchronization.md).
-On the phone, open **Files -> Synchronization**, enter a local filename, paste
-the coordinator's connection text, and tap **Join shared file**. An empty or
-matching local file connects in place; a new name creates a local copy. A
-different existing file is never overwritten.
+1. Put both devices on the same Wi-Fi. Open **Files -> Pair device** on the
+   phone and **Sync -> Devices -> Pair device** on the computer. Select the
+   other device on one screen. Compare the numbers, then choose **Pair** on
+   the receiving device. There is only one confirmation and nothing to type.
+   Keep both pairing screens open until paired. **Forget** removes a saved
+   connection in one tap and keeps all local files.
+2. Open the local file you want to share. In **Files**, choose **Share this file**.
+   For a file opened through Android's document picker, Flow shares a separate
+   phone copy of the same name and leaves the selected document where it was.
+3. On the other device, use **Shared files -> Find shared files**, choose the
+   shared file, and join. A standalone file with the same name stays in place.
+   Under Your files, Local and Shared copy identify the two separate ledgers.
+   Display names can match; a dataset's internal identity determines what syncs.
 
-Valid edits save immediately on the phone. While Flow is in the foreground,
-it checks for changes about every two seconds and immediately after a save.
-Leaving the app makes a best-effort final sync. Offline edits remain in the
-same SQLite file and synchronize when the connection returns. The status shows
-pending changes, an unavailable coordinator, or **Up to date**. There is no
-Android background synchronization service.
+Shared files exchange edits while Flow is open on reachable, paired devices.
+Two paired phones can exchange edits without a desktop. Keeping multiple files
+shared works even when a different file is open. Edits made offline remain
+in each phone file. Reopen both apps after reconnecting. Independent edits
+merge; for incompatible edits to the same field, Files shows the competing
+values. Tap the one to keep; that decision is exchanged like another edit.
 
-If the coordinator moves to another network address, paste its revised
-connection text and choose **Update connection** for the current synchronized
-file. This preserves pending edits and refuses a different shared dataset.
+**Save As** takes a consistent, complete SQLite recovery copy, including the
+shared dataset identity, prior edits and unresolved choices. It then opens
+the document you selected. The document is not registered for networking;
+use the original local file under **Your files** to continue sharing. A
+backup is never silently registered under the same identity as another
+phone file. Device pairing credentials are separate from the peer database.
 
-Use this local joined file for sync. **Open file** and **Save As** retain their
-manual document-file behavior; the app does not synchronize a network document
-by repeatedly replacing its entire SQLite file. Save As switches to the chosen
-document. To resume live synchronization afterward, select the original local
-file under Your files.
-
-If another device changes the same field before your edit arrives, choose
-**Keep this device's edit** or **Use received change**. The choice applies to
-that saved action; later queued actions remain available. Undo reverses this
-phone's session actions and stops if it would overwrite a newer received
-change. Starting balances and saved account-map positions synchronize too;
-unfinished forms and filters stay on their device.
+**Stop sharing this file** removes it from this phone's shared catalog; it
+keeps local edits and copies already joined elsewhere. **Forget** under
+**Pair device** revokes that device's access from this installation. The
+phone exchanges edits while Flow is in the foreground. Local-network policies
+must allow direct connections between the devices. If a device is not listed,
+**Device not listed? -> Find by address** uses its Wi-Fi or Ethernet address
+with the same pairing confirmation. See the desktop [sharing guide](https://github.com/jim-lewis-dev/flow/blob/master/docs/peer-sync.md)
+for firewall ports and offline behavior.
 
 ## Use it
 
@@ -110,10 +115,14 @@ unfinished forms and filters stay on their device.
   reveal it temporarily. The layout stays clear of the status bar and keyboard.
 - **Flows:** search and combine From, To, Units, Status, Categories, and Tags
   filters. Tap a record to edit it. Valid edits save when you leave a field.
+  Clear Flow and Add Flow appear only when creating a new record.
 - **Add Flow:** fill in Date, From, To, Amount, and Units; the hint tracks what
   is missing. Amounts accept `+`, `-`, `*`, `/`, parentheses, powers such as `2^3`, and an
   optional leading `=`. Zero,
   negative quantities, and matching endpoints work as on desktop.
+- **Choices:** tap Name, From, To, Units, Category, or Tags to see current
+  choices. Type to filter, tap a choice, or enter a new value. Choices follow
+  the open file and refresh after edits, undo, and synchronization.
 - **Dates:** type a year-first date or use the calendar beside it. Missing
   month/day default to 1; missing minutes/seconds default to 00. For example,
   `2026-11 9` becomes `2026-11-01 09:00:00`. Leading zeros are optional.
@@ -132,8 +141,9 @@ unfinished forms and filters stay on their device.
   starting date and balance; blank means unknown. Set **As of** to include
   future pending or planned records.
 - **Graphs:** select account/unit pairs and a status basis. Different units
-  have separate plots. Touch for exact values; pinch to zoom, drag to pan,
-  and use Fit to restore the full range.
+  have separate plots. **Show combined balances within each unit** adds a
+  total alongside the individual account lines. Touch for exact values;
+  pinch to zoom, drag to pan, and use Fit to restore the full range.
 - **Files:** create, open, switch, save a file in another location, or join a
   synchronized file. Delete removes only a local phone file.
 - **Experimental:** play transfers between account nodes. It uses the current
@@ -163,29 +173,31 @@ quantities travel in the reverse direction. Different units remain separate.
 ## What is in this preview
 
 This is a focused phone adaptation. Desktop batch selection, CSV/JSON import,
-combined graph lines, and undo for view settings are not included. There is no
+and undo for view settings are not included. There is no
 iPhone build, hosted cloud service, or Play Store release.
 
 ## Checks for this build
 
+- The test suite includes portable Python adapter tests and DOM event checks for
+  dropdowns, the edit footer, combined graphs, and shared-file interactions.
 - Python tests cover records, exact quantities, balances, graphs, map
   positions, partial dates, file switching, and validated SQLite round trips.
-  Sync checks cover joining empty and matching files without hard links,
-  protecting different records, deleting local copies, and rejecting stale
-  sync responses after switching files.
-- Native Java tests exercise file coordination with a mock Android document
+  Sharing checks cover device pairing, shared-file identities, joining,
+  offline edits, conflicts, local deletion, and stale responses after switching
+  files or forgetting a device.
+- Native Java tests cover file coordination with a mock Android document
   provider: autosave, reopening, duplicate basenames, unavailable files,
   interrupted writes, conflict protection, Save As recovery, and remembering
   that no file is open after deletion.
-- Browser checks at 360 and 412 pixels wide cover separate phone files,
+- Earlier browser checks at 360 and 412 pixels wide covered separate phone files,
   record editing, switching, duplicate-name rejection, calendar controls,
   date/time ranges, and reachable navigation. The browser uses the real Python
   adapter; native document pickers require Android.
-- The signed release builds, matches the previous preview's signing certificate,
-  and passes APK and native-library 16 KB alignment checks.
+- Release validation includes checking the package, signing certificate and
+  APK/native library alignment before distributing an update.
 
-This update has not been run on a physical Galaxy S24. Mock-provider tests
-exercise native file coordination, but do not operate Samsung's actual picker.
+Mock-provider tests exercise native file handling; actual document pickers and
+LAN discovery also need testing on the target phone.
 
 ## Build and check
 
@@ -204,15 +216,16 @@ Matplotlib is bundled: the touch UI is HTML/CSS/JavaScript in an offline Android
 WebView, with a small Java file-picker bridge.
 
 `flowledger/` contains the shared desktop engine. `mobile/bridge.py` adapts its
-APIs. All database requests run on one process-wide worker to preserve
-transaction order and SQLite thread ownership. Sync network requests use a
-separate worker so connection delays do not block local edits.
+APIs. One process-wide worker owns the open editor and its SQLite connection.
+Peer exchanges open separate short-lived database connections; pairing,
+discovery and catalog requests do not run on the editor worker.
 
-The APK uses Android's ordinary Internet permission for the configured HTTPS
-coordinator; the connection text pins its certificate. It requests no broad
-storage permission. The Android document picker grants access only to files
-you choose. Sync credentials and pending changes are stored inside the local
-SQLite file.
+The APK uses the Internet permission for direct TLS connections between paired
+devices. An ordinary Wi-Fi multicast permission supports discovery
+when device sharing is active. It requests no broad storage permission.
+Android's document picker grants access only to files you choose. Device keys,
+trusted peers and the sharing catalog stay in a separate private installation
+directory. Peer edits and conflicts travel with the replica's SQLite data.
 
 Run the portable adapter tests:
 

@@ -20,7 +20,7 @@ public final class EngineChecks extends Instrumentation {
             py.getModule("tempfile").put("tempdir", PyObject.fromJava(getTargetContext().getCacheDir().getAbsolutePath()));
             PyObject unittest = py.getModule("unittest");
             PyObject suite = unittest.callAttr("TestSuite");
-            for (String module : new String[]{"test_mobile", "test_mobile_sync", "test_dates"}) {
+            for (String module : new String[]{"test_mobile", "test_mobile_peers", "test_mobile_peer_revisions", "test_dates"}) {
                 suite.callAttr("addTests", unittest.get("defaultTestLoader")
                         .callAttr("loadTestsFromModule", py.getModule(module)));
             }

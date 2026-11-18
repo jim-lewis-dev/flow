@@ -144,7 +144,7 @@ class PeerController:
         self.next_nearby_poll = 0
         self.end_nearby = False
         self.error = ""
-        self.last_poll = self.last_status = self.code_until = 0
+        self.last_poll = self.last_status = 0
         self.version = None
         self.dataset = ""
         self.conflicts = []
@@ -154,8 +154,7 @@ class PeerController:
         self.file_label = tk.StringVar(app)
         self.address_label = tk.StringVar(app)
         self.devices_label = tk.StringVar(app)
-        self.issued = tk.StringVar(app)
-        self.code, self.address = tk.StringVar(app), tk.StringVar(app)
+        self.address = tk.StringVar(app)
         self.peer_detail = tk.StringVar(app)
         self.selected_info = tk.StringVar(app)
         self._file_rows = self._conflict_key = None
@@ -225,15 +224,6 @@ class PeerController:
                     if not self.scan_after_pair:
                         self.notice.set("No shared files found on reachable devices." if not value else "")
                     self.scan_after_pair = False
-                elif action == "pair_code":
-                    self.issued.set(value)
-                    self.code_until = time.monotonic() + 300
-                    self.notice.set("This manual code expires in five minutes.")
-                elif action == "pair":
-                    self.code.set("")
-                    self.address.set("")
-                    self.notice.set("Paired. Look in Shared files to join a file.")
-                    self._submit("available")
                 elif action == "share":
                     self.notice.set("This file is available to paired devices.")
                 elif action == "resolve":
@@ -255,10 +245,6 @@ class PeerController:
         now = time.monotonic()
         if force or now - self.last_poll >= 1:
             self.last_poll = now
-            if self.code_until and (now >= self.code_until or self.state.get("invite_until") == 0):
-                self.issued.set("")
-                self.code_until = 0
-                self.notice.set("Manual code is no longer active.")
             if self.end_nearby and self.pending is None:
                 self.end_nearby = False
                 self.deferred = None
@@ -407,29 +393,18 @@ class PeerController:
         self.deny_button = ttk.Button(self.comparison, text="Cancel")
         self.deny_button.pack(side="left")
         self._near_items = ()
-        self.manual_open = tk.BooleanVar(d, False)
-        ttk.Checkbutton(d, text="Connection options", variable=self.manual_open,
-                        command=self._show_manual).grid(row=2, sticky="w", pady=4)
-        self.manual_box = box = ttk.Frame(d, padding=(4, 3))
+        self.address_open = tk.BooleanVar(d, False)
+        ttk.Checkbutton(d, text="Find by address", variable=self.address_open,
+                        command=self._show_address).grid(row=2, sticky="w", pady=4)
+        self.address_box = box = ttk.Frame(d, padding=(4, 3))
         box.grid(row=3, sticky="ew")
         box.columnconfigure(1, weight=1)
         ttk.Label(box, textvariable=self.address_label, wraplength=495).grid(row=0, columnspan=3, sticky="w")
         ttk.Label(box, text="Other device address").grid(row=1, sticky="w", padx=(0, 5))
         ttk.Entry(box, textvariable=self.address, width=26).grid(row=1, column=1, sticky="ew", pady=3)
-        self.lookup_button = ttk.Button(box, text="Find at address", command=self._lookup_nearby)
+        self.lookup_button = ttk.Button(box, text="Find", command=self._lookup_nearby)
         self.lookup_button.grid(row=1, column=2, sticky="w", padx=6)
-        ttk.Separator(box).grid(row=2, columnspan=3, sticky="ew", pady=4)
-        ttk.Label(box, text="Older Flow versions").grid(row=3, columnspan=3, sticky="w")
-        self.make_code = ttk.Button(box, text="Show manual code", command=self._make_manual_code)
-        self.make_code.grid(row=4, column=0, sticky="w")
-        ttk.Entry(box, textvariable=self.issued, state="readonly", width=28).grid(row=4, column=1, sticky="ew")
-        ttk.Label(box, text="Code from device").grid(row=5, sticky="w")
-        entry = ttk.Entry(box, textvariable=self.code, width=28)
-        entry.grid(row=5, column=1, sticky="ew", pady=3)
-        entry.bind("<Return>", lambda event: self._pair())
-        self.pair_button = ttk.Button(box, text="Use code", command=self._pair)
-        self.pair_button.grid(row=5, column=2, sticky="w", padx=6)
-        self._show_manual()
+        self._show_address()
         ttk.Label(d, textvariable=self.devices_label, wraplength=550).grid(row=4, sticky="w", pady=(8, 0))
         self.device_bar = ttk.Frame(d)
         self.device_bar.grid(row=5, sticky="ew", pady=8)
@@ -438,15 +413,11 @@ class PeerController:
         self.forget_button = ttk.Button(self.device_bar, text="Remove paired device", command=self._forget)
         self.forget_button.pack(side="left", padx=6)
 
-    def _show_manual(self):
-        if self.manual_open.get():
-            self.manual_box.grid()
+    def _show_address(self):
+        if self.address_open.get():
+            self.address_box.grid()
         else:
-            self.manual_box.grid_remove()
-
-    def _make_manual_code(self):
-        if time.monotonic() >= self.code_until:
-            self._submit("pair_code")
+            self.address_box.grid_remove()
 
     def _close_pairing_dialog(self, event):
         if event.widget is self.book:
@@ -527,12 +498,6 @@ class PeerController:
         else:
             self.near_title.set("Connect to Flow on another device on your Wi-Fi.")
 
-    def _pair(self):
-        if not self.code.get().strip():
-            self.notice.set("Enter the code displayed on the other device.")
-            return
-        self._submit("pair", self.code.get().strip(), self.address.get().strip() or None)
-
     def _forget(self):
         i = self.device_pick.current()
         if i >= 0:
@@ -546,9 +511,7 @@ class PeerController:
             self._submit("share", self.app.repo.path, self.shared_name.get().strip())
 
     def can_share(self):
-        sync = self.app.repo.sync
-        return (not self.app.demo and self.app.repo.path != ":memory:" and not (sync is not None and sync.enabled)
-                and not self.app.sync_controller.running)
+        return not self.app.demo and self.app.repo.path != ":memory:"
 
     def _rows(self):
         rows = {}
@@ -648,8 +611,7 @@ class PeerController:
         can_share = self.can_share()
         self.file_label.set(("Shared as " + local["name"] if local else
                              "Peer file | Not offered from this location" if self.dataset else
-                             "This file uses a coordinator" if self.app.repo.sync and self.app.repo.sync.enabled
-                             else "Demo | Device sharing is off" if self.app.demo else "This file is local only") + "\n" + self.app.repo.path)
+                             "Demo | Device sharing is off" if self.app.demo else "This file is local only") + "\n" + self.app.repo.path)
         if local:
             self.shared_name.set(local["name"])
         self.name_entry.configure(state="normal" if can_share and not local and not busy else "disabled")
@@ -668,8 +630,6 @@ class PeerController:
         self.find_button.configure(state=state)
         self.sync_button.configure(state=state if self.state.get("peers") and local else "disabled")
         self._near_render(state)
-        self.make_code.configure(state="disabled" if self.code_until > time.monotonic() else state)
-        self.pair_button.configure(state=state)
         peers = self.state.get("peers", [])
         self.devices_label.set("Paired: " + (", ".join(p["name"] for p in peers) or "none"))
         if peers:

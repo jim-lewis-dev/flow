@@ -3,7 +3,6 @@ and a catalog of selected local files. The network never accepts filesystem path
 """
 from __future__ import annotations
 
-import base64
 from contextlib import closing, contextmanager
 import fcntl
 import hashlib
@@ -12,7 +11,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import secrets
 import socket
 import sqlite3
 import ssl
@@ -99,10 +97,10 @@ class PeerNode(NearbyPairing):
                 CREATE TABLE IF NOT EXISTS files(dataset TEXT PRIMARY KEY, name TEXT NOT NULL,
                     path TEXT NOT NULL UNIQUE, baseline TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS sightings(id TEXT PRIMARY KEY,address TEXT NOT NULL,seen INTEGER NOT NULL);
-                CREATE TABLE IF NOT EXISTS pending(ticket TEXT PRIMARY KEY, proof TEXT NOT NULL, expires INTEGER NOT NULL);
             ''')
             db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', ('name', self.default_name))
-            db.execute('DELETE FROM pending WHERE expires<=?', (_now(),))
+            db.execute('DROP TABLE IF EXISTS pending')
+            db.execute("DELETE FROM meta WHERE key IN ('invite_hash','invite_until','invite_attempts')")
         os.chmod(self.directory / 'devices.sqlite3', 0o600)
 
     def _cert(self):
@@ -268,7 +266,6 @@ class PeerNode(NearbyPairing):
             return dict(running=self._started, owner=self._owner is not None,
                         addresses=json.loads(_state(db, 'addresses') or '[]'),
                         address=_state(db, 'address'), port=int(_state(db, 'port') or 0),
-                        invite_until=(int(_state(db, 'invite_until') or 0) if int(_state(db, 'invite_attempts') or 0)<8 else 0),
                         name=_state(db, 'name'), peer_id=self._identity or _state(db, 'identity'),
                         peers=self.peers(), files=self.local_files(),
                         last_sync=int(_state(db, 'last_sync') or 0),
@@ -331,108 +328,10 @@ class PeerNode(NearbyPairing):
                 break
         raise RuntimeError('The local peer listener has not started.')
 
-    def pair_code(self):
-        self._device()
-        prefix = wire.short_pin(self._identity)
-        secret = base64.b32encode(secrets.token_bytes(5)).decode('ascii')
-        code = prefix + secret
-        with self._db() as db:
-            _state(db, 'invite_hash', hashlib.sha256(code.encode('ascii')).hexdigest())
-            _state(db, 'invite_until', _now() + 300)
-            _state(db, 'invite_attempts', 0)
-        return '-'.join(code[i:i+4] for i in range(0, len(code), 4))
-
-    def _redeem(self, code):
-        if not isinstance(code, str) or len(code) != 20 or not code.isascii():
-            raise PermissionError()
-        with self._db() as db:
-            if _now() >= int(_state(db, 'invite_until') or 0) or int(_state(db, 'invite_attempts') or 0) >= 8:
-                raise PermissionError()
-            db.execute('BEGIN IMMEDIATE')
-            good = (_now() < int(_state(db, 'invite_until') or 0)
-                    and int(_state(db, 'invite_attempts') or 0) < 8
-                    and hmac.compare_digest(hashlib.sha256(code.encode('ascii')).hexdigest(), _state(db, 'invite_hash')))
-            if good:
-                _state(db, 'invite_hash', '')
-                _state(db, 'invite_until', 0)
-            else:
-                _state(db, 'invite_attempts', min(8, int(_state(db, 'invite_attempts') or 0) + 1))
-        if not good:
-            raise PermissionError()
-
-    def pair(self, code, address=None):
-        device = self._device()
-        code = ''.join(str(code).upper().split()).replace('-', '')
-        if len(code) != 20 or any(c not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in code):
-            raise ValueError('Enter the complete pairing code shown on the other device.')
-        prefix = code[:12]
-        if prefix == wire.short_pin(self._identity):
-            raise ValueError('Use a code from a different device.')
-        targets = []
-        if address:
-            wire.parse_address(address)
-            targets.append(address)
-        else:
-            deadline = time.monotonic() + 5
-            while not targets:
-                with self._db() as db:
-                    targets = [r['address'] for r in db.execute('SELECT * FROM sightings WHERE seen>?', (_now()-30,))
-                               if wire.short_pin(r['id']) == prefix]
-                if time.monotonic() >= deadline:
-                    break
-                if not targets:
-                    self._stopped.wait(0.2)
-            if not targets:
-                raise ValueError('Device not found on this LAN. Enter the address shown alongside its pairing code.')
-        ticket, proof, token = (secrets.token_urlsafe(32) for _ in range(3))
-        with self._db() as db:
-            db.execute('DELETE FROM pending WHERE expires<=?', (_now(),))
-            db.execute('INSERT INTO pending VALUES (?,?,?)', (ticket, proof, _now()+120))
-        try:
-            endpoint = targets[0]
-            identity, result = wire.call(endpoint, prefix, dict(op='pair', code=code, ticket=ticket,
-                                            proof=proof, token=token, device=device), pairing=True)
-            self._remember(identity, result['name'], endpoint, token)
-            return identity
-        finally:
-            with self._db() as db:
-                db.execute('DELETE FROM pending WHERE ticket=?', (ticket,))
-
-    def _remember(self, identity, name, endpoint, token):
-        with self._db() as db:
-            db.execute('INSERT OR REPLACE INTO peers VALUES (?,?,?,?,?)',
-                       (identity, _name(name), endpoint, token, _now()))
-
     def _handle(self, hdr, stream, host):
         op = hdr.get('op')
         if isinstance(op,str) and op.startswith('nearby_'):
             return self._nearby_handle(hdr,stream,host)
-        if op == 'proof':
-            with self._db() as db:
-                row = db.execute('SELECT proof FROM pending WHERE ticket=? AND expires>?',
-                                 (hdr['ticket'], _now())).fetchone()
-            if not row:
-                raise PermissionError()
-            return row[0]
-        if op == 'pair':
-            dev = hdr['device']
-            identity, port = dev['id'], dev['port']
-            if (not wire.is_id(identity) or identity == self._identity or type(port) is not int or not 0 < port < 65536
-                or any(not isinstance(hdr[k], str) or len(hdr[k]) != 43 for k in ('token','proof','ticket'))):
-                raise ValueError('Invalid device information.')
-            remote_name = _name(dev['name'])
-            self._redeem(hdr.get('code'))
-            endpoint = wire.address(host, port)
-            try:
-                _, proof = wire.call(endpoint, identity, dict(op='proof', ticket=hdr['ticket']))
-            except (OSError, ValueError) as exc:
-                raise wire.Refused('Could not verify the joining device. Allow Flow to receive connections '
-                                   'on both devices, then create a fresh pairing code.') from exc
-            if not hmac.compare_digest(hdr['proof'], proof):
-                raise PermissionError()
-            self._remember(identity, remote_name, endpoint, hdr['token'])
-            with self._db() as db:
-                return {'name': _state(db, 'name')}
         with self._db() as db:
             row = db.execute('SELECT token FROM peers WHERE id=?', (hdr.get('id'),)).fetchone()
             if not row or not hmac.compare_digest(row[0], str(hdr.get('token',''))):

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import array
-import base64
 import contextlib
 import fcntl
 import hashlib
@@ -34,10 +33,6 @@ class Refused(ValueError):
 
 def pin(cert):
     return hashlib.sha256(cert).hexdigest()
-
-
-def short_pin(identity):
-    return base64.b32encode(bytes.fromhex(identity)).decode('ascii')[:12]
 
 
 def is_id(value):
@@ -89,7 +84,7 @@ def write(sock, value, limit=FRAME):
     sock.sendall(data)
 
 
-def call(endpoint, expected, header, body=None, *, pairing=False, key_proof=None):
+def call(endpoint, expected, header, body=None, *, key_proof=None):
     """Pin the TLS peer before sending credentials or ledger data."""
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -102,12 +97,11 @@ def call(endpoint, expected, header, body=None, *, pairing=False, key_proof=None
     with socket.create_connection((host, port), timeout=timeout) as sock:
         with context.wrap_socket(sock, server_hostname=host) as stream:
             fingerprint = pin(stream.getpeercert(binary_form=True))
-            actual = short_pin(fingerprint) if pairing else fingerprint
             # The only unauthenticated query is the public opt-in device label.
             public_hello = (expected is None and header == {'op': 'nearby_hello'} and body is None
-                            and key_proof is None and not pairing)
-            if not public_hello and (not isinstance(expected, str) or not hmac.compare_digest(actual, expected)):
-                raise ValueError('Device certificate does not match the pairing code or saved device.')
+                            and key_proof is None)
+            if not public_hello and (not isinstance(expected, str) or not hmac.compare_digest(fingerprint, expected)):
+                raise ValueError('Device certificate does not match the expected device.')
             stream.settimeout(timeout if op == 'nearby_hello' else (5 if nearby else IO_TIMEOUT))
             write(stream, dict(header, v=1), HEADER)
             # Authenticate small headers before accepting any large ledger input.
@@ -181,7 +175,7 @@ class Listener:
                     except Refused as exc:
                         write(stream, {'error': str(exc)})
                     except PermissionError:
-                        write(stream, {'error': 'Access refused. Check the pairing code or pair these devices again.'})
+                        write(stream, {'error': 'Access refused. Pair these devices again.'})
                     except (OSError, TypeError, LookupError, ValueError, RuntimeError, sqlite3.Error):
                         write(stream, {'error': 'Peer could not complete the request. Check the file and device status.'})
         except (OSError, ValueError):

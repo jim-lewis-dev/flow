@@ -16,6 +16,7 @@
   <div class="history"><button id="undo" class="icon" aria-label="Undo" disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 6 6v3"></path></svg></button><button id="redo" class="icon" aria-label="Redo" disabled><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5 5 5-5 5m5-5H10a6 6 0 0 0-6 6v3"></path></svg></button></div>
 </header>
 <div id="storage-warning" class="storage-warning" role="alert" hidden><span id="storage-message"></span><button id="retry-save" class="text-button">Retry save</button></div>
+<div id="peer-review-bar" class="storage-warning" hidden><button id="peer-review" class="text-button"></button></div>
 <main>
   <section id="flows" class="page active" aria-label="Flows">
     <div class="section-heading"><h1>Flows</h1><span id="count" class="muted"></span></div>
@@ -35,6 +36,7 @@
     <div class="section-heading"><h1>Graphs</h1><button id="graph-reset" class="text-button">Fit</button></div>
     <div class="graph-controls"><button id="graph-select" class="outline">Accounts &amp; Units</button><select id="graph-basis" aria-label="Graph balance basis"><option>Confirmed</option><option>Including Pending</option><option selected>Including Planned</option></select></div>
     <div class="two-col"><label class="field">From<div class="date-control"><input id="graph-start" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5zM5 10h14M8 3v4m8-4v4M8 13h1m3 0h1m3 0h1M8 16h1m3 0h1m3 0h1"></path></svg></span><input id="graph-start-calendar" type="date" tabindex="-1" aria-label="Choose graph start date"></span></div></label><label class="field">To<div class="date-control"><input id="graph-end" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5zM5 10h14M8 3v4m8-4v4M8 13h1m3 0h1m3 0h1M8 16h1m3 0h1m3 0h1"></path></svg></span><input id="graph-end-calendar" type="date" tabindex="-1" aria-label="Choose graph end date"></span></div></label></div>
+    <label class="graph-combined"><input id="graph-combined" type="checkbox">Show combined balances within each unit</label>
     <p class="small muted">Touch for values | Pinch to zoom | Drag to pan</p>
     <div id="charts"></div>
   </section>
@@ -46,13 +48,40 @@
     <h2>New file on this phone</h2>
     <div class="new-dataset"><input id="new-dataset-name" aria-label="New file name" placeholder="money, energy, calories..." autocomplete="off"><button id="new-dataset" class="outline">Create</button></div>
     <p class="small muted">Separate records in a named SQLite file. The extension is added for you.</p>
-    <details class="sync-panel"><summary>Synchronization <span id="sync-state" class="small muted"></span></summary>
-      <p id="sync-help" class="small muted"></p>
-      <div id="sync-conflicts"></div>
-      <label class="field">Local file name<input id="sync-name" autocomplete="off" placeholder="money"></label>
-      <label class="field">Connection text<textarea id="sync-connection" rows="3" autocomplete="off" spellcheck="false" placeholder="Paste the connection text from the coordinator"></textarea></label>
-      <div class="file-actions"><button id="sync-join" class="outline">Join shared file</button><button id="sync-reconnect" class="outline" hidden>Update connection</button></div>
-    </details>
+    <section id="device-sharing" class="sync-panel">
+      <h2>Device sharing</h2>
+      <p id="peer-file-state" class="small muted"></p>
+      <div id="peer-conflicts" aria-live="polite"></div>
+      <p id="peer-copy" class="small muted" hidden>Sharing creates a separate phone copy with the same name. The selected document stays in place.</p>
+      <div class="file-actions"><button id="peer-share" class="primary">Share this file</button><button id="peer-unshare" class="outline" hidden>Stop sharing this file</button></div>
+      <details id="pair-panel"><summary>Pair device</summary>
+        <p class="small muted">Choose Pair device on both screens. Select the other device, then confirm there.</p>
+        <button id="nearby-start" class="outline" hidden>Pair device</button>
+        <p id="nearby-message" class="small muted" role="status"></p>
+        <div id="nearby-candidates"></div>
+        <div id="nearby-verify" hidden>
+          <strong id="nearby-name"></strong>
+          <output id="nearby-number" aria-label="Pairing verification number"></output>
+          <p id="nearby-hint" class="small muted"></p>
+          <div class="file-actions"><button id="nearby-approve" class="primary">Pair</button><button id="nearby-cancel" class="outline">Cancel</button></div>
+        </div>
+        <details id="nearby-fallback" hidden><summary>Device not listed?</summary>
+          <p class="small muted">Use the Wi-Fi address shown on the other device. A VPN or guest Wi-Fi can block local connections.</p>
+          <label class="field">Other device's Wi-Fi address<input id="nearby-address" autocomplete="off" spellcheck="false" placeholder="192.168.0.10"></label>
+          <button id="nearby-lookup" class="outline">Find by address</button>
+          <p id="nearby-local-address" class="small muted"></p>
+        </details>
+        <button id="nearby-stop" class="text-button" hidden>Stop pairing</button>
+      </details>
+      <h3 id="peer-devices-label" hidden>Paired devices</h3>
+      <div id="peer-devices"></div>
+      <details id="catalog-panel"><summary>Shared files</summary>
+        <p class="small muted">Find shared files on paired devices that are reachable now. Joining saves a separate local copy for offline use.</p>
+        <button id="peer-catalog" class="outline">Find shared files</button>
+        <div id="peer-catalog-list" aria-live="polite"></div>
+      </details>
+      <p id="peer-status" class="small muted" aria-live="polite"></p>
+    </section>
     <h2>Your files</h2><div id="dataset-list"></div>
     <button id="camp" class="example"><span>Try the camp example</span><small>Three days of battery energy and water.</small><span aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18 18 6M7 6h11v11"></path></svg></span></button>
     <p class="small muted">Open edits the selected file. Save As creates a file in the location you choose and switches to it. Files kept only inside Flow need Save As before uninstalling or clearing app data.</p>
@@ -97,21 +126,20 @@
   <div class="sheet-body">
     <div id="edit-form">
       <label class="field">Date<div class="date-control"><input id="f-date" data-field="date" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5zM5 10h14M8 3v4m8-4v4M8 13h1m3 0h1m3 0h1M8 16h1m3 0h1m3 0h1"></path></svg></span><input id="f-calendar" type="date" tabindex="-1" aria-label="Choose flow date"></span></div></label>
-      <label class="field">Name<input id="f-name" data-field="name" list="names" autocomplete="off"></label>
-      <div class="two-col"><label class="field">From<input id="f-from_account" data-field="from_account" list="account-options" autocomplete="off"></label><label class="field">To<input id="f-to_account" data-field="to_account" list="account-options" autocomplete="off"></label></div>
-      <div class="two-col"><label class="field">Amount<input id="f-amount" data-field="amount" placeholder="0 or a calculation" autocomplete="off" spellcheck="false"></label><label class="field">Units<input id="f-units" data-field="units" list="unit-options" autocomplete="off"></label></div>
-      <div class="two-col"><label class="field">Status<select id="f-status" data-field="status"><option>Complete</option><option>Pending</option><option>Planned</option><option>Canceled</option></select></label><label class="field">Category<input id="f-category" data-field="category" list="category-options" autocomplete="off"></label></div>
-      <label class="field">Tags<input id="f-tags" data-field="tags" placeholder="Comma separated" autocomplete="off" list="tag-options"></label>
+      <label class="field">Name<input id="f-name" data-field="name" data-choices="names" autocomplete="off"></label>
+      <div class="two-col"><label class="field">From<input id="f-from_account" data-field="from_account" data-choices="accounts" autocomplete="off"></label><label class="field">To<input id="f-to_account" data-field="to_account" data-choices="accounts" autocomplete="off"></label></div>
+      <div class="two-col"><label class="field">Amount<input id="f-amount" data-field="amount" placeholder="0 or a calculation" autocomplete="off" spellcheck="false"></label><label class="field">Units<input id="f-units" data-field="units" data-choices="units" autocomplete="off"></label></div>
+      <div class="two-col"><label class="field">Status<select id="f-status" data-field="status"><option>Complete</option><option>Pending</option><option>Planned</option><option>Canceled</option></select></label><label class="field">Category<input id="f-category" data-field="category" data-choices="categories" autocomplete="off"></label></div>
+      <label class="field">Tags<input id="f-tags" data-field="tags" placeholder="Comma separated" autocomplete="off" data-choices="tags"></label>
       <label class="field">Notes<textarea id="f-notes" data-field="notes" rows="4"></textarea></label>
     </div>
     <p id="form-error" class="error" role="alert" hidden></p>
     <div id="existing-actions" class="row-actions" hidden><button id="copy-flow" class="outline">Duplicate</button><button id="delete-flow" class="text-button danger">Delete</button></div>
   </div>
-  <div class="sheet-footer"><p id="required-hint" class="small muted"></p><div class="form-buttons"><button id="clear-flow" class="outline">Clear Flow</button><button id="add-flow" class="primary" disabled>Add Flow</button></div></div>
+  <div class="sheet-footer"><p id="required-hint" class="small muted"></p><div id="flow-buttons" class="form-buttons"><button id="clear-flow" class="outline">Clear Flow</button><button id="add-flow" class="primary" disabled>Add Flow</button></div></div>
 </dialog>
 <dialog id="picker" class="sheet picker"><div class="sheet-header"><h2 id="picker-title"></h2><button id="picker-done" class="text-button">Done</button></div><div class="sheet-body"><input id="picker-search" type="search" placeholder="Search" aria-label="Search choices"><div id="picker-options"></div></div></dialog>
 <dialog id="anchor" class="sheet"><div class="sheet-header"><h2 id="anchor-title"></h2><button id="anchor-done" class="text-button">Done</button></div><div class="sheet-body"><label class="field">Starting date<div class="date-control"><input id="anchor-date" autocomplete="off" placeholder="YYYY-MM-DD HH:MM:SS"><span class="calendar"><span aria-hidden="true"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v15H5zM5 10h14M8 3v4m8-4v4M8 13h1m3 0h1m3 0h1M8 16h1m3 0h1m3 0h1"></path></svg></span><input id="anchor-date-calendar" type="date" tabindex="-1" aria-label="Choose starting date"></span></div></label><label class="field">Starting balance<input id="anchor-amount" placeholder="Unknown" autocomplete="off"></label><p class="small muted">Blank is unknown. Enter 0 for a known zero.</p><p id="anchor-error" class="error" role="alert" hidden></p></div></dialog>
 <dialog id="map-detail" class="sheet"><div class="sheet-header"><h2 id="map-detail-title"></h2><button id="map-detail-close" class="text-button">Done</button></div><div id="map-detail-body" class="sheet-body"></div></dialog>
-<datalist id="account-options"></datalist><datalist id="unit-options"></datalist><datalist id="category-options"></datalist><datalist id="tag-options"></datalist><datalist id="names"></datalist>
 </body>
 </html>

@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
     // Python's SQLite connection and undo history belong to this process worker,
     // including after Android recreates the Activity.
     private static final ExecutorService worker = Executors.newSingleThreadExecutor();
-    private static final ExecutorService network = Executors.newSingleThreadExecutor();
-    private static boolean syncInFlight;
+    private static final ExecutorService peerLife = Executors.newSingleThreadExecutor();
+    private static final ExecutorService peerRequests = Executors.newSingleThreadExecutor();
     private static DocumentFiles files;
     private WebView web;
     private String fileRequestId;
@@ -47,6 +47,7 @@ public final class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         dataDirectory = new File(getFilesDir(), "datasets");
         dataDirectory.mkdirs();
+        PeerHost.initialize(this);
         if (saved != null) {
             fileRequestId = saved.getString("fileRequestId");
             exportPath = saved.getString("exportPath");
@@ -168,76 +169,30 @@ public final class MainActivity extends Activity {
         });
     }
 
-    private JSONObject networkCall(JSONObject args) throws Exception {
-        return new JSONObject(Python.getInstance().getModule("mobile.bridge")
-            .callAttr("network", args.toString()).toString());
-    }
-
-    private void synchronize(String id) throws Exception {
-        if (syncInFlight) {
-            answer(id, "{\"ok\":true,\"result\":{\"skipped\":true}}");
-            return;
-        }
-        JSONObject prepared = files().request("sync_prepare", new JSONObject());
-        if (!prepared.getBoolean("ok")) { answer(id, prepared.toString()); return; }
-        JSONObject data = prepared.getJSONObject("result");
-        if (!data.optBoolean("enabled")) { answer(id, prepared.toString()); return; }
-        syncInFlight = true;
-        network.execute(() -> {
-            JSONObject response;
-            try { response = networkCall(new JSONObject().put("action", "exchange")
-                .put("configuration", data.getJSONObject("configuration"))
-                .put("request", data.getJSONObject("request"))); }
-            catch (Exception error) {
-                response = new JSONObject();
-                try { response.put("error", error.getMessage()); } catch (Exception ignored) { }
-            }
-            final JSONObject received = response;
-            worker.execute(() -> {
-                try {
-                    received.put("session", data.getString("session"));
-                    answer(id, files().request("sync_accept", received).toString());
-                } catch (Exception error) { fail(id, error); }
-                finally { syncInFlight = false; }
-            });
-        });
-    }
-
-    private void joinSynchronization(String id, JSONObject args, boolean reconnect) throws Exception {
-        final String name = reconnect ? "" : args.getString("name"), connection = args.getString("connection");
-        final String session;
-        if (reconnect) {
-            JSONObject prepared = files().request("sync_prepare", new JSONObject());
-            if (!prepared.getBoolean("ok")) { answer(id, prepared.toString()); return; }
-            JSONObject result = prepared.getJSONObject("result");
-            if (!result.optBoolean("enabled")) throw new java.io.IOException("Choose a synchronized file first.");
-            session = result.getString("session");
-        } else session = "";
-        network.execute(() -> {
-            try {
-                JSONObject received = networkCall(new JSONObject().put("action", "bootstrap").put("connection", connection));
-                if (received.has("error")) throw new java.io.IOException(received.getString("error"));
-                received.put("name", name).put("session", session);
-                worker.execute(() -> {
-                    try { answer(id, files().request(reconnect ? "sync_reconnect" : "sync_join", received).toString()); }
-                    catch (Exception error) { fail(id, error); }
-                });
-            } catch (Exception error) { fail(id, error); }
-        });
-    }
-
     private final class Bridge {
         @JavascriptInterface public void request(String id, String payload) {
             worker.execute(() -> {
                 try {
                     JSONObject request = new JSONObject(payload);
                     String action = request.getString("action");
-                    if ("sync".equals(action)) {
-                        synchronize(id);
-                    } else if ("join_sync".equals(action)) {
-                        joinSynchronization(id, request.getJSONObject("args"), false);
-                    } else if ("reconnect_sync".equals(action)) {
-                        joinSynchronization(id, request.getJSONObject("args"), true);
+                    if ("peer_pair".equals(action) ||
+                        "peer_catalog".equals(action) || "peer_join".equals(action) || "peer_forget".equals(action)) {
+                        JSONObject args = request.optJSONObject("args");
+                        peerRequests.execute(() -> {
+                            try {
+                                JSONObject result = new JSONObject(Python.getInstance().getModule("mobile.peers")
+                                    .callAttr("network", dataDirectory.getAbsolutePath(), action,
+                                        args == null ? "{}" : args.toString()).toString());
+                                if ("peer_join".equals(action) && result.getBoolean("ok")) {
+                                    // Opening a new local copy uses the normal SAFE file switch:
+                                    // failed document writeback preserves the active working file.
+                                    worker.execute(() -> {
+                                        try { answer(id, files().request("open_dataset", result.getJSONObject("result")).toString()); }
+                                        catch (Exception error) { fail(id, error); }
+                                    });
+                                } else answer(id, result.toString());
+                            } catch (Exception error) { fail(id, error); }
+                        });
                     } else if ("pick_open".equals(action)) {
                         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
                             .addCategory(Intent.CATEGORY_OPENABLE)
@@ -263,8 +218,7 @@ public final class MainActivity extends Activity {
                         launchPicker(id, intent, SAVE_AS, snapshot);
                     } else {
                         // The page cannot choose private cache paths or bypass the picker.
-                        if ("install_document".equals(action) || "prepare_export".equals(action) ||
-                            "sync_prepare".equals(action) || "sync_accept".equals(action) || "sync_join".equals(action) || "sync_reconnect".equals(action))
+                        if ("install_document".equals(action) || "prepare_export".equals(action))
                             throw new IllegalArgumentException("Use the Files screen.");
                         JSONObject args = request.optJSONObject("args");
                         answer(id, files().request(action, args == null ? new JSONObject() : args).toString());
@@ -338,6 +292,21 @@ public final class MainActivity extends Activity {
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) hideNavigationBar();
+    }
+
+    private void peerForeground(boolean active) {
+        String root = dataDirectory.getAbsolutePath();
+        peerLife.execute(() -> Python.getInstance().getModule("mobile.peers").callAttr("lifecycle", root, active));
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        peerForeground(true);
+    }
+
+    @Override protected void onStop() {
+        peerForeground(false);
+        super.onStop();
     }
 
     @Override protected void onPause() {

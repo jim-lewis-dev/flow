@@ -30,7 +30,7 @@ final class DocumentFiles {
     interface Engine { JSONObject call(String action, JSONObject args) throws Exception; }
     private static final Set<String> WRITES = new HashSet<>(Arrays.asList(
         "add_flow", "update_flow", "copy_flow", "delete_flow", "save_anchor",
-        "save_positions", "undo", "redo"));
+        "save_positions", "undo", "redo", "peer_resolve"));
     private final Context context;
     private final File root;
     private final SharedPreferences prefs;
@@ -91,7 +91,7 @@ final class DocumentFiles {
             }
             return decorate(response);
         }
-        if ("open_dataset".equals(action) || "new_dataset".equals(action) || "camp".equals(action) || "sync_join".equals(action)) {
+        if ("open_dataset".equals(action) || "new_dataset".equals(action) || "camp".equals(action) || "peer_share".equals(action)) {
             flush();
             JSONObject response = engine.call(action, args);
             if (response.getBoolean("ok")) {
@@ -270,11 +270,14 @@ final class DocumentFiles {
         JSONObject result = response.optJSONObject("result");
         JSONObject state = result == null ? null : result.optJSONObject("state");
         if (state == null) return response;
-        JSONArray files = new JSONArray();
-        JSONArray names = state.getJSONArray("datasets");
-        for (int i = 0; i < names.length(); i++) {
-            String name = names.getString(i);
-            files.put(new JSONObject().put("key", name).put("name", name).put("location", "On this phone"));
+        JSONArray files = state.optJSONArray("local_files");
+        if (files == null) {
+            files = new JSONArray();
+            JSONArray names = state.getJSONArray("datasets");
+            for (int i = 0; i < names.length(); i++) {
+                String name = names.getString(i);
+                files.put(new JSONObject().put("key", name).put("name", name).put("location", "On this phone"));
+            }
         }
         JSONObject all = records();
         JSONArray keys = all.names();
@@ -285,7 +288,8 @@ final class DocumentFiles {
         }
         state.put("files", files).put("storage_warning", warning);
         state.put("file_location", current == null || current.isEmpty() ? "" :
-            external(current) ? document(current).getString("location") : "On this phone - Flow files");
+            external(current) ? document(current).getString("location") : current.startsWith("shared:") && current.contains("/") ?
+            "Shared copy - " + current.substring(7, 17) : "Local - on this phone");
         state.put("file_pending", external(current) && document(current).optBoolean("dirty"));
         return response;
     }

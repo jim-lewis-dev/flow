@@ -2,8 +2,6 @@
 import os
 from pathlib import Path
 import tempfile
-import threading
-import time
 import unittest
 from unittest.mock import patch
 
@@ -130,111 +128,48 @@ class SyncGuiTests(unittest.TestCase):
         self.assertEqual(self.app.focus_get(), overlay)
 
     def enable_sync(self):
-        from flowledger.sync import SyncState
+        from flowledger import peer_store
         self.app.sync_controller.close()
-        SyncState(self.repo).configure(dataset="money")
-        server, peer = Repository(":memory:"), Repository(":memory:")
-        self.addCleanup(server.close)
+        peer_store.share(self.repo, "money")
+        peer = Repository(":memory:")
         self.addCleanup(peer.close)
-        SyncState(server).configure(dataset="money", server=True, seed=self.repo.sync.export_seed())
-        SyncState(peer).configure(dataset="money", seed=server.sync.export_seed())
+        peer_store.join(peer, peer_store.seed(self.repo))
         self.app._refresh_synced_records()
         self.app.view_history.remember("experimental")
-        return server, peer
+        return peer
+
+    def receive(self, target, source):
+        from flowledger import peer_store
+        peer_store.receive(target, peer_store.missing(source, list(peer_store.inventory(target))))
 
     def test_remote_change_back_to_original_is_still_guarded_while_typing(self):
-        server, peer = self.enable_sync()
+        peer = self.enable_sync()
         self.app.form_vars["amount"].set("30")
         for amount in ("25", "10"):
             peer.save_flow({**peer.get_flow(self.flow["flow_id"]), "amount": amount})
-            peer.sync.accept_response(server.sync.server_exchange(peer.sync.prepare_request()))
-        self.repo.sync.accept_response(server.sync.server_exchange(self.repo.sync.prepare_request()))
+        self.receive(self.repo, peer)
         self.app._refresh_synced_records()
         self.assertFalse(self.app._finish_existing("flow"))
         self.assertEqual(self.repo.get_flow(self.flow["flow_id"])["amount"], "10")
         self.assertEqual(self.app.form_vars["amount"].get(), "30")
 
     def test_synced_node_undo_preserves_another_devices_other_node(self):
-        server, peer = self.enable_sync()
+        peer = self.enable_sync()
         view = self.app.experimental
         self.app.show_view("experimental")
         self.pump()
         before = view.get_state()
         view._positions["Checking"] = (0.2, 0.3)
         self.assertTrue(view._save_positions(before))
-        self.repo.sync.accept_response(server.sync.server_exchange(self.repo.sync.prepare_request()))
-        peer.sync.accept_response(server.sync.server_exchange(peer.sync.prepare_request()))
+        self.receive(peer, self.repo)
         positions = peer.load_map_positions()
         positions["Shop"] = (0.9, 0.8)
         peer.save_map_positions(positions)
-        peer.sync.accept_response(server.sync.server_exchange(peer.sync.prepare_request()))
-        self.repo.sync.accept_response(server.sync.server_exchange(self.repo.sync.prepare_request()))
+        self.receive(self.repo, peer)
         self.app._refresh_synced_records()
         self.app.undo()
         self.assertEqual(self.repo.load_map_positions()["Shop"], (0.9, 0.8))
         self.assertNotIn("Checking", self.repo.load_map_positions())
-
-    def test_connect_fetches_on_worker_and_applies_on_tk_thread(self):
-        from flowledger.sync import SyncState
-        server = Repository(":memory:")
-        self.addCleanup(server.close)
-        self.repo.conn.backup(server.conn)
-        SyncState(server).configure(dataset="money", server=True)
-        seed = server.sync.export_seed()
-        connection = dict(dataset="money", endpoint="https://sync.example.test:8765",
-                          token="a" * 40, certificate="b" * 64)
-        worker_threads = []
-
-        def fetch(_config):
-            worker_threads.append(threading.get_ident())
-            return seed
-
-        import json
-        controller = self.app.sync_controller
-        controller.show()
-        controller.connection_text.insert("1.0", json.dumps(connection))
-        with patch("flowledger.sync_ui.sync_transport.fetch_bootstrap", side_effect=fetch):
-            controller._connect()
-            deadline = time.monotonic() + 2
-            while controller.running and time.monotonic() < deadline:
-                self.pump()
-                time.sleep(.01)
-        self.assertFalse(controller.running)
-        self.assertTrue(self.repo.sync.enabled)
-        self.assertEqual(self.repo.sync.configuration()["endpoint"], connection["endpoint"])
-        self.assertEqual(len(worker_threads), 1)
-        self.assertNotEqual(worker_threads[0], threading.get_ident())
-        self.assertEqual(controller.connection_text.get("1.0", "end-1c"), "")
-        self.assertEqual(self.repo.list_flows(), [self.flow])
-
-    def test_paginated_pull_stays_syncing_until_last_page(self):
-        server, peer = self.enable_sync()
-        peer.save_flow({**peer.get_flow(self.flow["flow_id"]), "name": "Phone name"})
-        peer.save_flow({**peer.get_flow(self.flow["flow_id"]), "notes": "Phone notes"})
-        peer.sync.accept_response(server.sync.server_exchange(peer.sync.prepare_request()))
-        request = self.repo.sync.prepare_request()
-        with patch("flowledger.sync.MAX_BATCH_OPERATIONS", 1):
-            first = server.sync.server_exchange(request)
-            second = server.sync.server_exchange({**request, "cursor": first["cursor"]})
-        self.assertTrue(first["more"])
-        self.assertFalse(second["more"])
-        controller = self.app.sync_controller
-        controller.closed = False
-        controller.running = True
-        controller.results.put(("exchange", {}, first, None))
-        with patch.object(controller, "_start") as start:
-            controller._tick()
-            self.assertEqual(self.app.sync_button.cget("text"), "Syncing")
-            self.assertTrue(controller.catching_up)
-            start.assert_called_once()
-            self.app.after_cancel(controller.after_id)
-            controller.after_id = None
-            controller.running = True
-            controller.results.put(("exchange", {}, second, None))
-            controller._tick()
-        self.assertEqual(self.app.sync_button.cget("text"), "Up to date")
-        self.assertFalse(controller.catching_up)
-        self.assertEqual(self.repo.get_flow(self.flow["flow_id"])["notes"], "Phone notes")
 
 
 if __name__ == "__main__":

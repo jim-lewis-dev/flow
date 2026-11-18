@@ -35,7 +35,7 @@ class PeerRoutesTests(unittest.TestCase):
     def test_multihomed_beacons_keep_working_if_one_adapter_fails(self):
         # Control the interfaces without touching the test machine's network.
         # Assert memberships, outbound interface, and a wire-compatible reply
-        # to a stock 0.4.0 phone that only sends its existing multicast beacon.
+        # to a phone that sends only multicast beacons.
         host = '1' * 64
         phone = '2' * 64
         sender = ('10.1.1.20', wire.DISCOVERY_PORT)

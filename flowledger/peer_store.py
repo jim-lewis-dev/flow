@@ -117,10 +117,9 @@ def _initialize(repo, value):
         for operation in ('UPDATE', 'DELETE'):
             repo.conn.execute(f'CREATE TRIGGER peer_immutable_{table}_{operation.lower()} BEFORE {operation} ON {table} '
                               "BEGIN SELECT RAISE(ABORT,'Peer history is immutable.'); END")
-    # An older Flow with coordinator support knows sync_meta but does not
-    # understand peer sharing. Refuse its attempt to configure a second writer.
+    # Refuse incompatible sync settings from clients that cannot track events.
     for operation in ('INSERT', 'UPDATE'):
-        repo.conn.execute(f'CREATE TRIGGER peer_refuse_coordinator_{operation.lower()} BEFORE {operation} ON sync_meta '
+        repo.conn.execute(f'CREATE TRIGGER peer_guard_sync_mode_{operation.lower()} BEFORE {operation} ON sync_meta '
                           "WHEN NEW.key='dataset' BEGIN SELECT RAISE(ABORT,'This file uses peer sharing.'); END")
     sync._set('peer_dataset', value['dataset'])
     sync._set('peer_genesis', _digest(rows, order))
@@ -132,8 +131,6 @@ def _setup(repo):
     if repo.sync is None and repo.conn.in_transaction:
         raise ValueError('Finish the current transaction before enabling sharing.')
     sync = repo.sync or SyncState(repo)
-    if sync.enabled:
-        raise ValueError('This file is linked to a coordinator. Migrate it before sharing with peers.')
     return sync
 
 
@@ -143,8 +140,6 @@ def share(repo, name, *, dataset_id=None):
         _uuid(dataset_id)
     sync = _setup(repo)
     with sync.muted(), repo.atomic():
-        if sync.enabled:
-            raise ValueError('This file is linked to a coordinator.')
         current = dataset(repo)
         if current:
             if dataset_id and current != dataset_id:
@@ -162,8 +157,6 @@ def join(repo, value):
     _validate_seed(value)
     sync = _setup(repo)
     with sync.muted(), repo.atomic():
-        if sync.enabled:
-            raise ValueError('This file is linked to a coordinator.')
         current = dataset(repo)
         if current:
             if current != value['dataset'] or genesis(repo) != _digest(value['snapshot'], value['order']):

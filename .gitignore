@@ -35,12 +35,7 @@ android/**/build/
 *.jks
 *.keystore
 
-# Private synchronization service configuration
-coordinator.json
-server.key
-server.crt
-service.lock
-coordinator.retired.json
+# Private device identities
 device-key.pem
 device-cert.pem
 identity.lock

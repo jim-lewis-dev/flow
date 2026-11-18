@@ -90,8 +90,43 @@ class MobileTests(unittest.TestCase):
         self.assertEqual((battery['confirmed'],battery['balance']), ('90','85'))
         graph=self.store.graph(dict(pairs=[['Battery','Wh']],basis='Including Pending'))
         self.assertEqual([p[1] for p in graph['series'][0]['points']], ['100','90','85'])
-        with self.assertRaisesRegex(ValueError,'starting balance'):
-            self.store.graph(dict(pairs=[['Laptop','Wh']]))
+        for combined in (False, True):
+            with self.subTest(combined=combined), self.assertRaisesRegex(ValueError,'starting balance'):
+                self.store.graph(dict(pairs=[['Battery','Wh'],['Laptop','Wh']],combined=combined))
+
+    def test_graph_adds_combined_balances_only_within_each_unit(self):
+        self.add(date='2026-10-01', amount='10')
+        self.add(date='2026-10-01', from_account='Tank', to_account='Reserve', units='L', amount='5')
+        self.add(date='2026-10-02', to_account='External', amount='7')
+        self.add(date='2026-10-02', from_account='Tank', to_account='External', units='L', amount='2')
+        anchors = [('Battery','Wh','100'), ('Laptop','Wh','40'),
+                   ('Tank','L','10'), ('Reserve','L','20')]
+        for name, units, amount in anchors:
+            self.store.dispatch('save_anchor',dict(name=name,units=units,
+                                opening_at='2026-10-01',opening_amount=amount))
+        args = dict(pairs=[[name,units] for name,units,_ in anchors],basis='Confirmed',
+                    start='2026-10-01',end='2026-10-02')
+        separate = self.store.graph(args)
+        self.assertEqual(self.store.graph({**args,'combined':False}), separate)
+        self.assertEqual({(s['name'],s['units']):[p[1] for p in s['points']]
+                          for s in separate['series']}, {
+            ('Battery','Wh'): ['100','90','83','83'],
+            ('Laptop','Wh'): ['40','50','50','50'],
+            ('Tank','L'): ['10','5','3','3'],
+            ('Reserve','L'): ['20','25','25','25'],
+        })
+        combined = self.store.dispatch('graph', {**args,'combined':True})
+        self.assertEqual(combined['start'], separate['start'])
+        self.assertEqual(combined['end'], separate['end'])
+        self.assertEqual(combined['end'], '2026-10-02 23:59:59')
+        self.assertEqual(combined['series'][:4], separate['series'])
+        self.assertEqual(len(combined['series']), 6)
+        self.assertEqual({(s['name'],s['units']):[p[1] for p in s['points']]
+                          for s in combined['series'][4:]}, {
+            ('Combined: Battery + Laptop','Wh'): ['140','140','133','133'],
+            ('Combined: Reserve + Tank','L'): ['30','30','28','28'],
+        })
+        self.assertEqual(self.store.graph(args), separate)
 
     def test_graph_date_only_end_includes_whole_day(self):
         self.add(date='2026-10-01 20:30', amount='10')
@@ -376,22 +411,17 @@ class MobileTests(unittest.TestCase):
         self.assertEqual(result['datasets'], ['camp.sqlite3'])
         self.assertEqual(result['flows'], [])
         self.assertEqual(result['undo'], '')
-        self.assertFalse(result['sync']['enabled'])
         self.assertFalse(self.store.path('flow').exists())
         self.store.dispatch('open_dataset', {'name': 'camp'})
         self.assertEqual(self.store.state()['flows'][0]['amount'], '8')
 
     def test_delete_last_file_stays_empty_and_can_create_again(self):
         self.add()
-        session = self.store.sync_session
         self.store.dispatch('delete_dataset', {'name': 'flow'})
         for action, args in [('init', {}), ('view', {'as_of': '2026-11-04'}), ('state', {})]:
             state = self.store.dispatch(action, args)['state']
             self.assertEqual(state['dataset'], '')
             self.assertEqual(state['datasets'], [])
-        self.assertNotEqual(self.store.sync_session, session)
-        self.assertEqual(self.store.sync_prepare(), {'enabled': False})
-        self.assertEqual(self.store.sync_accept({'session': session, 'response': {}}), {'ignored': True})
         with self.assertRaisesRegex(ValueError, 'Open or create'):
             self.add()
         self.store.close()
@@ -418,25 +448,6 @@ class MobileTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cannot be checked'):
             self.store.dispatch('delete_dataset', {'name': 'broken'})
         self.assertTrue(self.store.path('broken').exists())
-
-    def test_delete_refuses_unsent_and_conflicted_local_changes(self):
-        from flowledger.sync import SyncState
-        sync = SyncState(self.store.repo)
-        self.store.repo.sync = sync
-        sync.configure(dataset='shared', client='phone')
-        self.add()
-        self.assertTrue(sync.status()['pending'])
-        for conflict in (None, '{"message":"Changed on another device"}'):
-            self.store.repo.conn.execute('UPDATE sync_outbox SET conflict=?', (conflict,))
-            self.store.repo.conn.commit()
-            with self.assertRaisesRegex(ValueError, 'Sync this file'):
-                self.store.dispatch('delete_dataset', {'name': 'flow'})
-            self.assertEqual(len(self.store.repo.list_flows()), 1)
-            self.assertTrue(self.store.path('flow').exists())
-        self.store.dispatch('new_dataset', {'name': 'other'})
-        with self.assertRaisesRegex(ValueError, 'Sync this file'):
-            self.store.dispatch('delete_dataset', {'name': 'flow'})
-        self.assertEqual(self.store.dataset, 'other.sqlite3')
 
     def test_delete_failure_reopens_the_current_file_without_data_loss(self):
         original = self.add()

@@ -217,7 +217,7 @@ class NearbyPairingTests(unittest.TestCase):
             db.execute("DELETE FROM meta WHERE key='nearby_listener'")
         gui = self.node('gui', directory=owner.directory)
         self.assertFalse(gui.status()['owner'])
-        with self.assertRaisesRegex(ValueError, 'Restart other Flow windows'):
+        with self.assertRaisesRegex(ValueError, 'Close other Flow windows'):
             gui.nearby_open()
 
     def test_three_peers_pair_by_name_once_then_relay_offline_edits(self):

@@ -797,7 +797,7 @@ class Repository:
         In-memory repositories retain a temporary safety copy on disk as well.
         """
         from .peer_store import dataset
-        if dataset(self) or (self.sync is not None and self.sync.enabled):
+        if dataset(self):
             raise ValueError("A synchronized file cannot be replaced by a backup. Open the backup separately or join a new local copy.")
         if self.conn.in_transaction:
             raise ValueError("Finish the current write before restoring.")
@@ -811,7 +811,7 @@ class Repository:
         try:
             self._validate_database(source, allow_legacy=True)
             if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
-                shared = source.execute("SELECT value FROM sync_meta WHERE key IN ('dataset','peer_dataset')")
+                shared = source.execute("SELECT value FROM sync_meta WHERE key='peer_dataset'")
                 if any(json.loads(row[0]) for row in shared):
                     raise ValueError("A synchronized backup cannot replace this file. Open it separately or join a new local copy.")
             # Migrate a private snapshot, leaving the source backup unchanged.
@@ -821,6 +821,8 @@ class Repository:
             legacy = prepared.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION
             if legacy:
                 self._migrate_legacy(prepared)
+            from .sync import retire_settings
+            retire_settings(prepared)
             self._validate_database(prepared)
             stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             if self.path == ":memory:":
@@ -831,6 +833,12 @@ class Repository:
             self.backup(safety)
             recovered = self._save_legacy_forecasts(source, str(safety) + ".forecasts.json") if legacy else None
             prepared.backup(self.conn)
+            if self.sync is not None:
+                self.sync.close()
+                self.sync = None
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
+                from .sync import SyncState
+                SyncState(self)
             self.migration_backup_path = str(source_path) if legacy else None
             self.migration_forecasts_path = recovered
             self.conn.execute("PRAGMA foreign_keys = ON")

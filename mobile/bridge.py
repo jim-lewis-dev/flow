@@ -45,18 +45,30 @@ def required_hint(data):
     return text + ' required'
 
 
+def dataset_path(root, name):
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError('Enter a filename.')
+    name = name.strip()
+    if name in ('.', '..') or name.startswith('.') or any(c in name for c in '/\\\x00'):
+        raise ValueError('Use a filename, without folders.')
+    if not name.endswith('.sqlite3'):
+        name += '.sqlite3'
+    if len(name.encode('utf-8')) > 200:
+        raise ValueError('Use a shorter filename.')
+    return root / name
+
+
 class MobileStore:
     def __init__(self, root):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        from .peers import service
+        self.peers = service(self.root)
+        self._peer_version = None
         self.repo = None
         self.history = None
         self.dataset = self.dataset_name = None
         self._no_file = False
-        self.sync_session = uuid.uuid4().hex
-        self.sync_error = ''
-        self.sync_contacted = False
-        self.sync_more = False
         self.as_of = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.basis = 'Including Pending'
 
@@ -69,24 +81,28 @@ class MobileStore:
         self.dataset = self.dataset_name = None
 
     def path(self, name):
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError('Enter a filename.')
-        name = name.strip()
-        if name in ('.', '..') or name.startswith('.') or any(c in name for c in '/\\\x00'):
-            raise ValueError('Use a filename, without folders.')
-        if not name.endswith('.sqlite3'):
-            name += '.sqlite3'
-        if len(name.encode('utf-8')) > 200:
-            raise ValueError('Use a shorter filename.')
-        return self.root / name
+        return dataset_path(self.root, name)
 
     def open(self, name='flow', *, create=False):
-        target = self.path(name)
+        from .peers import key_path, file_key, file_label
+        target = self.path(name) if create else key_path(self.root, name)
         if create and target.exists():
             raise ValueError('A file with that name already exists.')
         if not create and not target.is_file():
             raise ValueError('That file is no longer available.')
-        self._open_target(target, target.name, target.name)
+        self._open_target(target, file_key(self.root, target), file_label(self.root, target))
+
+    def local_files(self):
+        from .peers import file_key, file_label
+        entries = []
+        for path in sorted(self.root.glob('*.sqlite3')):
+            if path.is_file() and not path.name.startswith('.'):
+                entries.append({'key': path.name, 'name': path.name, 'location': 'Local - on this phone'})
+        for path in sorted((self.root / '.shared-files').glob('*/*.sqlite3')):
+            if path.is_file() and not path.name.startswith('.') and re.fullmatch('[0-9a-f]{32}', path.parent.name):
+                entries.append({'key': file_key(self.root, path), 'name': file_label(self.root, path),
+                                'location': 'Shared copy - ' + path.parent.name[:10]})
+        return entries
 
     def _prepare_target(self, target, identity, display_name):
         # SQLite integrity and schema checks do not validate every stored value.
@@ -107,12 +123,9 @@ class MobileStore:
         candidate, history = self._prepare_target(target, identity, display_name)
         self.close()
         self.repo, self.history = candidate, history
+        self._peer_version = self.data_version()
         self.dataset, self.dataset_name = identity, display_name
         self._no_file = False
-        self.sync_session = uuid.uuid4().hex
-        self.sync_error = ''
-        self.sync_contacted = False
-        self.sync_more = False
 
     def document_path(self, key):
         if not isinstance(key, str) or not re.fullmatch(r'[0-9a-f]{64}', key):
@@ -132,27 +145,29 @@ class MobileStore:
             return {
                 'dataset': '', 'dataset_name': '',
                 'datasets': sorted(p.name for p in self.root.glob('*.sqlite3') if not p.name.startswith('.')),
+            'local_files': self.local_files(),
                 'flows': [], 'accounts': [], 'as_of': self.as_of, 'basis': self.basis,
                 'map_positions': {},
                 'vocabulary': {'accounts': [], 'units': [], 'categories': [],
                                'tags': [], 'names': [], 'statuses': list(STATUSES)},
-                'undo': '', 'redo': '', 'sync': {'enabled': False},
+                'undo': '', 'redo': '',
+                'device': self.peers.status(), 'peer_file': {},
             }
         return self._state_for(self.repo, self.history, self.dataset, self.dataset_name)
 
     def delete_dataset(self, name):
-        target = self.path(name)
+        from .peers import key_path, file_key
+        target = key_path(self.root, name)
         if target.is_symlink() or not target.is_file():
             raise ValueError('That local file is no longer available.')
-        # Inspect without opening a second writable repository or changing the
-        # current file. Pending operations include unresolved sync conflicts.
+        if any(f['key'] == file_key(self.root, target) for f in self.peers.status()['files']):
+            raise ValueError('Stop sharing this file before deleting its local copy.')
+        # Validate the selected file without changing it or the open ledger.
         try:
             with closing(sqlite3.connect(target.as_uri() + '?mode=ro', uri=True)) as check:
-                has_outbox = check.execute("SELECT 1 FROM sqlite_master WHERE name='sync_outbox'").fetchone()
-                if has_outbox and check.execute('SELECT 1 FROM sync_outbox LIMIT 1').fetchone():
-                    raise ValueError('Sync this file and resolve pending changes before deleting it.')
+                check.execute('SELECT name FROM sqlite_master LIMIT 1').fetchall()
         except sqlite3.DatabaseError as error:
-            raise ValueError('This file cannot be checked for unsent changes.') from error
+            raise ValueError('This file cannot be checked before deletion.') from error
         active = self.repo is not None and Path(self.repo.path) == target
         if active:
             self.close()
@@ -160,14 +175,11 @@ class MobileStore:
             target.unlink()
         except OSError:
             if active:
-                self.open(target.name)
+                self.open(file_key(self.root, target))
             raise
         if active:
             self.dataset = self.dataset_name = ''
             self._no_file = True
-            self.sync_session = uuid.uuid4().hex
-            self.sync_error = ''
-            self.sync_contacted = self.sync_more = False
         for suffix in ('-wal', '-shm', '-journal'):
             try:
                 target.with_name(target.name + suffix).unlink(missing_ok=True)
@@ -177,6 +189,11 @@ class MobileStore:
                 pass
 
     def _state_for(self, repo, history, identity, display_name):
+        from .revisions import read_snapshot
+        with read_snapshot(repo):
+            return self._snapshot_for(repo, history, identity, display_name)
+
+    def _snapshot_for(self, repo, history, identity, display_name):
         flows = sorted(repo.list_flows(), key=flow_sort_key)
         flows.sort(key=lambda f: normalize_date(f['date']), reverse=True)
         accounts = repo.list_accounts(referenced_only=True)
@@ -187,10 +204,13 @@ class MobileStore:
                 account[key + '_display'] = 'Unknown' if value is None else format_display(value, account['units'])
         for flow in flows:
             flow['amount_display'] = format_display(flow['amount'], flow['units'])
+        from .revisions import decorate
+        decorate(repo, flows, accounts)
         names = sorted({a['name'] for a in accounts}, key=str.casefold)
         return {
             'dataset': identity, 'dataset_name': display_name,
             'datasets': sorted(p.name for p in self.root.glob('*.sqlite3') if not p.name.startswith('.')),
+            'local_files': self.local_files(),
             'flows': flows, 'accounts': accounts, 'as_of': self.as_of, 'basis': self.basis,
             'map_positions': repo.load_map_positions(),
             'vocabulary': {
@@ -200,95 +220,68 @@ class MobileStore:
                 'statuses': list(STATUSES),
             },
             'undo': history.undo_label, 'redo': history.redo_label,
-            'sync': self.sync_status(repo),
+            'device': self.peers.status(), 'peer_file': self.peer_file(repo),
         }
 
-    def sync_status(self, repo=None):
-        repo = repo or self.repo
-        sync = getattr(repo, 'sync', None)
-        result = sync.status() if sync else {'enabled': False}
-        return {**result, 'error': self.sync_error, 'connected': self.sync_contacted, 'more': self.sync_more}
+    @staticmethod
+    def peer_file(repo):
+        from flowledger import peer_store
+        file_id = peer_store.dataset(repo)
+        return {'dataset': file_id, 'conflicts': peer_store.conflicts(repo)} if file_id else {}
 
-    def sync_prepare(self):
-        sync = getattr(self.repo, 'sync', None)
-        if not sync or not sync.status().get('enabled'):
-            return {'enabled': False}
-        if self.dataset.startswith('document:'):
-            # A file provider exchanges whole files. A live replica must remain
-            # local so external writeback cannot replace its pending edits.
-            raise ValueError('Join this synchronized file from Files to keep a local phone replica.')
-        return {'enabled': True, 'session': self.sync_session,
-                'configuration': sync.configuration(), 'request': sync.prepare_request()}
+    def data_version(self):
+        return self.repo.conn.execute('PRAGMA data_version').fetchone()[0] if self.repo else None
 
-    def sync_accept(self, args):
-        if args.get('session') != self.sync_session:
-            return {'ignored': True}
-        sync = getattr(self.repo, 'sync', None)
-        if not sync:
-            return {'ignored': True}
-        if args.get('error'):
-            self.sync_error = str(args['error'])
-            self.sync_contacted = False
-            self.sync_more = False
-            return {'state': self.state(), 'changed': False}
-        changed = sync.accept_response(args['response'])
-        self.sync_error = ''
-        self.sync_more = bool(args['response'].get('more', False))
-        self.sync_contacted = not self.sync_more
-        return {'state': self.state(), 'changed': changed}
+    def poll_peers(self):
+        # The peer service uses its own SQLite connections. Only redraw ledger
+        # data when commits from a different connection changed this view.
+        current = self.data_version()
+        if current != self._peer_version:
+            self._peer_version = current
+            return {'state': self.state()}
+        return {'device': self.peers.status()}
 
-    def sync_join(self, args):
-        from flowledger.sync import SyncState
-        from flowledger.sync_transport import parse_connection
-        configuration = parse_connection(json.dumps(args['configuration']))
-        target = self.path(args.get('name', ''))
-        existing = target.exists()
-        created = False
-        candidate = None
-        try:
-            if not existing:
-                # Android may forbid hardlinks, even inside the app's folder.
-                # Reserve the name without overwriting a concurrent creation;
-                # SQLite then commits the received records in one transaction.
-                try:
-                    with target.open('xb'):
-                        pass
-                except FileExistsError as error:
-                    raise ValueError('A file with that name already exists. Choose another name.') from error
-                created = True
-            candidate = Repository(target)
-            sync = getattr(candidate, 'sync', None)
-            if sync and sync.enabled:
-                raise ValueError('This file is already connected. Use Update connection.')
-            sync = sync or SyncState(candidate)
-            history = SessionHistory(candidate)
+    def share_peer_file(self, args):
+        if not self.repo or args.get('current') != self.dataset:
+            raise ValueError('The current file changed. Choose Share this file again.')
+        from flowledger import peer_store
+        from .peers import file_key, shared_path
+        external = self.dataset.startswith('document:')
+        label = self.dataset_name
+        node = self.peers.node()
+        target = Path(self.repo.path)
+        if external:
+            dataset = peer_store.dataset(self.repo) or str(uuid.uuid4())
+            if any(f['dataset'] == dataset for f in node.local_files()):
+                raise ValueError('This dataset already has a registered copy. Open the shared copy in Your files.')
+            target = shared_path(self.root, dataset, label)
+            target.parent.mkdir(mode=0o700, exist_ok=True, parents=True)
+            if list(target.parent.glob('*.sqlite3')):
+                raise ValueError('This dataset already has a phone copy. Open it in Your files.')
+            with target.open('xb'):
+                pass
             try:
-                # The shared engine accepts an empty or matching existing file
-                # and refuses different records. Validate the resulting view
-                # before committing, so a failed join preserves existing data.
-                with candidate.atomic():
-                    sync.configure(**configuration, client=uuid.uuid4().hex, seed=args['seed'])
-                    self._state_for(candidate, history, target.name, target.name)
-            finally:
-                history.close()
-            candidate.close()
-            candidate = None
-            self._open_target(target, target.name, target.name)
-            self.sync_contacted = True  # Joining follows a successful HTTPS seed fetch.
-        except BaseException:
-            if candidate:
-                candidate.close()
-                candidate = None
-            if created:
+                self.repo.backup(target)
+                with closing(Repository(target)) as copy:
+                    peer_store.share(copy, label, dataset_id=dataset)
+            except BaseException:
                 target.unlink(missing_ok=True)
-            raise
-        finally:
-            if candidate:
-                candidate.close()
+                raise
+        node.share(str(target), name=label)
+        self.open(file_key(self.root, target))
         return {'state': self.state()}
 
-    def save_flow(self, data, *, existing=False, baseline=None):
+    def save_flow(self, data, *, existing=False, baseline=None, revision=None):
+        # Read the baseline and apply the patch in one transaction: a peer
+        # worker can commit incoming changes through another SQLite connection.
+        return self.history.perform('Edit flow' if existing else 'Add flow',
+            lambda: self._write_flow(data, existing, baseline, revision))
+
+    def _write_flow(self, data, existing, baseline, revision):
+        from .revisions import check, FLOW_FIELDS
         data = dict(data)
+        if existing:
+            check(self.repo, 'flows', [data.get('flow_id', '')], revision, set(data) & FLOW_FIELDS.keys())
         if existing and baseline is not None:
             current = self.repo.get_flow(data.get('flow_id', ''))
             if current is None:
@@ -318,7 +311,7 @@ class MobileStore:
             data['amount'] = quantity_text(evaluate_quantity(data['amount']))
         except ValueError as error:
             raise ValueError('Amount: ' + str(error)) from error
-        return self.history.perform('Edit flow' if existing else 'Add flow', lambda: self.repo.save_flow(data))
+        return self.repo.save_flow(data)
 
     def install_document(self, key, display_name):
         """Replace one URI's working cache, never create a numbered dataset.
@@ -405,13 +398,17 @@ class MobileStore:
         end = normalize_date(args.get('end') or max(dates))
         if args.get('end') and normalize_flow_date(args['end']) == end[:10]:
             end = end[:10] + ' 23:59:59'
-        series = graph_timeline(accounts, flows, start, end, BASES[basis])
+        series = list(graph_timeline(accounts, flows, start, end, BASES[basis]).items())
+        if args.get('combined', False):
+            combined = graph_timeline(accounts, flows, start, end, BASES[basis], combined=True)
+            series.extend((('Combined: ' + ' + '.join(a['name'] for a in accounts if a['units'] == units), units), points)
+                          for (_, units), points in combined.items())
         return {
             'start': start, 'end': end,
             'series': [{'name': name, 'units': units,
                         'points': [[date, quantity_text(value), format_display(value, units)]
                                    for date, value in points]}
-                       for (name, units), points in series.items()],
+                       for (name, units), points in series],
         }
 
     def _experimental_selection(self, args):
@@ -524,6 +521,10 @@ class MobileStore:
         }
 
     def save_positions(self, args):
+        self.history.perform('Move account', lambda: self._write_positions(args))
+        return {'positions': self.repo.load_map_positions(), 'state': self.state()}
+
+    def _write_positions(self, args):
         # Drag responses may arrive after switching files. Never apply an old
         # dataset's positions to the newly opened file.
         if args.get('dataset') != self.dataset:
@@ -545,67 +546,81 @@ class MobileStore:
                     raise ValueError(name + ' moved on another device. Move it again from its received position.')
         positions = dict(before)
         positions.update(updates)
-        self.history.perform('Move account', lambda: self.repo.save_map_positions(positions))
-        return {'positions': self.repo.load_map_positions(), 'state': self.state()}
+        self.repo.save_map_positions(positions)
+
+    def _write_anchor(self, args):
+        from .revisions import check, ANCHOR_FIELDS
+        check(self.repo, 'account_balances', [args['name'].casefold(), args['units']],
+              args.get('revision'), set(args) & ANCHOR_FIELDS.keys())
+        account = self.repo.get_account(args['name'], args['units'])
+        if not account:
+            raise ValueError('This account and unit no longer exist.')
+        baseline = args.get('baseline')
+        if baseline is not None:
+            changes = {key: args[key] for key in ('opening_at', 'opening_amount') if key in args}
+            if not isinstance(baseline, dict) or set(changes) != set(baseline):
+                raise ValueError('Invalid starting balance edit.')
+            for key, value in changes.items():
+                original = account[key] if account[key] is not None else ''
+                if original != baseline[key] and original != value:
+                    raise ValueError('The starting balance changed on another device. Reopen this account before editing it.')
+            args = {**account, **changes}
+            if args['opening_amount'] is None:
+                args['opening_amount'] = ''
+        try:
+            when = normalize_date(args['opening_at'])
+        except ValueError as error:
+            raise ValueError('Starting date: ' + str(error)) from error
+        try:
+            amount = (quantity_text(evaluate_quantity(args['opening_amount']))
+                      if args['opening_amount'].strip() else None)
+        except ValueError as error:
+            raise ValueError('Starting balance: ' + str(error)) from error
+        self.repo.save_account(
+            account['name'], amount, when, account['units'])
 
     def dispatch(self, action, args):
         if self.repo is None and action not in {
                 'init', 'state', 'view', 'new_dataset', 'open_dataset', 'delete_dataset',
-                'camp', 'install_document', 'open_document', 'join_sync', 'sync_join',
-                'sync_prepare', 'sync_accept', 'sync', 'normalize_input'}:
+                'peer_poll', 'peer_pair', 'peer_catalog', 'peer_join', 'peer_forget',
+                'camp', 'install_document', 'open_document', 'normalize_input'}:
             raise ValueError('Open or create a file first.')
         if action == 'init':
             if args.get('dataset') == '' and not self.repo:
                 self._no_file = True
             if not self.repo and not self._no_file:
                 name = args.get('dataset') or 'flow.sqlite3'
-                path = self.path(name)
+                from .peers import key_path
+                path = key_path(self.root, name)
                 # A missing remembered file is an error, not a new blank file.
-                empty = not any(self.root.glob('*.sqlite3')) and not any(
+                empty = not self.local_files() and not any(
                     (self.root / '.documents').glob('*.sqlite3'))
                 self.open(name, create=empty and name in ('flow', 'flow.sqlite3') and not path.exists())
-        elif action == 'sync_prepare':
-            return self.sync_prepare()
-        elif action == 'sync_accept':
-            return self.sync_accept(args)
-        elif action == 'sync_join':
-            return self.sync_join(args)
-        elif action == 'sync_reconnect':
-            from flowledger.sync_transport import parse_connection
-            if args.get('session') != self.sync_session:
-                raise ValueError('The active file changed. Update the connection again.')
-            sync = getattr(self.repo, 'sync', None)
-            if not sync or not sync.enabled or self.dataset.startswith('document:'):
-                raise ValueError('Choose a synchronized local file first.')
-            sync.configure(**parse_connection(args['configuration']))
-            self.sync_error = ''
-            self.sync_contacted = False
-            self.sync_more = False
-        elif action == 'reconnect_sync':
-            session = self.sync_session
-            response = json.loads(network(json.dumps({'action': 'bootstrap', 'connection': args['connection']})))
-            if response.get('error'):
-                raise ValueError(response['error'])
-            return self.dispatch('sync_reconnect', {'session': session, **response})
-        elif action == 'sync_resolve':
-            sync = getattr(self.repo, 'sync', None)
-            if not sync:
-                raise ValueError('This file is not synchronized.')
-            sync.resolve(args['operation_id'], choice=args['choice'])
-            self.sync_error = ''
-        elif action == 'sync':
-            # Development harness. Android performs HTTP on a separate executor.
-            prepared = self.sync_prepare()
-            if not prepared.get('enabled'):
+        elif action == 'peer_poll':
+            return self.poll_peers()
+        elif action == 'peer_share':
+            return self.share_peer_file(args)
+        elif action == 'peer_unshare':
+            if not self.repo or args.get('current') != self.dataset:
+                raise ValueError('The current file changed. Select it again.')
+            current = self.peer_file(self.repo)
+            if not current or not any(f['dataset'] == current['dataset'] and f['key'] == self.dataset
+                                      for f in self.peers.status()['files']):
+                raise ValueError('This file is not shared from this phone.')
+            self.peers.node().unshare(current['dataset'])
+        elif action == 'peer_resolve':
+            if not self.repo or args.get('current') != self.dataset:
+                raise ValueError('The current file changed. Review the conflict again.')
+            from flowledger import peer_store
+            if not peer_store.resolve(self.repo, args['conflict'], args['choice']):
+                raise ValueError('This conflict has changed. Review the current choices.')
+        elif action in ('peer_pair', 'peer_catalog', 'peer_join', 'peer_forget'):
+            # Native Android handles LAN calls outside the SQLite UI worker.
+            result = self.peers.call(action, args)
+            if action == 'peer_join':
+                self.open(result['name'])
                 return {'state': self.state()}
-            response = json.loads(network(json.dumps({'action': 'exchange', **prepared})))
-            return self.sync_accept({'session': prepared['session'], **response})
-        elif action == 'join_sync':
-            # Development harness mirrors the native two-phase join.
-            response = json.loads(network(json.dumps({'action': 'bootstrap', 'connection': args['connection']})))
-            if response.get('error'):
-                raise ValueError(response['error'])
-            return self.sync_join({'name': args['name'], **response})
+            return result
         elif action == 'new_dataset':
             self.open(args.get('name', ''), create=True)
         elif action == 'open_dataset':
@@ -619,7 +634,7 @@ class MobileStore:
                 create_camp(target)
             self.open(target.name)
         elif action in ('add_flow', 'update_flow'):
-            record = self.save_flow(args['flow'], existing=action == 'update_flow', baseline=args.get('baseline'))
+            record = self.save_flow(args['flow'], existing=action == 'update_flow', baseline=args.get('baseline'), revision=args.get('revision'))
             return {'state': self.state(), 'record': record}
         elif action == 'copy_flow':
             old = self.repo.get_flow(args['flow_id'])
@@ -629,34 +644,13 @@ class MobileStore:
             record = self.history.perform('Copy flow', lambda: self.repo.save_flow(old))
             return {'state': self.state(), 'record': record}
         elif action == 'delete_flow':
-            self.history.perform('Delete flow', lambda: self.repo.delete_flow(args['flow_id']))
+            def remove():
+                from .revisions import check, FLOW_FIELDS
+                check(self.repo, 'flows', [args['flow_id']], args.get('revision'), FLOW_FIELDS)
+                return self.repo.delete_flow(args['flow_id'])
+            self.history.perform('Delete flow', remove)
         elif action == 'save_anchor':
-            account = self.repo.get_account(args['name'], args['units'])
-            if not account:
-                raise ValueError('This account and unit no longer exist.')
-            baseline = args.get('baseline')
-            if baseline is not None:
-                changes = {key: args[key] for key in ('opening_at', 'opening_amount') if key in args}
-                if not isinstance(baseline, dict) or set(changes) != set(baseline):
-                    raise ValueError('Invalid starting balance edit.')
-                for key, value in changes.items():
-                    original = account[key] if account[key] is not None else ''
-                    if original != baseline[key] and original != value:
-                        raise ValueError('The starting balance changed on another device. Reopen this account before editing it.')
-                args = {**account, **changes}
-                if args['opening_amount'] is None:
-                    args['opening_amount'] = ''
-            try:
-                when = normalize_date(args['opening_at'])
-            except ValueError as error:
-                raise ValueError('Starting date: ' + str(error)) from error
-            try:
-                amount = (quantity_text(evaluate_quantity(args['opening_amount']))
-                          if args['opening_amount'].strip() else None)
-            except ValueError as error:
-                raise ValueError('Starting balance: ' + str(error)) from error
-            self.history.perform('Edit starting balance', lambda: self.repo.save_account(
-                account['name'], amount, when, account['units']))
+            self.history.perform('Edit starting balance', lambda: self._write_anchor(args))
         elif action == 'view':
             when = normalize_date(args.get('as_of', self.as_of))
             basis = args.get('basis', self.basis)
@@ -711,20 +705,6 @@ def request(root, payload):
         data = json.loads(payload)
         result = _store.dispatch(data['action'], data.get('args', {}))
         return json.dumps({'ok': True, 'result': result}, ensure_ascii=False)
-    except (ValueError, KeyError, TypeError, sqlite3.Error, OSError) as error:
+    except (ValueError, KeyError, TypeError, RuntimeError, sqlite3.Error, OSError) as error:
         return json.dumps({'ok': False, 'error': str(error)}, ensure_ascii=False)
 
-
-def network(payload):
-    """HTTP only: safe on a separate native worker; never touches SQLite."""
-    try:
-        from flowledger.sync_transport import parse_connection, fetch_bootstrap, exchange
-        data = json.loads(payload)
-        if data['action'] == 'bootstrap':
-            configuration = parse_connection(data['connection'])
-            return json.dumps({'configuration': configuration, 'seed': fetch_bootstrap(configuration)})
-        if data['action'] == 'exchange':
-            return json.dumps({'response': exchange(data['configuration'], data['request'])})
-        raise ValueError('Unknown synchronization request.')
-    except (ValueError, KeyError, TypeError, OSError) as error:
-        return json.dumps({'error': str(error)})

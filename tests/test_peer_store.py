@@ -11,7 +11,7 @@ import uuid
 from flowledger.core import Repository
 from flowledger.history import SessionHistory
 from flowledger import peer_store as store
-from flowledger.sync import SyncState, SyncConflict, _key
+from flowledger.sync import SyncConflict, _key
 
 
 class PeerStoreTests(unittest.TestCase):
@@ -149,15 +149,8 @@ class PeerStoreTests(unittest.TestCase):
             history.undo()
         self.assertNotEqual(self.row_at(local)['name'], original['name'])
 
-    def test_v1_unreachable_old_client_block_and_private_backup_restore(self):
-        self.assertFalse(self.a.sync.enabled)
-        self.assertFalse(self.a.sync.status()['enabled'])
+    def test_event_capture_guard_and_private_backup_restore(self):
         self.assertTrue(self.a.sync.tracking)
-        self.assertEqual(self.a.sync.configuration()['endpoint'], '')
-        with self.assertRaisesRegex(ValueError, 'not configured'):
-            self.a.sync.prepare_request()
-        with self.assertRaisesRegex(ValueError, 'coordinator'):
-            self.a.sync.configure(dataset='legacy')
         with closing(sqlite3.connect(self.a.path)) as old:
             old.create_function('flow_sync_write_allowed', 0, lambda: 1)
             with self.assertRaisesRegex(sqlite3.OperationalError, 'flow_peer_write_allowed'):
@@ -171,12 +164,6 @@ class PeerStoreTests(unittest.TestCase):
             private.restore(backup)
         with self.assertRaisesRegex(ValueError, 'synchronized file'):
             self.a.restore(private.path)
-        v1 = SyncState(private)
-        v1.configure(dataset='legacy')
-        with self.assertRaisesRegex(ValueError, 'coordinator'):
-            store.share(private, 'reject')
-        with self.assertRaisesRegex(ValueError, 'coordinator'):
-            store.join(private, self.seed)
 
     def test_failed_join_no_overwrite_and_seed_validation(self):
         c = self.repo('c')

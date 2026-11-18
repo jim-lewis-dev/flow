@@ -11,11 +11,20 @@ const required=[['date','Date'],['to_account','To'],['from_account','From'],['am
 const filterDefs=[['from_account','From','accounts'],['to_account','To','accounts'],['units','Units','units'],['status','Status','statuses'],['category','Categories','categories'],['tags','Tags','tags']];
 const filters=Object.fromEntries(filterDefs.map(([k])=>[k,new Set()]));
 let state=null, page='flows', editing=null, draft=null, formTail=Promise.resolve(true), submitted='', pickerConfig=null, anchorRecord=null, adding=false, formGeneration=0, fileBusy=false;
-let editorBase=null, anchorBase=null;
+let editorBase=null, anchorBase=null, flowRevision=null, anchorRevision=null;
+// Refresh tokens only for values the form actually redisplayed. A pending
+// amount still belongs to its original unit, even if the network refreshed.
+function advanceRevision(previous,next,shown,all=false){
+  if(all)return next?{...next}:null;
+  if(!previous||!next||previous.dataset!==next.dataset||previous.row!==next.row||previous.__row__!==next.__row__)return previous;
+  const copy={...previous};
+  for(const f of shown){if(Object.prototype.hasOwnProperty.call(next,f))copy[f]=next[f];else delete copy[f];}
+  return copy;
+}
 let deletingFile=null;
 const queuedFlowFields=new Map(), queuedAnchorFields=new Map();
 let syncBusy=false, syncPaused=false, syncTimer=null, syncAgain=false;
-const writeActions=new Set(['add_flow','update_flow','copy_flow','delete_flow','save_anchor','save_positions','undo','redo','sync_resolve']);
+const writeActions=new Set(['add_flow','update_flow','copy_flow','delete_flow','save_anchor','save_positions','undo','redo','peer_resolve']);
 let graphPairs=[], graphInitialized=false, rangeEdited=false, graphGeneration=0, graphData=null, zoom={lo:0,hi:1};
 const pending=new Map(), session=String(Date.now())+'-'+Math.random(); let sequence=0, noticeTimer;
 const localNow=()=>{ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}:${String(d.getSeconds()).padStart(2,'0')}`; };
@@ -23,12 +32,19 @@ const blank=()=>({date:localNow().slice(0,10),name:'',from_account:'',to_account
 
 window.flowResponse=(id,response)=>{ const p=pending.get(id); if(!p){if(response.ok&&response.result?.state)accept(response.result);else if(!response.ok)notice(response.error,true);return;} pending.delete(id); if(response.ok)p.resolve(response.result);else p.reject(new Error(response.error||'The operation could not be completed.')); };
 function api(action,args={}) {
-  const payload=JSON.stringify({action,args});
+  const payload=JSON.stringify({action,args}), deviceEpoch=peerDeviceEpoch;
   let response;
   if(window.FlowNative) response=new Promise((resolve,reject)=>{const id=session+'-'+String(++sequence);pending.set(id,{resolve,reject});window.FlowNative.request(id,payload);});
   // Development harness only; the Android host always uses the local bridge.
   else response=fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:payload}).then(r=>r.json()).then(r=>{if(!r.ok)throw new Error(r.error);return r.result;});
-  return response.then(result=>{if(writeActions.has(action))scheduleSync(0);return result;});
+  return response.then(result=>{
+    // A poll started before Forget must not restore the forgotten row or its error.
+    if(result&&deviceEpoch!==peerDeviceEpoch&&state?.device){
+      if(result.device)result.device=state.device;
+      if(result.state?.device)result.state.device=state.device;
+    }
+    if(writeActions.has(action))scheduleSync(0);return result;
+  });
 }
 function notice(message,error=false){clearTimeout(noticeTimer);$('notice').textContent=message;$('notice').classList.toggle('error-notice',error);$('notice').hidden=false;noticeTimer=setTimeout(()=>$('notice').hidden=true,error?9000:3500);}
 function setError(id,message){$(id).textContent=message;$(id).hidden=!message;}
@@ -69,6 +85,91 @@ function bindDateInput(id, commit, report=message=>notice(message,true)) {
 }
 const displayDate=value=>value.endsWith(' 00:00:00')?value.slice(0,10):value;
 
+// Editable choices live inside the dialog so they also work in Android WebView.
+const flowChoices=(()=>{
+  let active=null,dataset=null;
+  const controls=[];
+  function close(){
+    if(!active)return false;
+    const visible=!active.list.hidden;
+    active.list.hidden=true;active.input.setAttribute('aria-expanded','false');
+    active.input.removeAttribute('aria-activedescendant');active=null;return visible;
+  }
+  function highlight(control,index){
+    control.index=index;
+    [...control.list.children].forEach((row,i)=>row.setAttribute('aria-selected',String(i===index)));
+    if(index<0)control.input.removeAttribute('aria-activedescendant');
+    else {const row=control.list.children[index];control.input.setAttribute('aria-activedescendant',row.id);row.scrollIntoView({block:'nearest'});}
+  }
+  function choose(control,value){
+    const input=control.input;
+    if(input.dataset.field==='tags'){
+      const comma=input.value.lastIndexOf(',');
+      input.value=comma<0?value:input.value.slice(0,comma+1)+' '+value;
+    }else input.value=value;
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+    close();
+    input.dispatchEvent(new Event('change',{bubbles:true}));
+  }
+  function draw(control){
+    const query=control.query.toLocaleLowerCase();
+    const values=control.values.filter(value=>value.toLocaleLowerCase().includes(query));
+    const signature=JSON.stringify(values);
+    // Background sync must not replace a row while the user is touching it.
+    if(signature!==control.signature){
+      control.signature=signature;control.matches=values;
+      control.list.replaceChildren(...values.map((value,index)=>{
+        const row=el('button','flow-choice',value);row.type='button';row.tabIndex=-1;
+        row.id=control.list.id+'-'+index;row.setAttribute('role','option');row.setAttribute('aria-selected','false');
+        row.addEventListener('pointerdown',event=>event.preventDefault());
+        row.addEventListener('click',event=>{event.preventDefault();choose(control,value);});
+        return row;
+      }));
+      highlight(control,-1);
+    }
+    control.list.hidden=!values.length;
+    control.input.setAttribute('aria-expanded',String(values.length>0));
+  }
+  function open(control,query=''){
+    if(active!==control){close();active=control;highlight(control,-1);}
+    control.query=query;draw(control);
+  }
+  for(const input of document.querySelectorAll('[data-choices]')){
+    const wrapper=el('div','flow-combobox'),list=el('div','flow-choices');
+    const label=input.parentElement.firstChild.textContent.trim();
+    list.id=input.id+'-choices';list.hidden=true;list.setAttribute('role','listbox');
+    list.setAttribute('aria-label',label+' choices');input.setAttribute('aria-label',label);
+    input.before(wrapper);wrapper.append(input,list);
+    input.setAttribute('role','combobox');input.setAttribute('aria-autocomplete','list');
+    input.setAttribute('aria-haspopup','listbox');input.setAttribute('aria-controls',list.id);input.setAttribute('aria-expanded','false');
+    const control={input,list,wrapper,values:[],matches:[],query:'',index:-1,signature:null};controls.push(control);
+    input.addEventListener('focus',()=>open(control));
+    input.addEventListener('click',()=>open(control));
+    input.addEventListener('input',()=>{
+      highlight(control,-1);
+      open(control,(input.dataset.field==='tags'?input.value.split(',').at(-1):input.value).trim());
+    });
+    input.addEventListener('blur',()=>{if(active===control)close();});
+    input.addEventListener('keydown',event=>{
+      if(event.isComposing)return;
+      if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();if(active!==control)open(control);
+        if(control.matches.length){const step=event.key==='ArrowDown'?1:-1;highlight(control,control.index<0?(step>0?0:control.matches.length-1):(control.index+step+control.matches.length)%control.matches.length);}
+      }else if(event.key==='Escape'&&active===control){if(close()){event.preventDefault();event.stopImmediatePropagation();}}
+      else if(event.key==='Enter'&&active===control&&control.index>=0){event.preventDefault();event.stopImmediatePropagation();choose(control,control.matches[control.index]);}
+    },true);
+  }
+  document.addEventListener('pointerdown',event=>{if(active&&!active.wrapper.contains(event.target))close();});
+  return {close,refresh(){
+    if(dataset!==state.dataset){close();dataset=state.dataset;}
+    for(const control of controls){
+      const values=state.vocabulary[control.input.dataset.choices]||[];
+      control.values=control.input.dataset.field==='category'?[...new Set(['Uncategorized',...values])]:values;
+    }
+    if(active)draw(active);
+  }};
+})();
+
 function hint(data){const missing=required.filter(([k])=>!String(data[k]??'').trim()).map(([,n])=>n);return missing.length===0?'':(missing.length===1?missing[0]:missing.length===2?missing.join(' and '):missing.slice(0,-1).join(', ')+', and '+missing.at(-1))+' required';}
 
 function render(){
@@ -82,9 +183,7 @@ function render(){
   document.querySelectorAll('[data-page]').forEach(n=>n.disabled=!state.dataset&&n.dataset.page!=='files');
   if(!state.dataset)navigate('files');
   for(const [key,,vocab] of filterDefs)for(const selected of filters[key])if(!state.vocabulary[vocab].includes(selected))filters[key].delete(selected);
-  for(const [id,values] of [['account-options',state.vocabulary.accounts],['unit-options',state.vocabulary.units],['category-options',[...new Set(['Uncategorized',...state.vocabulary.categories])]],['tag-options',state.vocabulary.tags],['names',state.vocabulary.names]]){
-    $(id).replaceChildren(...values.map(value=>{const n=el('option');n.value=value;return n;}));
-  }
+  flowChoices.refresh();
   renderFlows();renderAccounts();renderFiles();
   if(page==='graphs')loadGraph();
   experimental.changed();
@@ -122,19 +221,19 @@ function renderAccounts(){
   if(!state.accounts.length)$('account-list').append(el('div','empty','Accounts appear when a flow references them.'));
 }
 function renderFiles(){
-  renderSync();
+  renderPeerFile();
   $('file-name').textContent=state.dataset_name||state.dataset||'No file open';
   $('file-location').textContent=state.dataset?(state.file_location||'On this phone - Flow files'):'Open, create, or join a file.';
-  const files=state.files||state.datasets.map(name=>({key:name,name,location:'On this phone'}));
+  const files=state.files||state.local_files||state.datasets.map(name=>({key:name,name,location:'On this phone'}));
   files.sort((a,b)=>a.name.localeCompare(b.name)||a.location.localeCompare(b.location));
   $('dataset-list').replaceChildren(...files.map(file=>{
     const active=file.key===state.dataset,row=el('div','dataset-row'),b=el('button','dataset-item'+(active?' active':'')),label=el('span','file-label');
     label.append(el('span','',file.name),el('small','muted',file.location));b.append(label,el('span','',active?'Open':'>'));
     b.disabled=fileBusy;b.onclick=()=>switchDataset(file.key.startsWith('document:')?'open_document':'open_dataset',file.key.startsWith('document:')?{key:file.key}:{name:file.key}).catch(()=>{});row.append(b);
-    if(!file.key.startsWith('document:')){
+    if(!file.key.startsWith('document:')&&!(state.device?.files||[]).some(f=>f.key===file.key)){
       const remove=el('button','text-button danger delete-dataset','Delete');
       remove.setAttribute('aria-label','Delete '+file.name);remove.disabled=fileBusy;
-      remove.onclick=()=>{deletingFile=file;setError('delete-file-error','');$('delete-file-message').textContent=`Delete ${file.name} from this phone? Other devices are unchanged. This cannot be undone.`;$('delete-file-confirm').showModal();};
+      remove.onclick=()=>{deletingFile=file;setError('delete-file-error','');$('delete-file-message').textContent=`Delete ${file.name} from this phone? Other devices keep only edits they already received. This cannot be undone.`;$('delete-file-confirm').showModal();};
       row.append(remove);
     }
     return row;
@@ -143,14 +242,14 @@ function renderFiles(){
   fileControls();
 }
 async function switchDataset(action,args={}){return fileAction(action,args);}
-function resetView(){editorBase=null;anchorBase=null;queuedFlowFields.clear();queuedAnchorFields.clear();experimental.reset();formGeneration++;draft=null;editing=null;submitted='';$('search').value='';Object.values(filters).forEach(s=>s.clear());graphPairs=[];graphInitialized=false;rangeEdited=false;zoom={lo:0,hi:1};}
-function navigate(next){if(state&&!state.dataset)next='files';page=next;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('active',n.id===page));document.querySelectorAll('[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));window.scrollTo(0,0);if(page==='graphs')loadGraph();experimental.setActive(page==='experimental');}
+function resetView(){editorBase=null;anchorBase=null;queuedFlowFields.clear();queuedAnchorFields.clear();experimental.reset();formGeneration++;draft=null;editing=null;submitted='';$('search').value='';Object.values(filters).forEach(s=>s.clear());graphPairs=[];graphInitialized=false;rangeEdited=false;$('graph-combined').checked=false;zoom={lo:0,hi:1};}
+function navigate(next){if(state&&!state.dataset)next='files';if(next!=='files')nearbyStop();page=next;document.querySelectorAll('.page').forEach(n=>n.classList.toggle('active',n.id===page));document.querySelectorAll('[data-page]').forEach(n=>n.classList.toggle('active',n.dataset.page===page));window.scrollTo(0,0);if(page==='graphs')loadGraph();experimental.setActive(page==='experimental');}
 document.querySelectorAll('[data-page]').forEach(n=>n.onclick=()=>navigate(n.dataset.page));
 
 function formData(){const d=Object.fromEntries(fields.map(f=>[f,$('f-'+f).value]));d.tags=d.tags.split(',').map(s=>s.trim()).filter(Boolean);if(editing)d.flow_id=editing;return d;}
-function updateHint(){const data=formData(),defaults=blank();const changed=fields.some(f=>JSON.stringify(data[f])!==JSON.stringify(defaults[f]));$('clear-flow').disabled=adding||(!editing&&!changed);const missing=hint(data);$('required-hint').textContent=missing||(editing?'Edits save automatically.':'Ready to add');$('add-flow').disabled=adding||!!editing||!!missing;$('existing-actions').hidden=!editing;}
-function fillForm(data){for(const f of fields)$('f-'+f).value=f==='tags'?data.tags.join(', '):data[f]??'';$('f-calendar').value=data.date.slice(0,10);updateHint();}
-function openEditor(record=null){if(!state?.dataset)return;formGeneration++;editing=record?.flow_id||null;editorBase=record?plain(record):null;queuedFlowFields.clear();const data=record?plain(record):(draft||blank());fillForm(data);submitted=editing?JSON.stringify(data):'';$('editor-title').textContent=editing?'Edit Flow':'Add Flow';setError('form-error','');$('editor').showModal();$('editor').querySelector('.sheet-body').scrollTop=0;}
+function updateHint(){const data=formData(),defaults=blank();const changed=fields.some(f=>JSON.stringify(data[f])!==JSON.stringify(defaults[f]));$('clear-flow').disabled=adding||(!editing&&!changed);const missing=hint(data);$('required-hint').textContent=editing?'Edits save automatically.':missing||'Ready to add';$('flow-buttons').hidden=!!editing;$('add-flow').disabled=adding||!!editing||!!missing;$('existing-actions').hidden=!editing;}
+function fillForm(data){flowChoices.close();for(const f of fields)$('f-'+f).value=f==='tags'?data.tags.join(', '):data[f]??'';$('f-calendar').value=data.date.slice(0,10);updateHint();}
+function openEditor(record=null){if(!state?.dataset)return;formGeneration++;editing=record?.flow_id||null;editorBase=record?plain(record):null;flowRevision=record?.edit_revision||null;queuedFlowFields.clear();const data=record?plain(record):(draft||blank());fillForm(data);submitted=editing?JSON.stringify(data):'';$('editor-title').textContent=editing?'Edit Flow':'Add Flow';setError('form-error','');$('editor').showModal();$('editor').querySelector('.sheet-body').scrollTop=0;}
 function stash(){if(!editing)draft=formData();updateHint();}
 function commitField(field=null){
   if(!editing){stash();
@@ -170,8 +269,10 @@ function commitField(field=null){
     if(generation!==formGeneration)return false;
     const baseline=Object.fromEntries(changed.map(f=>[f,editorBase[f]]));
     try{
-      const result=await api('update_flow',{flow:{flow_id:recordId,...values},baseline});
+      const result=await api('update_flow',{flow:{flow_id:recordId,...values},baseline,revision:flowRevision});
       if(generation===formGeneration){
+        const shown=result.state.flows.find(r=>r.flow_id===recordId);
+        if(shown)flowRevision=advanceRevision(flowRevision,shown.edit_revision,changed.filter(f=>JSON.stringify(result.record[f])===JSON.stringify(shown[f])));
         for(const f of changed){
           editorBase[f]=result.record[f];
           if(JSON.stringify(queuedFlowFields.get(f))===JSON.stringify(values[f]))queuedFlowFields.delete(f);
@@ -193,17 +294,17 @@ function commitField(field=null){
 for(const f of fields){
   $('f-'+f).addEventListener('input',stash);
   $('f-'+f).addEventListener('change',()=>commitField(f));
-  $('f-'+f).addEventListener('keydown',e=>{if(e.key==='Enter'&&f!=='notes'){e.preventDefault();commitField(f);$('f-'+fields[Math.min(fields.indexOf(f)+1,fields.length-1)]).focus();}});
+  $('f-'+f).addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing&&f!=='notes'){e.preventDefault();commitField(f);$('f-'+fields[Math.min(fields.indexOf(f)+1,fields.length-1)]).focus();}});
 }
-async function closeEditor(){if(await commitField())$('editor').close();}
+async function closeEditor(){flowChoices.close();if(await commitField())$('editor').close();}
 bind('editor-close','click',closeEditor);
 $('editor').addEventListener('cancel',event=>{event.preventDefault();closeEditor();});
 connectCalendar('f-date','f-calendar');
 bind('clear-flow','click',async()=>{await formTail;formGeneration++;editing=null;editorBase=null;queuedFlowFields.clear();draft=blank();submitted='';fillForm(draft);$('editor-title').textContent='Add Flow';setError('form-error','');});
 bind('add-open','click',()=>openEditor());
 bind('add-flow','click',async()=>{if(adding)return;const data=formData();adding=true;updateHint();try{accept(await api('add_flow',{flow:data}));formGeneration++;draft=null;fillForm(blank());$('editor').close();notice('Flow added.');}catch(e){setError('form-error',e.message);}finally{adding=false;updateHint();}});
-bind('copy-flow','click',async()=>{if(!await commitField())return;const r=await act('copy_flow',{flow_id:editing});editing=r.record.flow_id;editorBase=plain(r.record);queuedFlowFields.clear();submitted=JSON.stringify(plain(r.record));fillForm(r.record);notice('Copy created. Edits apply to this copy.');});
-bind('delete-flow','click',async()=>{await formTail;await act('delete_flow',{flow_id:editing});editing=null;submitted='';$('editor').close();notice('Flow deleted. Undo is available.');});
+bind('copy-flow','click',async()=>{if(!await commitField())return;const r=await act('copy_flow',{flow_id:editing});editing=r.record.flow_id;editorBase=plain(r.record);flowRevision=r.state.flows.find(f=>f.flow_id===editing)?.edit_revision||null;queuedFlowFields.clear();submitted=JSON.stringify(plain(r.record));fillForm(r.record);notice('Copy created. Edits apply to this copy.');});
+bind('delete-flow','click',async()=>{await formTail;await act('delete_flow',{flow_id:editing,revision:flowRevision});editing=null;submitted='';$('editor').close();notice('Flow deleted. Undo is available.');});
 
 function openPicker(title,values,selection,onChange,allowAll=false){pickerConfig={title,values,selection,onChange,allowAll};$('picker-title').textContent=title;$('picker-search').value='';renderPicker();$('picker').showModal();}
 function renderPicker(){const c=pickerConfig,q=$('picker-search').value.toLocaleLowerCase();const nodes=[];
@@ -215,7 +316,7 @@ bind('picker-search','input',renderPicker);bind('picker-done','click',()=>$('pic
 bind('search','input',renderFlows);bind('reset','click',()=>{$('search').value='';Object.values(filters).forEach(s=>s.clear());renderFlows();});
 for(const action of ['undo','redo'])bind(action,'click',async()=>{await formTail;await act(action);});
 bindDateInput('as-of',()=>act('view',{as_of:$('as-of').value}));bind('basis','change',()=>act('view',{basis:$('basis').value}));
-function openAnchor(a){anchorRecord=a;anchorBase={opening_at:a.opening_at,opening_amount:a.opening_amount??''};queuedAnchorFields.clear();$('anchor-title').textContent=`${a.name} / ${a.units}`;$('anchor-date').value=displayDate(a.opening_at);$('anchor-amount').value=a.opening_amount??'';setError('anchor-error','');$('anchor').showModal();}
+function openAnchor(a){anchorRecord=a;anchorRevision=a.edit_revision||null;anchorBase={opening_at:a.opening_at,opening_amount:a.opening_amount??''};queuedAnchorFields.clear();$('anchor-title').textContent=`${a.name} / ${a.units}`;$('anchor-date').value=displayDate(a.opening_at);$('anchor-amount').value=a.opening_amount??'';setError('anchor-error','');$('anchor').showModal();}
 let anchorTail=Promise.resolve();
 function saveAnchor(){
   const a=anchorRecord;if(!a)return Promise.resolve(true);
@@ -227,9 +328,9 @@ function saveAnchor(){
   anchorTail=anchorTail.then(async()=>{
     const baseline=Object.fromEntries(changed.map(f=>[f,anchorBase[f]]));
     try{
-      const result=await api('save_anchor',{name:a.name,units:a.units,...values,baseline});
+      const result=await api('save_anchor',{name:a.name,units:a.units,...values,baseline,revision:anchorRevision});
       const current=result.state.accounts.find(c=>c.name===a.name&&c.units===a.units);
-      if(anchorRecord===a&&current){for(const f of changed){anchorBase[f]=current[f]??'';if(queuedAnchorFields.get(f)===values[f])queuedAnchorFields.delete(f);const input=$(f==='opening_at'?'anchor-date':'anchor-amount');if(input.value===values[f])input.value=f==='opening_at'?displayDate(anchorBase[f]):anchorBase[f];}setError('anchor-error','');}
+      if(anchorRecord===a&&current){anchorRevision=advanceRevision(anchorRevision,current.edit_revision,changed);for(const f of changed){anchorBase[f]=current[f]??'';if(queuedAnchorFields.get(f)===values[f])queuedAnchorFields.delete(f);const input=$(f==='opening_at'?'anchor-date':'anchor-amount');if(input.value===values[f])input.value=f==='opening_at'?displayDate(anchorBase[f]):anchorBase[f];}setError('anchor-error','');}
       accept(result);return true;
     }catch(e){if(anchorRecord===a){for(const f of changed)if(queuedAnchorFields.get(f)===values[f])queuedAnchorFields.delete(f);setError('anchor-error',e.message);}return false;}
   });return anchorTail;
@@ -238,24 +339,27 @@ function refreshOpenEditors(){
   if(editing&&editorBase&&$('editor').open){
     const record=state.flows.find(f=>f.flow_id===editing);
     if(!record){setError('form-error','This flow was deleted on another device.');return;}
-    const current=formData();
+    const current=formData(), shown=[];
+    const pending=f=>queuedFlowFields.has(f)||document.activeElement===$('f-'+f)||JSON.stringify(current[f])!==JSON.stringify(editorBase[f]);
+    const quantityPending=pending('amount')||pending('units');
     for(const f of fields){
-      if(queuedFlowFields.has(f)||document.activeElement===$('f-'+f))continue;
-      if(JSON.stringify(current[f])===JSON.stringify(editorBase[f])){
-        $('f-'+f).value=f==='tags'?record[f].join(', '):record[f];editorBase[f]=record[f];
-      }
+      if(pending(f)||(quantityPending&&(f==='amount'||f==='units')))continue;
+      $('f-'+f).value=f==='tags'?record[f].join(', '):record[f];editorBase[f]=record[f];shown.push(f);
     }
+    flowRevision=advanceRevision(flowRevision,record.edit_revision,shown,shown.length===fields.length);
     updateHint();
   }
   if(anchorRecord&&anchorBase&&$('anchor').open){
     const account=state.accounts.find(a=>a.name===anchorRecord.name&&a.units===anchorRecord.units);
     if(!account){setError('anchor-error','This account is no longer referenced.');return;}
+    const shown=[];
     for(const [field,id] of [['opening_at','anchor-date'],['opening_amount','anchor-amount']]){
       if(queuedAnchorFields.has(field)||document.activeElement===$(id))continue;
       if($(id).value===String(anchorBase[field])||field==='opening_at'&&$(id).value===displayDate(anchorBase[field])){
-        anchorBase[field]=account[field]??'';$(id).value=field==='opening_at'?displayDate(account[field]):anchorBase[field];
+        anchorBase[field]=account[field]??'';$(id).value=field==='opening_at'?displayDate(account[field]):anchorBase[field];shown.push(field);
       }
     }
+    anchorRevision=advanceRevision(anchorRevision,account.edit_revision,shown,shown.length===2);
   }
 }
 async function closeAnchor(){if(await saveAnchor())$('anchor').close();}
@@ -264,7 +368,7 @@ $('anchor').addEventListener('cancel',event=>{event.preventDefault();closeAnchor
 bind('anchor-amount','focus',()=>{const n=$('anchor-amount');n.setSelectionRange(n.value.length,n.value.length);});
 bind('new-dataset','click',async()=>{await switchDataset('new_dataset',{name:$('new-dataset-name').value});$('new-dataset-name').value='';});
 bind('camp','click',async()=>{await switchDataset('camp');navigate('flows');});
-function fileControls(){for(const id of ['open-file','new-dataset','camp','sync-join','sync-reconnect','delete-file-yes','delete-file-no'])$(id).disabled=fileBusy;$('save-as').disabled=fileBusy||!state?.dataset;document.querySelectorAll('.dataset-item,.delete-dataset').forEach(n=>n.disabled=fileBusy);}
+function fileControls(){peerControls();for(const id of ['open-file','new-dataset','camp','delete-file-yes','delete-file-no'])$(id).disabled=fileBusy;$('save-as').disabled=fileBusy||!state?.dataset;document.querySelectorAll('.dataset-item,.delete-dataset').forEach(n=>n.disabled=fileBusy);}
 async function fileAction(action,args={}){
   if(fileBusy)return {canceled:true};fileBusy=true;fileControls();
   try{await formTail;await anchorTail;const r=await api(action,args);if(r.state){if(action!=='delete_dataset'||r.state.dataset!==state?.dataset)resetView();accept(r);notice(action==='delete_dataset'?'File deleted from this phone.':`Opened ${state.dataset_name||state.dataset}`);}return r;}
@@ -282,6 +386,7 @@ bind('graph-select','click',()=>{
   openPicker('Accounts & Units',[...choices.keys()],selected,()=>{graphInitialized=true;graphPairs=[...selected].map(k=>choices.get(k));zoom={lo:0,hi:1};loadGraph();});
 });
 bind('graph-basis','change',()=>{zoom={lo:0,hi:1};return loadGraph();});
+bind('graph-combined','change',()=>{zoom={lo:0,hi:1};return loadGraph();});
 for(const id of ['graph-start','graph-end'])bindDateInput(id,()=>{rangeEdited=true;zoom={lo:0,hi:1};return loadGraph();},message=>$('charts').replaceChildren(el('p','error',message)));
 bind('graph-reset','click',()=>{zoom={lo:0,hi:1};rangeEdited=false;return loadGraph();});
 async function loadGraph(){
@@ -289,7 +394,7 @@ async function loadGraph(){
   if(!graphInitialized){const a=state.accounts.find(a=>a.opening_amount!==null);graphPairs=a?[[a.name,a.units]]:[];graphInitialized=true;}
   graphPairs=graphPairs.filter(p=>state.accounts.some(a=>a.name===p[0]&&a.units===p[1]));
   $('graph-select').textContent=`Accounts & Units${graphPairs.length?' | '+graphPairs.length:''}`;
-  const args={pairs:graphPairs,basis:$('graph-basis').value};
+  const args={pairs:graphPairs,basis:$('graph-basis').value,combined:$('graph-combined').checked};
   if(rangeEdited){if($('graph-start').value)args.start=$('graph-start').value;if($('graph-end').value)args.end=$('graph-end').value;}
   try{const data=await api('graph',args);if(gen!==graphGeneration)return;graphData=data;if(!rangeEdited){$('graph-start').value=data.start.slice(0,10);$('graph-end').value=data.end.slice(0,10);}drawGraphs();}
   catch(e){if(gen===graphGeneration)$('charts').replaceChildren(el('p','error',e.message));}
@@ -331,52 +436,196 @@ function drawGraphs(){
   }$('charts').replaceChildren(...cards);
 }
 
-function renderSync(){
-  const sync=state.sync||{};
-  $('sync-reconnect').hidden=!sync.enabled;
-  $('sync-state').textContent=!sync.enabled?'Not connected':sync.error?`Offline | ${sync.pending||0} pending`:sync.more?'Catching up':sync.conflicts?.length?'Needs review':sync.pending?`${sync.pending} pending`:sync.connected?'Up to date':'Waiting to sync';
-  $('sync-state').title=sync.error||sync.endpoint||'';
-  $('sync-help').textContent=sync.error||(sync.enabled?'Edits save here first and synchronize while Flow is open.':'Use the connection text from the coordinator. A matching local file connects in place; a new name creates a local copy.');
-  $('sync-conflicts').replaceChildren(...(sync.conflicts||[]).map(conflict=>{
+let peerCatalog=null, peerBusy=false, peerDeviceList='', peerDeviceEpoch=0;
+const deviceFile=()=>state?.device?.files?.find(f=>f.key===state.dataset);
+function peerControls(){
+  const shared=deviceFile();
+  $('peer-share').hidden=!!shared;
+  $('peer-share').disabled=fileBusy||peerBusy||!state?.dataset;
+  $('peer-unshare').hidden=!shared;
+  for(const id of ['peer-unshare','peer-catalog'])$(id).disabled=fileBusy||peerBusy;
+  document.querySelectorAll('.peer-join,.peer-forget,.peer-conflict-choice').forEach(n=>n.disabled=fileBusy||peerBusy);
+}
+function peerValue(value){
+  if(value===null)return 'Deleted';
+  if(value==='')return '(empty)';
+  if(typeof value!=='object')return String(value);
+  if(Array.isArray(value))return value.join(', ')||'(none)';
+  if('amount' in value&&'units' in value&&Object.keys(value).length===2)return value.amount+' '+value.units;
+  return Object.entries(value).map(([k,v])=>k.replaceAll('_',' ')+': '+peerValue(v)).join('; ')||'(none)';
+}
+function renderPeerDevice(){
+  const s=state?.device||{}, count=s.peers?.length||0;
+  $('peer-status').textContent=s.error||s.discovery_error||(!s.enabled?'Pairing is optional. Other devices cannot see unshared files.':
+    (s.running?'Sharing is active while Flow is open.':'Sharing is paused.')+' '+count+' paired device'+(count===1?'':'s')+'.');
+  $('peer-devices-label').hidden=!count;
+  const devices=JSON.stringify((s.peers||[]).map(p=>[p.peer_id,p.name,p.address]));
+  if(devices!==peerDeviceList){
+    peerDeviceList=devices;
+    $('peer-devices').replaceChildren(...(s.peers||[]).map(p=>{
+      const row=el('div','peer-device'),b=el('button','text-button peer-forget','Forget');
+      row.append(el('strong','',p.name),el('small','muted',' '+p.address+' '),b);
+      b.onclick=()=>withPeer(async()=>{
+        peerDeviceEpoch++;
+        try{
+          const r=await api('peer_forget',{peer_id:p.peer_id});
+          applyDevice(r);peerCatalog=null;renderPeerCatalog();notice('Device forgotten.');
+        }finally{peerDeviceEpoch++;}
+      });
+      return row;
+    }));
+  }
+  peerControls();
+}
+function renderPeerFile(){
+  const doc=state.dataset?.startsWith('document:'), shared=deviceFile(), replica=state.peer_file||{};
+  const conflicts=replica.conflicts?.length||0;
+  $('peer-review-bar').hidden=!conflicts;
+  $('peer-review').textContent=conflicts===1?'Review 1 conflicting change':'Review '+conflicts+' conflicting changes';
+  $('peer-copy').hidden=!doc;
+  $('peer-file-state').textContent=!state.dataset?'Open a local file to share it.':shared?'Shared with your paired devices: '+shared.name:
+    doc&&replica.dataset?'Document copy of a shared file. Reopen the registered phone file to exchange changes.':replica.dataset?'Sharing is stopped on this phone. Local edits are saved.':'Only on this device until you share it.';
+  $('peer-conflicts').replaceChildren(...(replica.conflicts||[]).map(c=>{
     const row=el('div','sync-conflict');
-    row.append(el('p','',conflict.message||'An edit overlaps a change from another device.'));
-    const labels={date:'Date',from_key:'From',to_key:'To',amount:'Amount',units:'Units',status:'Status',name:'Name',notes:'Notes',category_key:'Category',opening_amount:'Starting balance',opening_at:'Starting date',x:'Horizontal position',y:'Vertical position',position:'Tag order'};
-    const valueText=value=>value===null||value===undefined?'-':String(value);
-    for(const change of conflict.changes||[]){
-      const flow=change.table==='flows'?state.flows.find(f=>f.flow_id===change.key[0]):null;
-      const title=flow?flow.name:change.table==='flows'?'Flow':change.table==='flow_tags'?`Tag: ${change.key[1]}`:change.key.join(' / ');
-      row.append(el('strong','small',title));
-      if(change.after===null)row.append(el('p','small','This device: deleted'));
-      if(change.remote===null)row.append(el('p','small','Received: deleted'));
-      const details=el('dl','sync-values');
-      for(const field of Object.keys(change.after||change.before||{})){
-        if(!labels[field])continue;
-        details.append(el('dt','',labels[field]),el('dd','',`This device: ${change.after===null?'deleted':valueText(change.after[field])}`),el('dd','',`Received: ${valueText(change.remote?.[field])}`));
-      }
-      row.append(details);
-    }
-    for(const [choice,label] of [['local',"Keep this device's edit"],['remote','Use received change']]){
-      const b=el('button','outline',label);b.onclick=async()=>{try{await act('sync_resolve',{operation_id:conflict.operation_id||conflict.id,choice});scheduleSync(0);}catch(_){}};row.append(b);
+    const flow=c.table==='flows'?state.flows.find(f=>f.flow_id===c.key?.[0]):null;
+    row.append(el('strong','',flow?.name?flow.name+' | '+(c.group||[]).join(' / '):c.title||'Conflicting changes'),
+      el('p','small muted','Devices saved different values. Choose the value to keep.'));
+    for(const choice of c.choices||[]){
+      const b=el('button','outline peer-conflict-choice',choice.label||peerValue(choice.value));
+      b.onclick=()=>withPeer(async()=>{accept(await api('peer_resolve',{current:state.dataset,conflict:c.id,choice:choice.id}));notice(deviceFile()?'Choice saved. It will sync with paired devices.':'Choice saved in this file.');});
+      row.append(b);
     }return row;
   }));
+  renderPeerDevice();
 }
+function renderPeerCatalog(){
+  const box=$('peer-catalog-list');box.replaceChildren();
+  if(peerCatalog===null)return;
+  if(!peerCatalog.length){box.append(el('p','small muted','No shared files found. Make sure a paired device has Flow open and has shared a file.'));return;}
+  for(const f of peerCatalog){
+    const local=(state.device?.files||[]).find(v=>v.dataset===f.dataset),row=el('div','peer-file');
+    row.append(el('strong','',f.name),el('small','muted',(f.peer_name||'Paired device')+' | '+f.dataset.replaceAll('-','').slice(0,10)));
+    if(local){row.append(el('p','small muted','Already shared on this phone.'));}
+    else{
+      const join=el('button','outline peer-join','Join file');row.append(join);
+      join.onclick=()=>withPeer(async()=>{await fileAction('peer_join',{name:f.name,dataset:f.dataset,peer_id:f.peer_id});renderPeerCatalog();});
+    }
+    box.append(row);
+  }
+}
+function applyDevice(result){if(result.device&&state){state.device=result.device;renderPeerFile();}}
+async function withPeer(callback){
+  if(fileBusy||peerBusy)return;peerBusy=true;peerControls();
+  try{await callback();}catch(error){notice(error.message,true);}
+  finally{peerBusy=false;peerControls();}
+}
+bind('peer-review','click',()=>{navigate('files');$('peer-conflicts').scrollIntoView({block:'center'});});
+bind('peer-share','click',()=>withPeer(async()=>{
+  const r=await fileAction('peer_share',{current:state.dataset});
+  if(r.state)notice('File shared. Paired devices can now find it under Shared files.');
+}));
+bind('peer-unshare','click',()=>withPeer(async()=>{accept(await api('peer_unshare',{current:state.dataset}));peerCatalog=null;renderPeerCatalog();notice('Sharing stopped. Your phone copy is kept.');}));
+bind('peer-catalog','click',()=>withPeer(async()=>{const r=await api('peer_catalog');applyDevice(r);peerCatalog=r.catalog;renderPeerCatalog();}));
+
+// Only an explicit tap opens discovery. Polling must never create another
+// window or approve a request, and a late result cannot reopen a closed panel.
+let nearbyActive=false,nearbyBusy=false,nearbyTimer=null,nearbyEpoch=0,nearbyView={},nearbyList='',nearbyMessage='',nearbyPolls=0;
+function nearbyPaint(){
+  const v=nearbyView,req=nearbyActive&&v.request,items=nearbyActive&&!req?(v.devices||[]):[];
+  $('nearby-start').hidden=nearbyActive||!$('pair-panel').open;
+  $('nearby-stop').hidden=!nearbyActive;
+  $('nearby-verify').hidden=!req;
+  $('nearby-fallback').hidden=!nearbyActive||!!req;
+  $('nearby-message').textContent=nearbyMessage||(req?'':nearbyActive?(items.length?'Choose a device.':(nearbyPolls>=3?'Still looking. Keep Pair device open on both devices. Already paired devices are listed below. If they do not appear, check Device not listed? below.':'Looking for nearby devices...')):'');
+  $('nearby-lookup').disabled=nearbyBusy;
+  $('nearby-approve').disabled=nearbyBusy||!!req?.approved;
+  $('nearby-approve').hidden=!req||req.direction==='outgoing'||!!req.approved;
+  $('nearby-cancel').disabled=nearbyBusy;
+  if(req){
+    $('nearby-name').textContent=req.name;
+    $('nearby-number').textContent=String(req.number).replace(/^(...)(...)$/,'$1 $2');
+    $('nearby-hint').textContent=req.approved?'Waiting for '+req.name+' to confirm.':'Compare the number on both screens, then tap Pair.';
+  }else{
+    $('nearby-name').textContent='';$('nearby-number').textContent='';
+  }
+  const sig=JSON.stringify(items.map(p=>[p.peer_id,p.name,p.address]));
+  if(sig!==nearbyList){
+    nearbyList=sig;
+    $('nearby-candidates').replaceChildren(...items.map(p=>{
+      const duplicate=items.some(other=>other.peer_id!==p.peer_id&&other.name===p.name);
+      const b=el('button','outline',p.name+(duplicate?' ('+p.address+')':''));
+      b.onclick=()=>nearbyAction('request',{peer_id:p.peer_id});
+      return b;
+    }));
+  }
+  for(const b of $('nearby-candidates').querySelectorAll('button'))b.disabled=nearbyBusy;
+  const addr=state?.device?.addresses?.join(' / ')||state?.device?.address||'';
+  $('nearby-local-address').textContent=addr?'This device: '+addr:'';
+}
+function nearbyStop(msg=''){
+  if(!nearbyActive)return;
+  nearbyEpoch++;nearbyActive=false;nearbyBusy=false;clearTimeout(nearbyTimer);
+  nearbyView={};nearbyMessage=msg;nearbyPaint();
+  // The native onStop lifecycle also closes the pairing window.
+  api('peer_pair',{mode:'close'}).catch(()=>{});
+}
+async function nearbyAction(mode,args={}){
+  if(mode==='open'){
+    if(nearbyActive)return;
+    nearbyEpoch++;nearbyActive=true;nearbyView={};nearbyMessage='';nearbyPolls=0;
+  }else if(!nearbyActive||nearbyBusy){return;}
+  const epoch=nearbyEpoch,manual=mode!=='poll';
+  if(manual){nearbyBusy=true;nearbyMessage='';}
+  clearTimeout(nearbyTimer);
+  nearbyPaint();
+  try{
+    const r=await api('peer_pair',{mode,...args});
+    if(epoch!==nearbyEpoch)return;
+    if(r.device){state.device=r.device;renderPeerDevice();}
+    const wasComparing=!!nearbyView.request;
+    nearbyView=r.nearby;
+    if(mode==='poll')nearbyPolls++;
+    if(nearbyView.paired?.length){nearbyStop('Paired. Open Shared files to join a file.');return;}
+    if(!nearbyView.open){nearbyStop(nearbyView.message||'Pairing ended. Choose Pair device to try again.');return;}
+    if(manual||nearbyView.request||nearbyView.devices?.length)nearbyMessage='';
+    if(mode==='poll'&&wasComparing&&!nearbyView.request)nearbyMessage='Pairing ended. Choose a device to try again.';
+    if(nearbyView.message)nearbyMessage=nearbyView.message;
+  }catch(error){
+    if(epoch!==nearbyEpoch)return;
+    if(mode==='open'){nearbyStop(error.message);return;}
+    nearbyMessage=error.message||'Could not reach the other device.';
+  }finally{
+    if(epoch===nearbyEpoch){
+      if(manual)nearbyBusy=false;
+      nearbyPaint();clearTimeout(nearbyTimer);
+      if(nearbyActive&&!nearbyBusy)nearbyTimer=setTimeout(()=>nearbyAction('poll'),1800);
+    }
+  }
+}
+bind('nearby-start','click',()=>nearbyAction('open'));
+bind('nearby-stop','click',()=>nearbyStop());
+bind('nearby-approve','click',()=>{const r=nearbyView.request;if(r&&!r.approved)nearbyAction('approve',{request_id:r.id});});
+bind('nearby-cancel','click',()=>{const r=nearbyView.request;if(r)nearbyAction('cancel',{request_id:r.id});});
+bind('nearby-lookup','click',()=>{const address=$('nearby-address').value.trim();if(address)nearbyAction('lookup',{address});});
+bind('pair-panel','toggle',()=>{if($('pair-panel').open)nearbyAction('open');else nearbyStop();});
+
 function scheduleSync(delay=2000){clearTimeout(syncTimer);if(!syncPaused&&!document.hidden)syncTimer=setTimeout(pollSync,delay);}
 async function pollSync(force=false){
   if(syncBusy){syncAgain=true;return;}
   if(fileBusy||(!force&&(syncPaused||document.hidden))){scheduleSync();return;}
-  if(!state?.sync?.enabled){scheduleSync();return;}
+  if(!state?.device?.enabled){scheduleSync();return;}
   syncBusy=true;
-  try{const result=await api('sync');if(result.state){if(result.changed)accept(result);else{state.sync=result.state.sync;renderSync();}}}
-  catch(error){if(state?.sync){state.sync.error=error.message;renderSync();}}
-  finally{syncBusy=false;if(syncAgain||state?.sync?.more){syncAgain=false;setTimeout(()=>pollSync(force||syncPaused),0);}else scheduleSync();}
+  try{
+    if(state.device?.enabled){const r=await api('peer_poll');if(r.state)accept(r);else if(r.device){state.device=r.device;renderPeerDevice();}}
+  }
+  catch(error){if(state?.device){state.device.error=error.message;renderPeerDevice();}}
+  finally{syncBusy=false;if(syncAgain){syncAgain=false;setTimeout(()=>pollSync(force||syncPaused),0);}else scheduleSync();}
 }
-bind('sync-join','click',async()=>{await fileAction('join_sync',{name:$('sync-name').value,connection:$('sync-connection').value});$('sync-connection').value='';$('sync-name').value='';scheduleSync(0);});
-bind('sync-reconnect','click',async()=>{const result=await api('reconnect_sync',{connection:$('sync-connection').value});accept(result);$('sync-connection').value='';notice('Connection updated.');scheduleSync(0);});
 window.flowResume=()=>{syncPaused=false;scheduleSync(0);};
-document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(syncTimer);}else{syncPaused=false;scheduleSync(0);}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){nearbyStop();clearTimeout(syncTimer);}else{syncPaused=false;scheduleSync(0);}});
 
-window.flowBack=()=>{for(const id of ['delete-file-confirm','map-detail','picker','anchor','editor'])if($(id).open){if(id==='editor')closeEditor();else if(id==='anchor')closeAnchor();else $(id).close();return true;}if(page!==(state?.dataset?'flows':'files')){navigate('flows');return true;}return false;};
-window.flowPause=()=>{syncPaused=true;clearTimeout(syncTimer);experimental.pause();const saves=[];if($('editor').open)saves.push(commitField());if($('anchor').open)saves.push(saveAnchor());Promise.all(saves).then(()=>pollSync(true)).catch(()=>{});};
+window.flowBack=()=>{if(flowChoices.close())return true;for(const id of ['delete-file-confirm','map-detail','picker','anchor','editor'])if($(id).open){if(id==='editor')closeEditor();else if(id==='anchor')closeAnchor();else $(id).close();return true;}if(page!==(state?.dataset?'flows':'files')){navigate('flows');return true;}return false;};
+window.flowPause=()=>{nearbyStop();syncPaused=true;clearTimeout(syncTimer);experimental.pause();const saves=[];if($('editor').open)saves.push(commitField());if($('anchor').open)saves.push(saveAnchor());Promise.all(saves).then(()=>pollSync(true)).catch(()=>{});};
 window.addEventListener('resize',()=>{if(page==='graphs'&&graphData)drawGraphs();});
 const experimental=new window.FlowExperimental({api,getState:()=>state,getFlows:matchingFlows,accept,notice,dateControl:bindDateInput});
 async function init(){try{accept(await api('init'));accept(await api('view',{as_of:localNow()}));scheduleSync(0);}catch(e){$('dataset').textContent='Could not open';notice(e.message,true);}}
