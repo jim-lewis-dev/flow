@@ -9,6 +9,7 @@ import fcntl
 import hashlib
 import hmac
 import json
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -226,15 +227,21 @@ class PeerNode(NearbyPairing):
         while not stop.is_set():
             try:
                 wire.discover(stop, self._identity, port, self._sighting,
-                              interface=self.host, ready=self._discovery_ready)
-            except (OSError, sqlite3.Error):
-                with self._db() as db:
-                    _state(db, 'discovery_error', 'LAN discovery unavailable. Enter the other device address to pair.')
+                              interface=self.host, on_status=self._discovery_status)
+            except Exception as exc:
+                # Binding or receiving failed. Preserve the TCP listener and retry UDP.
+                logging.getLogger(__name__).warning('UDP discovery: %s', exc)
+                self._discovery_status(f'UDP discovery on port {wire.DISCOVERY_PORT}: {exc}')
                 stop.wait(10)
 
-    def _discovery_ready(self):
-        with self._db() as db:
-            _state(db, 'discovery_error', '')
+    def _discovery_status(self, message):
+        try:
+            with self._db() as db:
+                _state(db, 'discovery_error', message[:500])
+            return True
+        except sqlite3.Error as exc:
+            logging.getLogger(__name__).warning('Could not save discovery status: %s', exc)
+            return False
 
     def _sighting(self, identity, endpoint):
         with self._db() as db:

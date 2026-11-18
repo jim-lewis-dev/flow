@@ -497,8 +497,9 @@ class PeerController:
             self.deny_button.configure(command=lambda: self._submit("nearby_cancel", rid), state=state)
         elif open_:
             devices = self.nearby.get("devices", ())
-            self.near_title.set("Select a device or choose this computer on the other screen." if devices
-                                else "Open nearby pairing on both devices. If neither appears, use Connection options.")
+            self.near_title.set(self.state.get("discovery_error") or
+                                ("Select a device or choose this computer on the other screen." if devices
+                                 else "Open nearby pairing on both devices. If neither appears, use Connection options."))
             rows = tuple((v["peer_id"], v["name"], v["address"]) for v in devices)
             if self._near_items != rows:
                 selected = next(iter(self.near_tree.selection()), None)

@@ -52,6 +52,10 @@ VPN that blocks LAN access can prevent this. On Linux, `ip -br -4 addr`
 shows which address belongs to each interface.
 
 The peer listener uses TCP 47621; automatic discovery uses UDP 47622.
+Desktop peers announce on Wi-Fi and Ethernet using multicast and local subnet
+broadcasts. Discovery keeps listening if an announcement method fails and
+retries when the network changes. Errors appear on the Devices page. Devices
+already paired are listed under Paired rather than offered for pairing again.
 These are home-network ports. No router port forwarding is needed. If you
 use UFW, scope any rules to your actual LAN. For example, **only if** your
 LAN is `192.168.0.0/24` and your firewall is blocking Flow:

@@ -7,6 +7,7 @@ import contextlib
 import fcntl
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -215,31 +216,62 @@ def _ipv4_interfaces():
                 req = fcntl.ioctl(probe, 0x8913, name.ljust(item_size, b'\0'))  # SIOCGIFFLAGS
             except OSError:
                 continue
-            yield (name.decode('ascii', 'replace'), struct.unpack_from('H', req, 16)[0],
-                   socket.inet_ntoa(buf[off+20:off+24]))
+            flags = struct.unpack_from('H', req, 16)[0]
+            ip = socket.inet_ntoa(buf[off+20:off+24])
+            broadcast = None
+            if flags & 2 and not flags & (8 | 16):  # IFF_BROADCAST, not loopback or point-to-point
+                try:
+                    mask = fcntl.ioctl(probe, 0x891b, name.ljust(item_size, b'\0'))  # SIOCGIFNETMASK
+                    broadcast = _broadcast_address(ip, socket.inet_ntoa(mask[20:24]))
+                except (OSError, ValueError):
+                    pass  # Still usable for multicast.
+            yield name.decode('ascii', 'replace'), flags, ip, broadcast
+
+
+def _broadcast_address(ip, mask):
+    network = ipaddress.IPv4Network((ip, mask), strict=False)
+    # /31 and /32 have no broadcast hosts; never use the global broadcast.
+    if 0 < network.prefixlen < 31:
+        return str(network.broadcast_address)
+
+
+def _lan_routes(host):
+    """Usable LAN interfaces, without consulting the default route (often a VPN)."""
+    if host not in ('', '0.0.0.0', '::'):
+        return [(host, None, None)]
+    candidates = []
+    for name, flags, ip, broadcast in _ipv4_interfaces():
+        if not flags & 1 or flags & (8 | 16):  # not UP, or LOOPBACK / POINTOPOINT
+            continue
+        if ip == '0.0.0.0' or ip.startswith('127.'):
+            continue
+        if (name.startswith(('nordlynx', 'tailscale', 'docker', 'veth', 'virbr', 'cni',
+                             'flannel', 'rmnet', 'p2p', 'tun', 'tap', 'wg', 'zt')) or
+                re.fullmatch(r'br-[0-9a-f]{12,}', name)):
+            continue
+        rank = 0 if name.startswith(('wl', 'wifi', 'en', 'eth')) else 1
+        candidates.append((rank, name, ip, broadcast))
+    return [(ip, broadcast, name) for _, name, ip, broadcast in sorted(candidates)]
 
 
 def lan_hosts(host='0.0.0.0'):
-    """Prefer Wi-Fi and Ethernet; the subnet itself says nothing about being a VPN."""
-    if host not in ('', '0.0.0.0', '::'):
-        return [host]
-    candidates = []
     try:
-        for name, flags, ip in _ipv4_interfaces():
-            if not flags & 1 or flags & (8 | 16):  # not UP, or LOOPBACK / POINTOPOINT
-                continue
-            if ip == '0.0.0.0' or ip.startswith('127.'):
-                continue
-            # Some VPN/container adapters look like ordinary broadcast interfaces.
-            if (name.startswith(('nordlynx', 'tailscale', 'docker', 'veth', 'virbr', 'cni',
-                                 'flannel', 'rmnet', 'p2p', 'tun', 'tap', 'wg', 'zt')) or
-                    re.fullmatch(r'br-[0-9a-f]{12,}', name)):
-                continue
-            rank = 0 if name.startswith(('wl', 'wifi', 'en', 'eth')) else 1
-            candidates.append((rank, name, ip))
+        return list(dict.fromkeys(ip for ip, _, _ in _lan_routes(host)))
     except OSError:
-        pass
-    return list(dict.fromkeys(ip for _, _, ip in sorted(candidates)))
+        return []
+
+
+def _send_broadcast(sock, beacon, ip, broadcast, name):
+    target = (broadcast, DISCOVERY_PORT)
+    # Use the listener socket so the existing phone's unicast reply reaches it.
+    # Linux IP_PKTINFO gives this one packet the LAN interface and source IP,
+    # even if a VPN also installed routes. No raw socket or special permission.
+    if sys.platform.startswith('linux') and hasattr(sock, 'sendmsg'):
+        index = socket.if_nametoindex(name)
+        info = struct.pack('=I4s4s', index, socket.inet_aton(ip), bytes(4))
+        sock.sendmsg([beacon], [(socket.IPPROTO_IP, getattr(socket, 'IP_PKTINFO', 8), info)], 0, target)
+    else:
+        sock.sendto(beacon, target)
 
 
 def _android():
@@ -247,53 +279,75 @@ def _android():
             bool(os.environ.get('ANDROID_ROOT') and os.environ.get('ANDROID_DATA')))
 
 
-def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None):
+def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None, on_status=None):
     beacon = MAGIC + identity.encode('ascii') + b' ' + str(port).encode('ascii')
     import time
-    local = lan_hosts(interface)
-    # Android may restrict network-interface enumeration for ordinary apps.
-    # Let the OS choose a multicast interface in that case, but never present
-    # that unknown route to the user as a verified Wi-Fi address.
-    adapters = local or (['0.0.0.0'] if _android() else [])
-    if not adapters:
-        raise OSError('No active LAN interface.')
     with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('', DISCOVERY_PORT))
-        group = socket.inet_aton(GROUP)
-        joined = []
-        for ip in adapters:
-            try:
-                adapter = socket.inet_aton(socket.gethostbyname(ip))
-                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + adapter)
-                joined.append(adapter)
-            except OSError:
-                continue
-        if not joined:
-            raise OSError('No LAN interface supports multicast.')
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
         sock.settimeout(0.5)
-        if ready is not None:
-            ready()
-        last_send = 0
+        group = socket.inet_aton(GROUP)
+        joined = set()
+        options_error = []
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        except OSError as exc:
+            options_error.append(f'Enable broadcast: {exc}')
+        first, previous_status = True, None
+        next_refresh = next_send = 0
         replied = {}
         # Beacons are untrusted hints; bound their rate before writing the local cache.
         bucket_at, tokens, last_seen = time.monotonic(), 32.0, {}
         while not stopped.is_set():
-            if time.monotonic() - last_send >= 2:
-                if lan_hosts(interface) != local:
-                    return  # Rejoin on the current LAN after a network change.
-                sent = False
-                for adapter in joined:
+            now = time.monotonic()
+            if now >= next_refresh:
+                next_refresh = now + 5
+                setup_errors = list(options_error)
+                try:
+                    routes = _lan_routes(interface)
+                except OSError as exc:
+                    routes = []
+                    setup_errors.append(f'List LAN interfaces: {exc}')
+                if not routes:
+                    if _android():
+                        routes = [('0.0.0.0', None, None)]
+                    elif not setup_errors:
+                        setup_errors.append('No active LAN interface.')
+                active = {ip for ip, _, _ in routes}
+                for ip in joined - active:
+                    with contextlib.suppress(OSError):
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, group + socket.inet_aton(ip))
+                    joined.remove(ip)
+                for ip in sorted(active - joined):
                     try:
-                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, adapter)
-                        sock.sendto(beacon, (GROUP, DISCOVERY_PORT))
-                        sent = True
-                    except OSError:
-                        continue
-                if not sent:
-                    raise OSError('Could not announce on any LAN interface.')
-                last_send = time.monotonic()
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + socket.inet_aton(ip))
+                        joined.add(ip)
+                    except OSError as exc:
+                        setup_errors.append(f'Multicast join on {ip}: {exc}')
+                if first and ready is not None:
+                    ready()
+                first = False
+            if now >= next_send:
+                next_send = now + 2
+                errors = list(setup_errors)
+                for ip, broadcast, name in routes:
+                    if ip in joined:
+                        try:
+                            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(ip))
+                            sock.sendto(beacon, (GROUP, DISCOVERY_PORT))
+                        except OSError as exc:
+                            errors.append(f'Multicast send on {ip}: {exc}')
+                    if broadcast:
+                        try:
+                            _send_broadcast(sock, beacon, ip, broadcast, name)
+                        except OSError as exc:
+                            errors.append(f'Broadcast send to {broadcast}: {exc}')
+                status = '; '.join(errors)[:500]
+                if on_status is not None and status != previous_status:
+                    if on_status(status) is not False:
+                        previous_status = status
+            if stopped.is_set():
+                break
             try:
                 data, source = sock.recvfrom(256)
             except socket.timeout:

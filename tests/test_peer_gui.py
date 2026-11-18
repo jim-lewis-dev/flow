@@ -180,6 +180,18 @@ class PeerDesktopTests(unittest.TestCase):
         node.nearby_open.assert_called_once()
         node.pair_code.assert_not_called()
 
+    def test_discovery_error_appears_on_devices_and_clears_on_recovery(self):
+        self.launch()
+        self.controller.show()
+        self.peer.book.select(self.peer.devices)
+        self.peer.nearby = {"open": True, "devices": [], "request": None}
+        self.peer.state["discovery_error"] = "Discovery send: [Errno 1] Operation not permitted"
+        self.peer.render()
+        self.assertIn("Operation not permitted", self.peer.near_title.get())
+        self.peer.state["discovery_error"] = ""
+        self.peer.render()
+        self.assertNotIn("Operation not permitted", self.peer.near_title.get())
+
     def test_manual_code_is_not_reissued_by_refresh_click_or_expiry(self):
         from unittest.mock import Mock
         node = Mock()
