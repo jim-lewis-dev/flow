@@ -143,7 +143,7 @@ The **Data** tab offers CSV/JSON import and export, plus full database backup an
 
 Flow uses Python, Tkinter, Matplotlib, and SQLite. Quantities use decimal storage and exact arithmetic; drawing coordinates use floating point. Dates use local wall-clock time. See the [schema](flowledger/schema.sql) and [Python examples](examples/README.md).
 
-The [Android preview](android/README.md) uses the same Python engine with a touch interface. Its Gradle project is in `android/`; the phone adapter is in `mobile/`. The Android build from this checkout supports coordinator sync. For nearby pairing by name, use phone preview 0.4.1 or newer. Version 0.4.0 uses a manual pairing code.
+The [Android preview](android/README.md) uses the same Python engine with a touch interface. Its Gradle project is in `android/`; the phone adapter is in `mobile/`. The Android build from this checkout supports coordinator sync. For pairing by name with one confirmation, use desktop 0.7.4 and phone preview 0.4.3 or newer. Earlier previews may require confirmation on both devices.
 
 Run the tests on a graphical desktop:
 

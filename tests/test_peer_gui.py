@@ -145,7 +145,7 @@ class PeerDesktopTests(unittest.TestCase):
         row = {"peer_id": "1" * 64, "name": "Custard", "address": "192.168.0.70:47621"}
         idle = {"open": True, "devices": [row], "request": None, "paired": []}
         request = {"id": "r-1", "name": "Custard", "number": "031245", "peer_id": row["peer_id"],
-                   "approved": False, "direction": "outgoing"}
+                   "approved": True, "direction": "outgoing"}
         node.status.return_value = {"peers": [], "files": [], "address": "192.168.0.88:47621",
                                     "addresses": ["192.168.0.88:47621"], "name": "XPS", "invite_until": 0}
         node.nearby_open.return_value = idle
@@ -165,15 +165,23 @@ class PeerDesktopTests(unittest.TestCase):
         self.until(lambda: self.peer.pending is None and self.peer.near_tree.exists(row["peer_id"]))
         self.peer.near_tree.selection_set(row["peer_id"])
         self.app.update()
-        self.peer.near_connect.invoke()
+        box = self.peer.near_tree.bbox(row["peer_id"])
+        self.peer.near_tree.event_generate("<ButtonRelease-1>", x=10, y=box[1] + 5)
         self.until(lambda: self.peer.digits.get() == "031 245")
         node.nearby_request.assert_called_once_with(row["peer_id"])
         node.nearby_approve.assert_not_called()
         self.assertEqual("custard.local", self.peer.address.get())
+        self.assertFalse(self.peer.match_button.winfo_ismapped())
+        self.assertIn("Waiting", self.peer.near_title.get())
+        # The receiver alone gets the explicit Pair button.
+        self.peer.nearby = dict(idle, request=dict(request, direction="incoming", approved=False))
+        self.peer.render()
+        self.app.update()
+        self.assertTrue(self.peer.match_button.winfo_ismapped())
+        self.assertEqual("Pair", self.peer.match_button.cget("text"))
         self.peer.match_button.invoke()
         self.until(lambda: self.peer.pending is None and self.peer.match_button.instate(["disabled"]))
         node.nearby_approve.assert_called_once_with("r-1")
-        self.assertIn("Waiting", self.peer.near_title.get())
         # Closing the dialog retires that window rather than opening a new one.
         self.controller.dialog.destroy()
         self.until(lambda: node.nearby_close.called and self.peer.pending is None)

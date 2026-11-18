@@ -9,11 +9,11 @@ way until you choose otherwise.
 
 1. Connect both devices to the same LAN. Open a test file on the first device
    (for example, `flow peer-test` on Linux).
-2. Open **Sync > Devices > Pair nearby** on desktop and **Files > Pair device >
-   Pair nearby** on the phone. Tap the other device's name on one screen.
-   Compare the number on the two screens. If it matches, choose **Numbers
-   match** on both. Nothing needs to be typed. For an older peer, the manual
-   code option is still available.
+2. Open **Sync > Devices > Pair device** on desktop or **Files > Pair
+   device** on the phone, on both devices. Select the other device on one
+   screen. Compare the numbers, then choose **Pair** on the receiving device.
+   Selecting the device sends the request; only the receiver confirms.
+   Nothing needs to be typed. Keep both pairing screens open until paired.
 3. On the device holding the file, choose **Share this file** (desktop:
    **Sync > Shared files**; Android: **Files**). On the other, choose
    **Find shared files**, select the file, then join. Joining creates a local
@@ -27,8 +27,10 @@ way until you choose otherwise.
 Display names are labels. Two independently created files called `money` are
 different datasets. If you reinstall on a new phone, pair its new identity;
 the old name alone cannot grant access. Paired devices can read and join every file that the other
-device explicitly shares. Keep unrelated files local. Removing a device stops
-future direct access from that installation; it cannot recall copies.
+device explicitly shares. Keep unrelated files local. Forgetting a device removes its saved connection and its status errors
+immediately. It keeps local files and cannot recall copies on other devices.
+The other device may still remember the old pairing; it can accept a fresh
+request with a new confirmation.
 
 Flows, account starting balances, tags and saved node positions travel with
 their changes. The undo stack, screen selections and audit log stay local.
@@ -56,7 +58,9 @@ Desktop peers announce on Wi-Fi and Ethernet using multicast and local subnet
 broadcasts. Discovery keeps listening if an announcement method fails and
 retries when the network changes. Errors appear on the Devices page. Devices
 already paired are listed under Paired rather than offered for pairing again.
-These are home-network ports. No router port forwarding is needed. If you
+These differ from the older coordinator port 8765. Each computer with an
+active firewall needs to allow the peer ports on its LAN, including a computer
+that previously ran the coordinator. No router port forwarding is needed. If you
 use UFW, scope any rules to your actual LAN. For example, **only if** your
 LAN is `192.168.0.0/24` and your firewall is blocking Flow:
 

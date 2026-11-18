@@ -1,5 +1,5 @@
-"""Local, opt-in pairing. Discovery is only a hint; both people approve a
-number bound to both TLS certificates and fresh session randomness. Only the
+"""Local, opt-in pairing. Selecting the other device starts a request; its
+recipient confirms a number bound to both certificates and fresh randomness. Only the
 initiating device needs to make TCP connections. All state used by a GUI and
 its background service is shared through the private device catalog.
 """
@@ -231,8 +231,11 @@ class NearbyPairing:
             if active:
                 _set(db, 'open', _now()+_HEARTBEAT)
                 if not p:
+                    # The loop stops after two probes. Fully consume this bounded
+                    # query so its cursor cannot retain a read lock during the
+                    # separate transactions that store network results below.
                     sightings=db.execute('SELECT id,address FROM sightings WHERE seen>? '
-                                         'AND id NOT IN (SELECT id FROM peers) ORDER BY seen DESC LIMIT 32',(_now()-30,))
+                                         'AND id NOT IN (SELECT id FROM peers) ORDER BY seen DESC LIMIT 32',(_now()-30,)).fetchall()
                     last=_get(db,'probed',{})
                     last={k:v for k,v in last.items() if v>_now()-30}
                     for identity, endpoint in sightings:
@@ -286,6 +289,7 @@ class NearbyPairing:
             with self._db() as db:
                 db.execute('BEGIN IMMEDIATE')
                 _request(db,sid)
+                p['approved'] = True  # The local user explicitly selected this device.
                 _set(db,'pending',p)
         except Exception:
             if p.get('cap'):
@@ -357,8 +361,6 @@ class NearbyPairing:
                 db.execute('BEGIN IMMEDIATE')
                 if not _active(db) or _pending(db):
                     raise wire.Refused('Other device is not ready. Open Nearby devices and finish or cancel any pending request.')
-                if db.execute('SELECT 1 FROM peers WHERE id=?',(source,)).fetchone():
-                    raise wire.Refused('These devices are already paired.')
                 attempts=[x for x in _get(db,'attempts',[]) if x>_now()-120]
                 if len(attempts)>=8:
                     raise wire.Refused('Too many pairing requests. Try again in two minutes.')
@@ -406,7 +408,10 @@ class NearbyPairing:
             if not (p.get('number') and p['approved'] and hdr['approved']):
                 return dict(state='waiting')
             token=secrets.token_hex(32)
-            db.execute('INSERT INTO peers VALUES (?,?,?,?,?)',(p['peer_id'],p['name'],p['address'],token,_now()))
+            # Repairing one-sided Forget requires this fresh local approval,
+            # not a silent reconnect using a device name or an old token.
+            db.execute('INSERT OR REPLACE INTO peers VALUES (?,?,?,?,?)',
+                       (p['peer_id'],p['name'],p['address'],token,_now()))
             _set(db,'pending',None)
             _set(db,'completed',[p['peer_id']])
             _set(db,'receipt',dict(id=sid,cap=cap,peer_id=p['peer_id'],digest=hashlib.sha256(token.encode()).hexdigest(),until=_now()+_LIFE))

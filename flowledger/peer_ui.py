@@ -214,7 +214,7 @@ class PeerController:
                     elif old.get("request") and not value.get("request") and action == "nearby_poll":
                         self.notice.set("Pairing request ended. Select the device to try again.")
                     elif old.get("open") and not value.get("open") and action != "nearby_close":
-                        self.notice.set("Pairing ended. Choose Pair nearby to start again.")
+                        self.notice.set("Pairing ended. Choose Pair device to start again.")
                     elif action == "nearby_cancel":
                         self.notice.set("Pairing canceled.")
                     elif action not in ("nearby_close", "nearby_poll"):
@@ -378,7 +378,7 @@ class PeerController:
         d = self.devices
         top = ttk.Frame(d)
         top.grid(row=0, sticky="ew", pady=(0, 6))
-        self.near_button = ttk.Button(top, text="Pair nearby", command=self._toggle_nearby)
+        self.near_button = ttk.Button(top, text="Pair device", command=self._toggle_nearby)
         self.near_button.pack(side="left")
         self.near_title = tk.StringVar(d)
         ttk.Label(top, textvariable=self.near_title, wraplength=430).pack(side="left", padx=8)
@@ -397,12 +397,12 @@ class PeerController:
         self.near_connect.grid(row=0, column=2, padx=(6, 0))
         self.near_tree.bind("<<TreeviewSelect>>", lambda e: self._near_buttons())
         self.near_tree.bind("<Return>", lambda e: self._request_nearby())
-        self.near_tree.bind("<Double-1>", lambda e: self._request_nearby())
+        self.near_tree.bind("<ButtonRelease-1>", self._choose_nearby)
         self.comparison = ttk.Frame(d)
         self.comparison.grid(row=1, sticky="ew", pady=6)
         self.digits = tk.StringVar(d)
         ttk.Label(self.comparison, textvariable=self.digits, font=("DejaVu Sans", 22, "bold")).pack(side="left")
-        self.match_button = ttk.Button(self.comparison, text="Numbers match")
+        self.match_button = ttk.Button(self.comparison, text="Pair")
         self.match_button.pack(side="left", padx=(12, 5))
         self.deny_button = ttk.Button(self.comparison, text="Cancel")
         self.deny_button.pack(side="left")
@@ -470,6 +470,12 @@ class PeerController:
         if choice and self.nearby.get("open") and not self.nearby.get("request"):
             self._submit("nearby_request", choice[0])
 
+    def _choose_nearby(self, event):
+        row = self.near_tree.identify_row(event.y)
+        if row:
+            self.near_tree.selection_set(row)
+            self._request_nearby()
+
     def _near_buttons(self):
         ready = self.pending in (None, "status", "nearby_poll") and not self.app.demo and not self.deferred
         self.near_connect.configure(state="normal" if ready and self.near_tree.selection() else "disabled")
@@ -477,7 +483,7 @@ class PeerController:
     def _near_render(self, state):
         open_ = self.nearby.get("open")
         request = self.nearby.get("request") if open_ else None
-        self.near_button.configure(state=state, text="Stop pairing" if open_ else "Pair nearby")
+        self.near_button.configure(state=state, text="Stop pairing" if open_ else "Pair device")
         self.lookup_button.configure(state=state if open_ and not request else "disabled")
         show_list = open_ and not request and self.nearby.get("devices")
         for widget, show in ((self.comparison, request), (self.near_list, show_list)):
@@ -494,12 +500,16 @@ class PeerController:
             rid = request["id"]
             self.match_button.configure(command=lambda: self._submit("nearby_approve", rid),
                                         state="disabled" if request["approved"] else state)
+            if request.get("direction") == "outgoing" or request["approved"]:
+                self.match_button.pack_forget()
+            elif not self.match_button.winfo_manager():
+                self.match_button.pack(side="left", padx=(12, 5), before=self.deny_button)
             self.deny_button.configure(command=lambda: self._submit("nearby_cancel", rid), state=state)
         elif open_:
             devices = self.nearby.get("devices", ())
             self.near_title.set(self.state.get("discovery_error") or
                                 ("Select a device or choose this computer on the other screen." if devices
-                                 else "Open nearby pairing on both devices. If neither appears, use Connection options."))
+                                 else "Choose Pair device on the other device. Already paired devices are listed below."))
             rows = tuple((v["peer_id"], v["name"], v["address"]) for v in devices)
             if self._near_items != rows:
                 selected = next(iter(self.near_tree.selection()), None)

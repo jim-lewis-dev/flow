@@ -22,7 +22,7 @@ import threading
 import time
 
 from . import peer_wire as wire
-from .peer_nearby import NearbyPairing
+from .peer_nearby import NearbyPairing, _get as _near_get, _set as _near_set
 from .core import APPLICATION_ID, SCHEMA_VERSION, Repository
 
 
@@ -216,6 +216,8 @@ class PeerNode(NearbyPairing):
                     self._sync_active(stop)
                     due = time.monotonic() + self.interval
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                if stop.is_set():
+                    return
                 self._error(str(exc))
                 due = time.monotonic() + self.interval
 
@@ -229,6 +231,9 @@ class PeerNode(NearbyPairing):
                 wire.discover(stop, self._identity, port, self._sighting,
                               interface=self.host, on_status=self._discovery_status)
             except Exception as exc:
+                # A stopped worker must not reopen device settings during teardown.
+                if stop.is_set():
+                    return
                 # Binding or receiving failed. Preserve the TCP listener and retry UDP.
                 logging.getLogger(__name__).warning('UDP discovery: %s', exc)
                 self._discovery_status(f'UDP discovery on port {wire.DISCOVERY_PORT}: {exc}')
@@ -271,7 +276,43 @@ class PeerNode(NearbyPairing):
 
     def forget(self, peer_id):
         with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
             db.execute('DELETE FROM peers WHERE id=?', (peer_id,))
+            db.execute('DELETE FROM sightings WHERE id=?', (peer_id,))
+            for key in ('pending', 'receipt'):
+                saved = _near_get(db, key)
+                if saved and saved.get('peer_id') == peer_id:
+                    _near_set(db, key, None)
+            _near_set(db, 'completed', [p for p in _near_get(db, 'completed', []) if p != peer_id])
+            for key in ('candidates', 'probed'):
+                saved = _near_get(db, key, {})
+                saved.pop(peer_id, None)
+                _near_set(db, key, saved)
+            errors = json.loads(_state(db, 'peer_errors') or '{}')
+            errors.pop(peer_id, None)
+            _state(db, 'peer_errors', json.dumps(errors))
+            _state(db, 'error', '; '.join(errors.values())[:500])
+
+    def _peer_snapshot(self):
+        # Tokens stay private; they let an older network attempt distinguish a
+        # forgotten/re-paired device from the same identity's new authorization.
+        with self._db() as db:
+            return [dict(r) for r in db.execute('SELECT id AS peer_id,name,token FROM peers ORDER BY name,id')]
+
+    def _save_peer_errors(self, failures, checked=False):
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = dict(db.execute('SELECT id,token FROM peers'))
+            errors = {}
+            for peer, message in failures:
+                if current.get(peer['peer_id']) == peer['token']:
+                    previous = errors.get(peer['peer_id'])
+                    errors[peer['peer_id']] = previous + '; ' + message if previous else message
+            _state(db, 'peer_errors', json.dumps(errors))
+            _state(db, 'error', '; '.join(errors.values())[:500])
+            if checked:
+                _state(db, 'last_sync', _now())
+            return list(errors.values())
 
     def unshare(self, dataset):
         with self._db() as db:
@@ -491,6 +532,10 @@ class PeerNode(NearbyPairing):
             header['inventory'] = _inventory_digest(body)
         targets = list(dict.fromkeys([row['address']] + ([observed[0]] if observed else [])))
         for index, endpoint in enumerate(targets):
+            with self._db() as db:
+                if not db.execute('SELECT 1 FROM peers WHERE id=? AND token=?',
+                                  (peer_id, row['token'])).fetchone():
+                    raise ValueError('Device was forgotten while this request was in progress.')
             try:
                 _, result = wire.call(endpoint, peer_id, header, body)
             except (OSError, ValueError):
@@ -498,8 +543,10 @@ class PeerNode(NearbyPairing):
                     raise
                 continue
             with self._db() as db:
-                db.execute('UPDATE peers SET address=?,seen=? WHERE id=? AND token=?',
-                           (endpoint, _now(), peer_id, row['token']))
+                saved = db.execute('UPDATE peers SET address=?,seen=? WHERE id=? AND token=?',
+                                   (endpoint, _now(), peer_id, row['token']))
+                if not saved.rowcount:
+                    raise ValueError('Device was forgotten while this request was in progress.')
             return result
 
     def _catalog(self, peer_id):
@@ -520,15 +567,15 @@ class PeerNode(NearbyPairing):
     def available(self):
         self._device()
         result, errors = [], []
-        for peer in self.peers():
+        for peer in self._peer_snapshot():
             try:
                 items = self._catalog(peer['peer_id'])
                 for item in items:
                     result.append(dict(dataset=item['dataset'], name=item['name'],
                                        peer_id=peer['peer_id'], peer_name=peer['name']))
             except (ValueError, OSError, KeyError, TypeError) as exc:
-                errors.append(f"{peer['name']}: {exc}")
-        self._error('; '.join(errors))
+                errors.append((peer, f"{peer['name']}: {exc}"))
+        self._save_peer_errors(errors)
         return result
 
     @staticmethod
@@ -625,14 +672,14 @@ class PeerNode(NearbyPairing):
         with self._sync_lock:
             files = {f['dataset']: f for f in self.local_files()}
             errors, received, sent, checked = [], 0, 0, 0
-            for peer in self.peers():
+            for peer in self._peer_snapshot():
                 if stop.is_set():
                     break
                 try:
                     peer_id = peer['peer_id']
                     shared = self._catalog(peer_id)
                 except (ValueError, OSError, KeyError, TypeError) as exc:
-                    errors.append(f"{peer['name']}: {exc}")
+                    errors.append((peer, f"{peer['name']}: {exc}"))
                     continue
                 for item in shared:
                     dataset = item['dataset']
@@ -645,8 +692,6 @@ class PeerNode(NearbyPairing):
                         sent += outgoing
                         checked += 1
                     except (ValueError, RuntimeError, OSError, KeyError, TypeError, sqlite3.Error) as exc:
-                        errors.append(f"{peer['name']} / {files[dataset]['name']}: {exc}")
-            with self._db() as db:
-                _state(db, 'last_sync', _now())
-                _state(db, 'error', '; '.join(errors)[:500])
+                        errors.append((peer, f"{peer['name']} / {files[dataset]['name']}: {exc}"))
+            errors = self._save_peer_errors(errors, checked=True)
             return dict(received=received, sent=sent, checked=checked, errors=errors)
