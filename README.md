@@ -135,7 +135,7 @@ flow /path/to/travel.sqlite3
 
 Close Flow before copying a standalone database to another computer. The file carries records, starting balances, audit history, and map positions.
 
-Optional **Sync** keeps desktop and Android copies current through one computer on your network. Each device saves locally and can work offline; pending changes synchronize when it reconnects. Undo stays local to the session and stops if it would overwrite a newer received change. See [synchronization setup](docs/synchronization.md).
+Under **Sync**, pair devices and choose which files to share. Each device saves locally. When two paired devices meet, either can pass along edits from the others. See [share a file](docs/peer-sync.md). Files already using a [coordinator](docs/synchronization.md) keep using it until you choose to migrate.
 
 The **Data** tab offers CSV/JSON import and export, plus full database backup and restore. Imports preview duplicates and conflicts. CSV/JSON files contain flows only; [examples](examples/README.md) show the format.
 
@@ -143,7 +143,7 @@ The **Data** tab offers CSV/JSON import and export, plus full database backup an
 
 Flow uses Python, Tkinter, Matplotlib, and SQLite. Quantities use decimal storage and exact arithmetic; drawing coordinates use floating point. Dates use local wall-clock time. See the [schema](flowledger/schema.sql) and [Python examples](examples/README.md).
 
-The [Android preview](android/README.md) uses the same Python engine with a touch interface. Its Gradle project is in `android/`; the phone adapter is in `mobile/`.
+The [Android preview](android/README.md) uses the same Python engine with a touch interface. Its Gradle project is in `android/`; the phone adapter is in `mobile/`. The Android build from this checkout supports coordinator sync. Direct pairing on a phone requires the peer-capable preview (0.4.0 or newer).
 
 Run the tests on a graphical desktop:
 

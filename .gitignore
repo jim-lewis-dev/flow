@@ -40,3 +40,8 @@ coordinator.json
 server.key
 server.crt
 service.lock
+coordinator.retired.json
+device-key.pem
+device-cert.pem
+identity.lock
+listener.lock

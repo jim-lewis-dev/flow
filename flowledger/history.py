@@ -168,7 +168,7 @@ class SessionHistory:
             self._capturing = False
             self.repo.conn.execute(f"DELETE FROM {self._journal}")
         if changes:
-            self._undo.append(_Action(label, changes, self.repo.sync.history_tokens(changes) if getattr(self.repo, "sync", None) and self.repo.sync.enabled else None))
+            self._undo.append(_Action(label, changes, self.repo.sync.history_tokens(changes) if getattr(self.repo, "sync", None) and self.repo.sync.tracking else None))
             self._redo.clear()
         return result
 
@@ -218,8 +218,15 @@ class SessionHistory:
 
     def _restore(self, action: _Action, *, undo: bool) -> None:
         with self.repo.atomic():
+            tracked = self.repo.sync is not None and self.repo.sync.tracking
             if action.tokens is not None:
                 self.repo.sync.check_history_tokens(action.tokens)
+            elif tracked:
+                # This action predates sharing. Its expected remote revisions
+                # are the empty baseline, even if a peer changed a value back.
+                tokens = self.repo.sync.history_tokens(action.changes)
+                self.repo.sync.check_history_tokens({identity: dict.fromkeys(fields, '')
+                                                     for identity, fields in tokens.items()})
             # An unrecorded write must not be silently overwritten. Unrelated
             # records can change without invalidating this sparse undo step.
             for change in action.changes:
@@ -234,7 +241,7 @@ class SessionHistory:
             # A newly attached tag or map position must not disappear through
             # an ON DELETE CASCADE while undoing an older parent insertion.
             deleting = {(change.table, change.key) for change in action.changes
-                        if action.tokens is not None and (change.before if undo else change.after) is None}
+                        if tracked and (change.before if undo else change.after) is None}
             for table, key in deleting:
                 if table == "flows":
                     dependents = [("flow_tags", tuple(row)) for row in self.repo.conn.execute(
@@ -291,7 +298,7 @@ class SessionHistory:
             action.undo()
         else:
             self._restore(action, undo=True)
-            if action.tokens is not None:
+            if self.repo.sync is not None and self.repo.sync.tracking:
                 action = replace(action, tokens=self.repo.sync.history_tokens(action.changes))
         self._undo.pop()
         self._redo.append(action)
@@ -306,7 +313,7 @@ class SessionHistory:
             action.redo()
         else:
             self._restore(action, undo=False)
-            if action.tokens is not None:
+            if self.repo.sync is not None and self.repo.sync.tracking:
                 action = replace(action, tokens=self.repo.sync.history_tokens(action.changes))
         self._redo.pop()
         self._undo.append(action)

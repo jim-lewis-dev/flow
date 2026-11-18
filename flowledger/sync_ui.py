@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from . import sync_transport
+from .peer_ui import PeerController
 
 
 class SyncController:
@@ -25,6 +26,7 @@ class SyncController:
         self.catching_up = False
         self.next_poll = 0
         self._conflicts = []
+        self.peer = PeerController(app)
         app.bind("<Destroy>", self._destroyed, add="+")
         self._schedule(100)
 
@@ -42,6 +44,7 @@ class SyncController:
 
     def close(self):
         self.closed = True
+        self.peer.close()
         if self.after_id is not None:
             try:
                 self.app.after_cancel(self.after_id)
@@ -106,8 +109,9 @@ class SyncController:
                     self.next_poll = 20
         except Empty:
             pass
+        self.peer.poll()
         sync = self.sync
-        enabled = sync is not None and sync.status()["enabled"]
+        enabled = not self.app.demo and sync is not None and sync.enabled
         if enabled and not self.running:
             if self.next_poll <= 0:
                 try:
@@ -119,10 +123,10 @@ class SyncController:
             else:
                 self.next_poll -= 1
         self._display_status()
-        self._schedule()
+        self._schedule(100 if enabled or self.running or self.peer.pending else 500)
 
     def _display_status(self):
-        status = self.sync.status() if self.sync is not None else {"enabled": False}
+        status = self.sync.status() if self.sync is not None and self.sync.enabled else {"enabled": False}
         pending = status.get("pending", 0)
         self._conflicts = status.get("conflicts", [])
         if self.error:
@@ -141,10 +145,24 @@ class SyncController:
             short, text = "Up to date", "Up to date"
         else:
             short, text = "Offline", "Saved locally | Waiting for the coordinator"
+        if not status["enabled"] and self.peer.short_status():
+            short = self.peer.short_status()
         self.app.sync_button.configure(text=short)
+        local = self.peer.local_entry()
+        location = ("Shared | " + local["name"] if local else
+                    "Coordinator" if status["enabled"] else
+                    "Local peer copy" if self.peer.dataset else "Local")
+        if self.app.file_context.get() != location:
+            self.app.file_context.set(location)
         self.detail.set(text)
         if self.dialog is not None and self.dialog.winfo_exists():
-            self.connect_button.configure(state="disabled" if self.running else "normal")
+            self.connect_button.configure(state="disabled" if self.app.demo or self.running or self.peer.dataset
+                                          or self.peer.pending == "share" else "normal")
+            peer = self.peer
+            feedback = peer.error or peer.notice.get()
+            if peer.pending not in (None, "resume", "status"):
+                feedback = "Working..."
+            self.panel_notice.set(feedback)
             self._display_conflict()
 
     def show(self):
@@ -155,34 +173,45 @@ class SyncController:
         window = self.dialog = tk.Toplevel(self.app)
         window.title("Sync")
         window.transient(self.app)
-        window.geometry("640x420")
-        window.minsize(480, 350)
+        window.geometry("700x540")
+        window.minsize(560, 460)
         window.columnconfigure(0, weight=1)
-        window.rowconfigure(3, weight=1)
-        ttk.Label(window, text=str(self.app.repo.path), wraplength=590).grid(
-            row=0, column=0, sticky="w", padx=18, pady=(16, 8))
-        ttk.Label(window, textvariable=self.detail, wraplength=590).grid(
-            row=1, column=0, sticky="w", padx=18, pady=(0, 12))
-        ttk.Label(window, text="Paste the coordinator's connection text:").grid(
-            row=2, column=0, sticky="w", padx=18)
-        self.connection_text = tk.Text(window, height=4, wrap="word", font=("DejaVu Sans", 9))
+        window.rowconfigure(0, weight=1)
+        self.book = ttk.Notebook(window)
+        self.book.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="nsew")
+        self.peer.attach(self.book)
+        coordinator = ttk.Frame(self.book, padding=10)
+        self.book.add(coordinator, text="Coordinator")
+        if self.sync is not None and self.sync.enabled:
+            self.book.select(coordinator)
+        coordinator.columnconfigure(0, weight=1)
+        coordinator.rowconfigure(3, weight=1)
+        ttk.Label(coordinator, text=str(self.app.repo.path), wraplength=590).grid(
+            row=0, column=0, sticky="w", padx=8, pady=(8, 4))
+        ttk.Label(coordinator, textvariable=self.detail, wraplength=590).grid(
+            row=1, column=0, sticky="w", padx=8, pady=(0, 12))
+        ttk.Label(coordinator, text="Paste the coordinator's connection text:").grid(
+            row=2, column=0, sticky="w", padx=8)
+        self.connection_text = tk.Text(coordinator, height=4, wrap="word", font=("DejaVu Sans", 9))
         self.connection_text.grid(row=3, column=0, sticky="nsew", padx=18, pady=6)
-        self.conflict_text = tk.Text(window, height=6, wrap="word", font=("DejaVu Sans", 9), state="disabled")
+        self.conflict_text = tk.Text(coordinator, height=6, wrap="word", font=("DejaVu Sans", 9), state="disabled")
         self.conflict_text.grid(row=4, column=0, sticky="ew", padx=18, pady=6)
-        self.conflict_actions = ttk.Frame(window)
+        self.conflict_actions = ttk.Frame(coordinator)
         self.conflict_actions.grid(row=5, column=0, sticky="w", padx=18)
         ttk.Button(self.conflict_actions, text="Keep local", command=lambda: self._resolve("local")).pack(side="left", padx=(0, 8))
         ttk.Button(self.conflict_actions, text="Use server", command=lambda: self._resolve("remote")).pack(side="left")
+        self.connect_button = ttk.Button(coordinator, text="Connect", command=self._connect)
+        self.connect_button.grid(row=6, sticky="e", pady=8, padx=8)
         buttons = ttk.Frame(window)
-        buttons.grid(row=6, column=0, sticky="e", padx=18, pady=16)
-        self.connect_button = ttk.Button(buttons, text="Connect", command=self._connect)
-        self.connect_button.pack(side="left", padx=(0, 8))
-        ttk.Button(buttons, text="Close", command=window.destroy).pack(side="left")
+        buttons.grid(row=1, column=0, sticky="ew", padx=18, pady=10)
+        self.panel_notice = tk.StringVar(window)
+        ttk.Label(buttons, textvariable=self.panel_notice, wraplength=510).pack(side="left", fill="x", expand=True)
+        ttk.Button(buttons, text="Close", command=window.destroy).pack(side="right")
         window.bind("<Escape>", lambda event: window.destroy())
         self._display_status()
 
     def _connect(self):
-        if self.running:
+        if self.app.demo or self.running or self.peer.dataset or self.peer.pending == "share":
             return
         try:
             config = sync_transport.parse_connection(self.connection_text.get("1.0", "end-1c"))

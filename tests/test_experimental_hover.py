@@ -73,7 +73,8 @@ class ExperimentalHoverTests(unittest.TestCase):
         x0, y0, x1, y1 = canvas.bbox(item)
         x = round((x0 + x1) / 2 - canvas.canvasx(0))
         y = round((y0 + y1) / 2 - canvas.canvasy(0))
-        canvas.event_generate("<Motion>", x=x, y=y)
+        # Redraw checks the actual pointer position before keeping a tooltip.
+        canvas.event_generate("<Motion>", x=x, y=y, warp=True)
         self.pump()
         # Tooltip timing is part of the interaction; allow its delayed display.
         self.app.after(650, self.app.quit)

@@ -222,22 +222,30 @@ class Repository:
     Use atomic() to group several save calls into one all-or-nothing operation.
     """
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, preflight=None):
+        """With preflight, open an existing file and check this connection before any schema changes."""
+
         self.sync = None
         self.path = str(path)
         if not self.path:
             raise ValueError("Database path cannot be empty.")
         if self.path != ":memory:":
             target = Path(self.path).expanduser().resolve()
-            target.parent.mkdir(parents=True, exist_ok=True)
+            if preflight is None:
+                target.parent.mkdir(parents=True, exist_ok=True)
             self.path = str(target)
-        self.conn = sqlite3.connect(self.path, isolation_level=None)
+        if preflight is not None and self.path == ":memory:":
+            raise ValueError("A preflight check requires an existing file.")
+        destination = Path(self.path).as_uri() + "?mode=rw" if preflight is not None else self.path
+        self.conn = sqlite3.connect(destination, isolation_level=None, uri=preflight is not None)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA busy_timeout = 5000")
         self.migration_backup_path = None
         self.migration_forecasts_path = None
         try:
+            if preflight is not None:
+                preflight(self)
             tables = self.conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
@@ -480,6 +488,12 @@ class Repository:
     def atomic(self) -> Iterator[None]:
         """Commit all enclosed writes together; nest safely using savepoints."""
         outer = not self.conn.in_transaction
+        if outer and self.sync is None:
+            # Sharing can be enabled by the network worker while an editor
+            # still has this database open. Arm its capture before writing.
+            if self.conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
+                from .sync import SyncState
+                SyncState(self)
         if outer and self.sync is not None:
             self.sync._start_capture()
         marker = "flow_" + uuid.uuid4().hex
@@ -488,12 +502,14 @@ class Repository:
             yield
             if outer and self.sync is not None:
                 self.sync._finish_capture()
+            self.conn.execute(f"RELEASE SAVEPOINT {marker}")
         except BaseException:
-            self.conn.execute(f"ROLLBACK TO SAVEPOINT {marker}")
-            self.conn.execute(f"RELEASE SAVEPOINT {marker}")
+            # RELEASE can itself fail (a deferred foreign key or busy writer).
+            # Roll back the records and their journal before returning control.
+            if self.conn.in_transaction:
+                self.conn.execute(f"ROLLBACK TO SAVEPOINT {marker}")
+                self.conn.execute(f"RELEASE SAVEPOINT {marker}")
             raise
-        else:
-            self.conn.execute(f"RELEASE SAVEPOINT {marker}")
         finally:
             if outer and self.sync is not None:
                 self.sync._stop_capture()
@@ -780,7 +796,8 @@ class Repository:
         For file databases the safety copy sits beside the current database.
         In-memory repositories retain a temporary safety copy on disk as well.
         """
-        if self.sync is not None and self.sync.enabled:
+        from .peer_store import dataset
+        if dataset(self) or (self.sync is not None and self.sync.enabled):
             raise ValueError("A synchronized file cannot be replaced by a backup. Open the backup separately or join a new local copy.")
         if self.conn.in_transaction:
             raise ValueError("Finish the current write before restoring.")
@@ -794,8 +811,8 @@ class Repository:
         try:
             self._validate_database(source, allow_legacy=True)
             if source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
-                shared = source.execute("SELECT value FROM sync_meta WHERE key='dataset'").fetchone()
-                if shared is not None and json.loads(shared[0]):
+                shared = source.execute("SELECT value FROM sync_meta WHERE key IN ('dataset','peer_dataset')")
+                if any(json.loads(row[0]) for row in shared):
                     raise ValueError("A synchronized backup cannot replace this file. Open it separately or join a new local copy.")
             # Migrate a private snapshot, leaving the source backup unchanged.
             # Validate the whole candidate before making any live-data changes.

@@ -55,7 +55,7 @@ class ExperimentalView(ttk.Frame):
     def __init__(self, master, repo, get_flows: Callable[[], list[dict]],
                  on_select_flow: Callable[[str], None],
                  on_view_change: Callable[[dict, str], None] | None = None,
-                 on_save_positions: Callable[[dict], None] | None = None):
+                 on_save_positions: Callable[[Callable[[], dict]], dict] | None = None):
         super().__init__(master)
         self.repo = repo
         self.get_flows = get_flows
@@ -264,7 +264,7 @@ class ExperimentalView(ttk.Frame):
 
     def _sync_enabled(self):
         sync = getattr(self.repo, "sync", None)
-        return sync is not None and sync.status()["enabled"]
+        return sync is not None and sync.tracking
 
     def get_view_state(self) -> dict:
         state = self.get_state()
@@ -356,30 +356,36 @@ class ExperimentalView(ttk.Frame):
         # its coordinates in memory for redo, but persist only existing names.
         names = {account["name"] for account in self.repo.list_accounts()}
         positions = {name: point for name, point in self._positions.items() if name in names}
-        try:
+        def save():
+            proposed = positions
             if self._sync_enabled():
                 current = self.repo.load_map_positions()
                 original = ({name: tuple(point) for name, point in before["positions"].items()}
                             if before is not None else self._saved_positions)
-                changes = {name for name in set(positions) | set(original)
-                           if positions.get(name) != original.get(name)}
+                changes = {name for name in set(proposed) | set(original)
+                           if proposed.get(name) != original.get(name)}
                 for name in changes:
                     if (current.get(name) != self._saved_positions.get(name)
-                            and current.get(name) != positions.get(name)):
+                            and current.get(name) != proposed.get(name)):
                         raise ValueError(f"{name} moved on another device. Try the move again.")
                 # Only the moved nodes change. Received coordinates for other
                 # accounts survive an open map and an in-progress drag.
                 merged = dict(current)
                 for name in changes:
-                    if name in positions:
-                        merged[name] = positions[name]
+                    if name in proposed:
+                        merged[name] = proposed[name]
                     else:
                         merged.pop(name, None)
-                positions = merged
-            if self.on_save_positions is None:
-                self.repo.save_map_positions(positions)
+                proposed = merged
+            self.repo.save_map_positions(proposed)
+            return proposed
+
+        try:
+            if self.on_save_positions is not None:
+                positions = self.on_save_positions(save)
             else:
-                self.on_save_positions(positions)
+                with self.repo.atomic():
+                    positions = save()
         except (ValueError, sqlite3.Error) as exc:
             self.message_var.set(f"Could not save layout: {exc}")
             if self._sync_enabled():

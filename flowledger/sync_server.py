@@ -45,6 +45,8 @@ def _write_json(path, value):
 
 def load_settings(directory):
     directory = Path(directory).expanduser().resolve()
+    if not (directory / 'coordinator.json').exists() and (directory / 'coordinator.retired.json').is_file():
+        raise ValueError('This coordinator was retired when its dataset moved to peer sharing.')
     settings = json.loads((directory / 'coordinator.json').read_text())
     parse_connection(settings)
     return directory, settings
@@ -70,6 +72,9 @@ def initialize(source, directory, endpoint, mirror=None):
     # with their original coordinator rather than starting a second authority.
     with_source = Repository(source)
     try:
+        from . import peer_store
+        if peer_store.dataset(with_source):
+            raise ValueError('This file already belongs to a shared peer dataset.')
         if getattr(with_source, 'sync', None) and with_source.sync.status().get('enabled'):
             raise ValueError('This file already belongs to a coordinator. Use its existing service directory.')
         directory.mkdir(parents=True, mode=0o700)
@@ -310,8 +315,9 @@ def main(argv=None):
             print(f'Coordinator created: {args.directory.expanduser().resolve()}')
             print('The original file was not changed. Start the service, then pair your devices.')
             return 0
-        directory, settings = load_settings(args.directory)
+        directory = args.directory.expanduser().resolve()
         if args.command == 'connection':
+            _, settings = load_settings(directory)
             print(json.dumps(parse_connection(settings), separators=(',', ':')))
             return 0
         # One service owns this directory. Never elect a second coordinator when
@@ -322,6 +328,8 @@ def main(argv=None):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
                 raise ValueError('This coordinator is already running.') from exc
+            # Read the settings under the same lock used for peer cutover.
+            _, settings = load_settings(directory)
             port = urlsplit(settings['endpoint']).port or 443
             with Coordinator((args.bind, port), directory, settings) as service:
                 service.mirror.start()

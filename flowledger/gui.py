@@ -230,7 +230,8 @@ class FlowApp(tk.Tk):
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(0, weight=1)
         ttk.Label(footer, textvariable=self.status_message, style="Muted.TLabel", font=(FONT, 8), width=1).grid(row=0, column=0, sticky="ew")
-        ttk.Label(footer, text="Local", style="Muted.TLabel", font=(FONT, 8)).grid(row=0, column=1, sticky="e")
+        self.file_context = tk.StringVar(self, "Local")
+        ttk.Label(footer, textvariable=self.file_context, style="Muted.TLabel", font=(FONT, 8)).grid(row=0, column=1, sticky="e")
 
     def _close_popups(self):
         """Dismiss every transient suggestion, including those outside Flows."""
@@ -280,7 +281,7 @@ class FlowApp(tk.Tk):
 
     def _record_edit_tokens(self, kind, record):
         sync = getattr(self.repo, "sync", None)
-        if sync is None or not sync.status()["enabled"]:
+        if sync is None or not sync.tracking:
             return {}
         table, key = (("flows", (record["flow_id"],)) if kind == "flow" else
                       ("account_balances", (record["name"].casefold(), record["units"])))
@@ -1490,16 +1491,18 @@ class FlowApp(tk.Tk):
             if kind == "flow":
                 data = self._flow_data()
                 changed = self._changed_form_fields("flow")
-                current = self.repo.get_flow(self.editing_id)
-                if current is None:
-                    raise ValueError("This flow was deleted on another device. Clear the form to continue.")
-                base = getattr(self, "_flow_edit_base", None) or current
-                self._check_edit_tokens("flow", changed, current)
-                for key in changed:
-                    if current[key] != base[key] and current[key] != data[key]:
-                        raise FlowInputError(key, f"{key.replace('_', ' ').title()}: changed on another device. Reselect the flow before editing this field.")
-                data = {**current, **{key: data[key] for key in changed}}
-                result = self.history.perform("Edit flow", lambda: self.repo.save_flow(data))
+                def save_changed_flow():
+                    current = self.repo.get_flow(self.editing_id)
+                    if current is None:
+                        raise ValueError("This flow was deleted on another device. Clear the form to continue.")
+                    base = getattr(self, "_flow_edit_base", None) or current
+                    self._check_edit_tokens("flow", changed, current)
+                    for key in changed:
+                        if current[key] != base[key] and current[key] != data[key]:
+                            raise FlowInputError(key, f"{key.replace('_', ' ').title()}: changed on another device. Reselect the flow before editing this field.")
+                    return self.repo.save_flow({**current, **{key: data[key] for key in changed}})
+
+                result = self.history.perform("Edit flow", save_changed_flow)
                 self._loading = True
                 try:
                     for key in ("date", "from_account", "to_account", "name", "units", "category", "status"):
@@ -1523,25 +1526,27 @@ class FlowApp(tk.Tk):
                 except ValueError as exc:
                     raise ValueError(f"Starting Balance: {exc}") from exc
                 when = normalize_date(self._account_when())
-                account = self._account_record(self.account_editing)
-                if account is None:
-                    raise ValueError("This account balance no longer exists.")
-                account = self.repo.get_account(account["name"], account["units"])
                 changed = self._changed_form_fields("account")
-                base = getattr(self, "_account_edit_base", None) or account
-                self._check_edit_tokens("account", changed, account)
-                if "opening" not in changed:
-                    amount = account["opening_amount"]
-                elif account["opening_amount"] != base["opening_amount"] and account["opening_amount"] != amount:
-                    raise ValueError("Starting Balance changed on another device. Reselect the account before editing it.")
-                if "date" not in changed:
-                    when = account["opening_at"]
-                elif account["opening_at"] != base["opening_at"] and account["opening_at"] != when:
-                    raise ValueError("Starting Date changed on another device. Reselect the account before editing it.")
-                result = self.history.perform("Edit account", lambda: self.repo.save_account(account["name"], opening_amount=amount, opening_at=when, units=account["units"]))
+                base = getattr(self, "_account_edit_base", None)
+
+                def save_changed_account():
+                    account = self._account_record(self.account_editing)
+                    if account is None:
+                        raise ValueError("This account balance no longer exists.")
+                    self._check_edit_tokens("account", changed, account)
+                    if ("opening" in changed and base and
+                            account["opening_amount"] not in (base["opening_amount"], amount)):
+                        raise ValueError("Starting Balance changed on another device. Reselect the account before editing it.")
+                    if ("date" in changed and base and account["opening_at"] not in (base["opening_at"], when)):
+                        raise ValueError("Starting Date changed on another device. Reselect the account before editing it.")
+                    return self.repo.save_account(account["name"], units=account["units"],
+                        opening_amount=amount if "opening" in changed else account["opening_amount"],
+                        opening_at=when if "date" in changed else account["opening_at"])
+
+                result = self.history.perform("Edit account", save_changed_account)
                 self._loading = True
                 try:
-                    if "opening" not in changed and account["opening_amount"] != base["opening_amount"]:
+                    if "opening" not in changed and base and result["opening_amount"] != base["opening_amount"]:
                         self.account_vars["opening"].set("" if result["opening_amount"] is None else format_quantity(result["opening_amount"]).replace(",", ""))
                     else:
                         try:
@@ -1549,7 +1554,7 @@ class FlowApp(tk.Tk):
                                 parse_quantity(raw)
                         except ValueError:
                             self.account_vars["opening"].set(result["opening_amount"])
-                    if "date" not in changed and account["opening_at"] != base["opening_at"]:
+                    if "date" not in changed and base and result["opening_at"] != base["opening_at"]:
                         self.account_vars["date"].set(result["opening_at"])
                 finally:
                     self._loading = False
@@ -1748,7 +1753,16 @@ class FlowApp(tk.Tk):
         if not flow or not self._finish_existing("flow"):
             return
         try:
-            self.history.perform("Void flow", lambda: self.repo.void_flow(flow["flow_id"]))
+            displayed = self.ledger_rows.get(flow["flow_id"], flow)
+
+            def cancel():
+                if self._sync_enabled():
+                    current = self.repo.get_flow(flow["flow_id"])
+                    if current is None or current["status"] != displayed["status"]:
+                        raise ValueError("This flow's status changed. Review the updated row before canceling it.")
+                return self.repo.void_flow(flow["flow_id"])
+
+            self.history.perform("Void flow", cancel)
             self.new_flow(focus=False, confirm=False)
             self.refresh_all()
             self._update_history_buttons()
@@ -1768,6 +1782,8 @@ class FlowApp(tk.Tk):
             def remove():
                 with self.repo.atomic():
                     for fid in selected:
+                        if self._sync_enabled() and self.repo.get_flow(fid) != self.ledger_rows.get(fid):
+                            raise ValueError("A selected flow changed. Review the updated rows before deleting them.")
                         self.repo.delete_flow(fid)
             self.history.perform("Delete flow" if len(selected) == 1 else "Delete flows", remove)
             self.new_flow(focus=False, confirm=False)
@@ -2095,14 +2111,14 @@ class FlowApp(tk.Tk):
 
     def _sync_enabled(self):
         sync = getattr(self.repo, "sync", None)
-        return sync is not None and sync.status()["enabled"]
+        return sync is not None and sync.tracking
 
-    def _save_experimental_positions(self, positions):
+    def _save_experimental_positions(self, save):
         if self._sync_enabled():
-            self.history.perform("Move account in flow map", lambda: self.repo.save_map_positions(positions))
+            result = self.history.perform("Move account in flow map", save)
             self._update_history_buttons()
-        else:
-            self.repo.save_map_positions(positions)
+            return result
+        return save()
 
     def _open_experimental_flow(self, flow_id):
         if not self.show_view("flows") or not self.ledger.exists(flow_id):

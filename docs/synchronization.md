@@ -1,4 +1,6 @@
-# Synchronization
+# Coordinator synchronization
+
+This guide describes files already using a coordinator and clients compatible with that protocol. For direct device pairing or a planned migration, see [peer synchronization](peer-sync.md).
 
 Each device works on its own SQLite file. A coordinator receives individual
 changes, puts them in order, and distributes them to the other devices. Local

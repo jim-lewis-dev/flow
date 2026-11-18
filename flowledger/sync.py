@@ -55,6 +55,9 @@ class SyncState:
         self._install_tables()
         conn = repo.conn
         conn.create_function('flow_sync_write_allowed', 0, lambda: int(self._muted > 0 or self._capturing))
+        # A distinct function keeps previous coordinator-capable clients out
+        # of peer files even when they are inside their own managed writes.
+        conn.create_function('flow_peer_write_allowed', 0, lambda: int(self._muted > 0 or self._capturing))
         if self.enabled:
             self._install_guards()
         conn.create_function(self._prefix + '_active', 0, lambda: int(self._capturing and not self._muted))
@@ -102,6 +105,10 @@ class SyncState:
     @property
     def enabled(self):
         return bool(self._get('dataset'))
+
+    @property
+    def tracking(self):
+        return self.enabled or bool(self._get('peer_dataset'))
 
     @contextmanager
     def muted(self):
@@ -158,6 +165,8 @@ class SyncState:
         self._write_versions(versions, base=True)
 
     def configure(self, *, dataset, client=None, endpoint='', token='', certificate='', seed=None, server=False):
+        if self._get('peer_dataset'):
+            raise ValueError('This file uses device-to-device sharing, not a coordinator.')
         if not isinstance(dataset, str) or not dataset.strip():
             raise ValueError('A shared dataset identifier is required.')
         if self.enabled and self._get('dataset') != dataset:
@@ -216,7 +225,7 @@ class SyncState:
     def field_tokens(self, table, key, columns=None):
         identity = _key(table, key)
         current = {row[0]: row[1] for row in self.repo.conn.execute('SELECT column_name,token FROM sync_versions WHERE identity=?', (identity,))}
-        if table == 'flows':
+        if table == 'flows' and not self._get('peer_dataset'):
             tag_tokens = [(identity, field, token) for identity, fields in self._versions().items()
                           if identity.startswith('flow_tags:') and json.loads(identity.split(':', 1)[1])[0] == key[0]
                           for field, token in fields.items()]
@@ -229,6 +238,7 @@ class SyncState:
 
     def history_tokens(self, changes):
         result = {}
+        revisions = self._versions(remote=True)
         for change in changes:
             columns = TABLES[change.table]
             if change.before is None or change.after is None:
@@ -236,20 +246,21 @@ class SyncState:
             else:
                 touched = ('__row__', *(c for c, a, b in zip(columns, change.before, change.after) if a != b))
             identity = _key(change.table, change.key)
-            current = self._versions(remote=True).get(identity, {})
+            current = revisions.get(identity, {})
             result[identity] = {column: current.get(column, '') for column in touched}
         return result
 
     def check_history_tokens(self, tokens):
+        revisions = self._versions(remote=True)
         for identity, expected in (tokens or {}).items():
-            actual = self._versions(remote=True).get(identity, {})
+            actual = revisions.get(identity, {})
             if any(actual.get(column, '') != value for column, value in expected.items()):
                 raise SyncConflict('Cannot undo or redo: a newer change affects this value.')
 
     def _start_capture(self):
         if self.enabled and self._get('server', False) and not self._muted:
             raise ValueError('This is a coordinator file. Join it through synchronization to edit a local copy.')
-        if self.enabled and not self._muted:
+        if self.tracking and not self._muted:
             self.repo.conn.execute(f'DELETE FROM {self._journal}')
             self._capturing = True
 
@@ -273,6 +284,10 @@ class SyncState:
                 identity = _key(table, key)
                 first = combined[identity][2] if identity in combined else old
                 combined[identity] = (table, key, first, new)
+        if self._get('peer_dataset'):
+            from .peer_store import capture
+            capture(self.repo, combined)
+            return
         changes = []
         versions = self._versions()
         operation_id = str(uuid.uuid4())
@@ -464,6 +479,8 @@ class SyncState:
             raise SyncConflict('Another record depends on this change.')
 
     def server_exchange(self, request):
+        if self._get('peer_dataset'):
+            raise ValueError('This file uses device-to-device sharing, not a coordinator.')
         if not isinstance(request, dict) or request.get('protocol') != PROTOCOL or request.get('dataset') != self._get('dataset'):
             raise ValueError('Wrong shared file or synchronization protocol.')
         cursor = request.get('cursor')
@@ -510,6 +527,8 @@ class SyncState:
                 'receipts': [r for r in receipts if r['sequence'] <= received_cursor], 'conflicts': [] if more else conflicts, 'more': more}
 
     def accept_response(self, response):
+        if self._get('peer_dataset'):
+            raise ValueError('This file uses device-to-device sharing, not a coordinator.')
         if not isinstance(response, dict) or response.get('protocol') != PROTOCOL or response.get('dataset') != self._get('dataset'):
             raise ValueError('Wrong shared file or synchronization protocol.')
         if not response.get('entries') and not response.get('receipts') and not response.get('conflicts') and response.get('cursor') == self._get('cursor', 0):
@@ -591,6 +610,8 @@ class SyncState:
         self._write_versions(versions)
 
     def resolve(self, operation_id, choice='remote'):
+        if self._get('peer_dataset'):
+            raise ValueError('This file uses device-to-device sharing, not a coordinator.')
         if choice not in ('local', 'remote'):
             raise ValueError('Choose local or remote.')
         with self.muted(), self.repo.atomic():
