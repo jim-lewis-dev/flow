@@ -289,7 +289,14 @@ def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None, on_
             options_error.append(f'Enable broadcast: {exc}')
         first, previous_status = True, None
         next_refresh = next_send = 0
+        last_received = None
         replied = {}
+        def report(status):
+            nonlocal previous_status
+            if on_status is not None and status != previous_status:
+                if on_status(status) is not False:
+                    previous_status = status
+
         # Beacons are untrusted hints; bound their rate before writing the local cache.
         bucket_at, tokens, last_seen = time.monotonic(), 32.0, {}
         while not stopped.is_set():
@@ -324,22 +331,26 @@ def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None, on_
             if now >= next_send:
                 next_send = now + 2
                 errors = list(setup_errors)
+                sent = False
                 for ip, broadcast, name in routes:
                     if ip in joined:
                         try:
                             sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(ip))
                             sock.sendto(beacon, (GROUP, DISCOVERY_PORT))
+                            sent = True
                         except OSError as exc:
                             errors.append(f'Multicast send on {ip}: {exc}')
                     if broadcast:
                         try:
                             _send_broadcast(sock, beacon, ip, broadcast, name)
+                            sent = True
                         except OSError as exc:
                             errors.append(f'Broadcast send to {broadcast}: {exc}')
-                status = '; '.join(errors)[:500]
-                if on_status is not None and status != previous_status:
-                    if on_status(status) is not False:
-                        previous_status = status
+                # A failed announcement method is harmless when another works.
+                # Receiving a beacon also proves discovery is working, including
+                # on networks that allow only one direction of announcements.
+                receiving = last_received is not None and now - last_received < 30
+                report('' if sent or receiving else '; '.join(errors)[:500])
             if stopped.is_set():
                 break
             try:
@@ -361,6 +372,8 @@ def discover(stopped, identity, port, note, interface='0.0.0.0', ready=None, on_
                         last_seen = {k: v for k, v in last_seen.items() if now - v < 4}
                     last_seen[candidate] = now
                     note(candidate, address(source[0], int(tcp_port)))
+                    last_received = now
+                    report('')
                     # A phone may be able to send multicast even when incoming
                     # multicast is filtered. Its existing UDP listener also accepts
                     # the ordinary beacon as a unicast reply. Never send a secret.

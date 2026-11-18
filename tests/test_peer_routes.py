@@ -97,10 +97,30 @@ class PeerRoutesTests(unittest.TestCase):
         sock.bind.assert_called_once_with(('', wire.DISCOVERY_PORT))
         self.assertEqual(seen, ['192.168.3.1:47621'] * 3)
         self.assertIn('denied', messages[0])
-        self.assertIn('Multicast join on 192.168.2.70', messages[1])
-        self.assertEqual(messages[-1], '')
+        self.assertEqual(messages[1:], [''])
         self.assertEqual(broadcast.call_count, 2)
         self.assertEqual(broadcast.call_args.args, (sock, wire.MAGIC + b'a' * 64 + b' 47621', *local))
+
+    def test_failed_multicast_is_quiet_only_when_a_fallback_succeeds(self):
+        for fallback in (True, False):
+            with self.subTest(broadcast_works=fallback):
+                stop, sock = threading.Event(), Mock()
+                messages = []
+                sock.sendto.side_effect = PermissionError('multicast blocked')
+                def receive(size):
+                    stop.set()
+                    raise socket.timeout()
+                sock.recvfrom.side_effect = receive
+                with patch.object(wire, '_lan_routes', return_value=[('127.0.0.1', '127.255.255.255', 'lo')]), \
+                        patch('socket.socket', return_value=sock), \
+                        patch.object(wire, '_send_broadcast', side_effect=None if fallback else PermissionError('broadcast blocked')):
+                    wire.discover(stop, 'a' * 64, 4321, self.fail, on_status=messages.append)
+                if fallback:
+                    self.assertEqual(messages, [''])
+                else:
+                    self.assertEqual(len(messages), 1)
+                    self.assertIn('multicast blocked', messages[0])
+                    self.assertIn('broadcast blocked', messages[0])
 
     def test_real_broadcast_and_reply_when_multicast_is_blocked(self):
         # Real loopback datagrams only: no contact with devices on the test runner's LAN.

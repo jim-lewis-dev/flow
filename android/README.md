@@ -72,7 +72,7 @@ starting balances, audit history, units, and map positions travel together.
 
 1. Put both devices on the same Wi-Fi. Open **Files -> Pair device** on the
    phone and **Sync -> Devices -> Pair device** on the computer. Select the
-   other device on one screen. Compare the numbers, then choose **Pair** on
+   other device on one screen, then choose **Pair** on
    the receiving device. There is only one confirmation and nothing to type.
    Keep both pairing screens open until paired. **Forget** removes a saved
    connection in one tap and keeps all local files.

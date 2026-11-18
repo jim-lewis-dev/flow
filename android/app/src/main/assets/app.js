@@ -543,10 +543,9 @@ function nearbyPaint(){
   $('nearby-cancel').disabled=nearbyBusy;
   if(req){
     $('nearby-name').textContent=req.name;
-    $('nearby-number').textContent=String(req.number).replace(/^(...)(...)$/,'$1 $2');
-    $('nearby-hint').textContent=req.approved?'Waiting for '+req.name+' to confirm.':'Compare the number on both screens, then tap Pair.';
+    $('nearby-hint').textContent=req.approved?'Waiting for '+req.name+' to confirm.':'Pair with this device?';
   }else{
-    $('nearby-name').textContent='';$('nearby-number').textContent='';
+    $('nearby-name').textContent='';
   }
   const sig=JSON.stringify(items.map(p=>[p.peer_id,p.name,p.address]));
   if(sig!==nearbyList){

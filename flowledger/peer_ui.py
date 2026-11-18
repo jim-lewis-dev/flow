@@ -386,10 +386,8 @@ class PeerController:
         self.near_tree.bind("<ButtonRelease-1>", self._choose_nearby)
         self.comparison = ttk.Frame(d)
         self.comparison.grid(row=1, sticky="ew", pady=6)
-        self.digits = tk.StringVar(d)
-        ttk.Label(self.comparison, textvariable=self.digits, font=("DejaVu Sans", 22, "bold")).pack(side="left")
         self.match_button = ttk.Button(self.comparison, text="Pair")
-        self.match_button.pack(side="left", padx=(12, 5))
+        self.match_button.pack(side="left", padx=(0, 5))
         self.deny_button = ttk.Button(self.comparison, text="Cancel")
         self.deny_button.pack(side="left")
         self._near_items = ()
@@ -465,16 +463,14 @@ class PeerController:
         if request:
             who = request["name"]
             self.near_title.set(("Waiting for " + who + " to confirm." if request["approved"]
-                                 else "Compare this number with " + who + "."))
-            n = str(request["number"])
-            self.digits.set(n[:3] + " " + n[3:])
+                                 else "Pair with " + who + "?"))
             rid = request["id"]
             self.match_button.configure(command=lambda: self._submit("nearby_approve", rid),
                                         state="disabled" if request["approved"] else state)
             if request.get("direction") == "outgoing" or request["approved"]:
                 self.match_button.pack_forget()
             elif not self.match_button.winfo_manager():
-                self.match_button.pack(side="left", padx=(12, 5), before=self.deny_button)
+                self.match_button.pack(side="left", padx=(0, 5), before=self.deny_button)
             self.deny_button.configure(command=lambda: self._submit("nearby_cancel", rid), state=state)
         elif open_:
             devices = self.nearby.get("devices", ())

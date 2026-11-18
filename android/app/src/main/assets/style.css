@@ -49,7 +49,6 @@
 .peer-file,.peer-device{border-top:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere}
 .peer-file strong,.peer-file small{display:block}.peer-conflict-choice{display:block;text-align:left;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere}
 
-#nearby-number{display:block;font:600 32px monospace;letter-spacing:.08em;margin:6px 0}
 #nearby-verify{border-left:3px solid var(--green);padding:8px 10px;overflow-wrap:anywhere}
 #nearby-candidates .outline{width:100%;text-align:left;overflow-wrap:anywhere;margin-bottom:6px}
 #nearby-verify .file-actions{display:flex;flex-wrap:wrap;gap:6px}

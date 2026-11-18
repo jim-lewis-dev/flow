@@ -24,13 +24,15 @@ run(code.slice(code.indexOf('let nearbyActive='),code.indexOf('function schedule
   let candidate=node('nearby-candidates').querySelector('button');assert.equal(candidate.textContent,'Custard');
   view={...view,request:req};candidate.click();await wait();assert.equal(callMode(),'request');
   assert.equal(calls.at(-1)[1].peer_id,'c');
-  assert.equal(node('nearby-number').textContent,'013 245');
+  assert.doesNotMatch(html,/id="nearby-number"/);
+  assert.equal(node('nearby-name').textContent,'Custard');
   await run("nearbyAction('poll')");assert.equal(callMode(),'poll');
   assert.equal(node('nearby-approve').hidden,true);assert.equal(calls.some(x=>x[1]?.mode==='approve'),false);
   assert.match(node('nearby-hint').textContent,/Waiting for Custard/);
   // Only an incoming request presents a confirmation.
   view={...view,request:{...req,direction:'incoming',approved:false}};await run("nearbyAction('poll')");
   assert.equal(node('nearby-approve').hidden,false);assert.equal(node('nearby-approve').disabled,false);
+  assert.equal(node('nearby-hint').textContent,'Pair with this device?');
   view={...view,request:{...req,direction:'incoming',approved:true}};node('nearby-approve').click();await wait();
   assert.equal(callMode(),'approve');assert.equal(calls.at(-1)[1].request_id,'r1');
   assert.equal(node('nearby-approve').disabled,true);assert.match(node('nearby-hint').textContent,/Waiting/);

@@ -10,7 +10,7 @@ charge. Files stay local until you choose **Share this file**.
    (for example, `flow peer-test` on Linux).
 2. Open **Sync > Devices > Pair device** on desktop or **Files > Pair
    device** on the phone, on both devices. Select the other device on one
-   screen. Compare the numbers, then choose **Pair** on the receiving device.
+   screen, then choose **Pair** on the receiving device.
    Selecting the device sends the request; only the receiver confirms.
    Nothing needs to be typed. Keep both pairing screens open until paired.
 3. On the device holding the file, choose **Share this file** (desktop:
@@ -47,7 +47,7 @@ not a peer. Do not open the same live SQLite file on multiple devices.
 If a name does not appear, check that both devices are in nearby pairing and
 on the same home network. **Find by address** can use the other device's
 Wi-Fi or Ethernet address, or a hostname your network resolves. It uses
-the same number comparison; the port is optional. A timeout means Flow
+the same pairing request and acceptance; the port is optional. A timeout means Flow
 could not complete the connection. Guest Wi-Fi isolation, a firewall, or a
 VPN that blocks LAN access can prevent this. On Linux, `ip -br -4 addr`
 shows which address belongs to each interface.
