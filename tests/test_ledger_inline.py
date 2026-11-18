@@ -8,13 +8,14 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class LedgerInlineEditingTests(unittest.TestCase):
+class LedgerInlineEditingTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
 

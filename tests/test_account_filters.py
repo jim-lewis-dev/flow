@@ -3,12 +3,13 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class AccountFilterTests(unittest.TestCase):
+class AccountFilterTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()

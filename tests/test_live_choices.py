@@ -1,6 +1,7 @@
 """Suggestions and selectable values follow current saved references."""
 import os
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
@@ -55,7 +56,7 @@ class LiveVocabularyTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Needs an X display")
-class LiveChoicesGuiTests(unittest.TestCase):
+class LiveChoicesGuiTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.repo = Repository(":memory:")

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository
@@ -15,7 +16,7 @@ def account_key(name, units="USD"):
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class AutosaveTests(unittest.TestCase):
+class AutosaveTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()

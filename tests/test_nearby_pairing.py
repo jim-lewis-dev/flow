@@ -11,6 +11,7 @@ from unittest.mock import patch
 from flowledger.core import Repository
 from flowledger import peer_nearby, peer_wire as wire
 from flowledger.peer_network import PeerNode
+from discovery_test_support import isolate_discovery
 
 
 class NearbyPairingTests(unittest.TestCase):
@@ -18,6 +19,7 @@ class NearbyPairingTests(unittest.TestCase):
         root = tempfile.TemporaryDirectory()
         self.addCleanup(root.cleanup)
         self.root = Path(root.name)
+        isolate_discovery(self)
 
     def node(self, name, port=0, directory=None, discovery=False):
         n = PeerNode(directory or self.root / name, name=name, host='127.0.0.1',

@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from flowledger import peer_wire as wire
+from discovery_test_support import isolate_discovery, PRODUCTION_MAGIC
 
 
 class PeerRoutesTests(unittest.TestCase):
@@ -103,6 +104,7 @@ class PeerRoutesTests(unittest.TestCase):
 
     def test_real_broadcast_and_reply_when_multicast_is_blocked(self):
         # Real loopback datagrams only: no contact with devices on the test runner's LAN.
+        isolate_discovery(self)
         port = wire.DISCOVERY_PORT
         stop, reply = threading.Event(), threading.Event()
         addresses = []
@@ -131,11 +133,14 @@ class PeerRoutesTests(unittest.TestCase):
                     with real_socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
                         sender.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                         sender.bind(('127.0.0.2', port))
+                        # A running user's Flow may advertise during tests. Even
+                        # an announcement reaching our private port is ignored.
+                        sender.sendto(PRODUCTION_MAGIC + b'3' * 64 + b' 4321', source)
                         sender.sendto(phone, source)
                         sender.settimeout(2)
                         self.assertEqual(sender.recvfrom(256), (data, source))
                     self.assertTrue(reply.wait(1))
-                    self.assertEqual(addresses[0], ('2' * 64, '127.0.0.2:4321'))
+                    self.assertEqual(addresses, [('2' * 64, '127.0.0.2:4321')])
                 finally:
                     stop.set()
                     thread.join(2)

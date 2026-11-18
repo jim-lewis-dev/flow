@@ -6,13 +6,14 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class UnitsGuiTests(unittest.TestCase):
+class UnitsGuiTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()

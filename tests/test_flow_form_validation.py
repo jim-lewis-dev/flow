@@ -6,12 +6,13 @@ from pathlib import Path
 import tempfile
 from tkinter import ttk
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Needs an X display")
-class FlowFormValidationTests(unittest.TestCase):
+class FlowFormValidationTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
 

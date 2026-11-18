@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository
@@ -18,7 +19,7 @@ def account_key(name, units="USD"):
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class AccountInlineEditingTests(unittest.TestCase):
+class AccountInlineEditingTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
 
@@ -530,7 +531,7 @@ class AccountInlineEditingTests(unittest.TestCase):
         self.assert_new_form()
 
 
-class AccountRowSortTests(unittest.TestCase):
+class AccountRowSortTests(IsolatedGuiTestCase):
     def test_dates_use_full_timestamp_and_values_sort_as_decimals(self):
         from flowledger.gui import FlowApp
 

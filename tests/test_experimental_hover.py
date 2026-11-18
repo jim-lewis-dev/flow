@@ -6,12 +6,13 @@ import tempfile
 import tkinter as tk
 from tkinter import ttk
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class ExperimentalHoverTests(unittest.TestCase):
+class ExperimentalHoverTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
 

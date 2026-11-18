@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
@@ -16,7 +17,7 @@ from flowledger.core import Repository
 PROJECT = Path(__file__).resolve().parents[1]
 
 
-class TerminalInterruptTests(unittest.TestCase):
+class TerminalInterruptTests(IsolatedGuiTestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

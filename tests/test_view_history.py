@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
@@ -15,7 +16,7 @@ from flowledger.table_columns import displayed_columns, field_at
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class ViewHistoryTests(unittest.TestCase):
+class ViewHistoryTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()

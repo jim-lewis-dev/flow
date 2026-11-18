@@ -15,6 +15,7 @@ from unittest.mock import patch
 from flowledger import peer_wire
 from flowledger.core import Repository
 from flowledger.peer_network import PeerNode
+from discovery_test_support import isolate_discovery
 
 
 @unittest.skipUnless(shutil.which("openssl"), "desktop test identities require OpenSSL")
@@ -23,6 +24,7 @@ class PeerNetworkTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
+        isolate_discovery(self)
 
     def node(self, name, *, port=0, interval=3600):
         node = PeerNode(self.root / name, name=name, host="127.0.0.1",

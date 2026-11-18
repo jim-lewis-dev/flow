@@ -4,13 +4,14 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository, balance_at
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class ControlFixGuiTests(unittest.TestCase):
+class ControlFixGuiTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.directory = tempfile.TemporaryDirectory()

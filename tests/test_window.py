@@ -1,12 +1,13 @@
 """Fullscreen requests and Escape behavior; real monitor placement needs a WM."""
 import os
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Needs an X display")
-class WindowTests(unittest.TestCase):
+class WindowTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.requests = []

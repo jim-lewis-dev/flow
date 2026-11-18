@@ -6,6 +6,7 @@ import shutil
 import threading
 import time
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 from tempfile import TemporaryDirectory
 
@@ -13,7 +14,7 @@ from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Tk needs a display")
-class PeerDesktopTests(unittest.TestCase):
+class PeerDesktopTests(IsolatedGuiTestCase):
     def setUp(self):
         self.temp = TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

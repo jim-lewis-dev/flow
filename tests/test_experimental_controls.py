@@ -4,12 +4,13 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 
 from flowledger.core import Repository
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "A graphical DISPLAY is required")
-class ExperimentalControlsTests(unittest.TestCase):
+class ExperimentalControlsTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
 

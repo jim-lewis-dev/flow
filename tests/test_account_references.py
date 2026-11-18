@@ -1,6 +1,7 @@
 """Account visibility follows saved endpoints; validation stays silent."""
 import os
 import unittest
+from gui_test_support import IsolatedGuiTestCase
 from unittest.mock import patch
 
 from flowledger.core import Repository
@@ -51,7 +52,7 @@ class ReferencedAccountsTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.environ.get("DISPLAY"), "Needs an X display")
-class AccountVisibilityGuiTests(unittest.TestCase):
+class AccountVisibilityGuiTests(IsolatedGuiTestCase):
     def setUp(self):
         from flowledger.gui import FlowApp
         self.repo = Repository(":memory:")
