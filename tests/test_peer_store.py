@@ -239,12 +239,12 @@ class PeerStoreTests(unittest.TestCase):
             self.b.conn.execute('INSERT INTO peer_events(id,payload) VALUES(?,?)',
                                 (first['id'], store._json(first)))
         self.assertTrue(store.receive(self.b, [second, first]))
-        legacy_child = deepcopy(second)
-        legacy_child['id'] = str(uuid.uuid4())
-        legacy_child['parents'] = [second['id']]
-        del legacy_child['stamp']
-        with self.assertRaisesRegex(ValueError, 'older event cannot follow'):
-            store.receive(self.b, [legacy_child])
+        unstamped_child = deepcopy(second)
+        unstamped_child['id'] = str(uuid.uuid4())
+        unstamped_child['parents'] = [second['id']]
+        del unstamped_child['stamp']
+        with self.assertRaisesRegex(ValueError, 'unsupported sharing history'):
+            store.receive(self.b, [unstamped_child])
 
     def test_timestamp_tie_breaks_by_event_uuid_on_every_device(self):
         low, high = str(uuid.UUID(int=1)), str(uuid.UUID(int=2))

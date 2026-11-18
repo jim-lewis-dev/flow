@@ -1,4 +1,4 @@
-"""Latest-edit-wins projection, historical replay, and relational integrity."""
+"""Latest-edit-wins projection and relational integrity."""
 from copy import deepcopy
 from itertools import permutations
 from pathlib import Path
@@ -8,7 +8,6 @@ import unittest
 from unittest.mock import patch
 
 from flowledger.core import DEFAULT_ANCHOR, Repository
-from flowledger.peer_legacy import project as legacy_project
 from flowledger.peer_projection import project
 from flowledger.sync import SyncState, _key
 
@@ -23,11 +22,6 @@ def event(name, *changes, parents=(), stamp=100):
         result['stamp'] = [stamp, 0] if isinstance(stamp, int) else stamp
     return result
 
-
-def decision(name, conflict, value, *parents):
-    choice = next(c for c in conflict['choices'] if c['value'] == value)
-    return dict(event(name, parents=parents, stamp=None),
-                resolution={'conflict': conflict['id'], 'choice': choice['id']})
 
 
 class ProjectionTests(unittest.TestCase):
@@ -287,54 +281,18 @@ class ProjectionTests(unittest.TestCase):
             with self.subTest(stamp=stamp), self.assertRaisesRegex(ValueError, 'Invalid peer edit stamp'):
                 project(self.initial, [self.edit('a', stamp=stamp, notes='first')])
 
-    def test_legacy_conflict_and_recorded_decision_are_translated_without_a_queue(self):
-        a = self.edit('a', stamp=None, notes='one')
-        b = self.edit('b', stamp=None, notes='two')
-        _, [conflict], _ = legacy_project(self.initial, [a, b])
-        resolved = decision('resolve', conflict, 'one', 'a', 'b')
-        rows, _, versions = self.assert_orders([b, a, resolved])
-        self.assertEqual('one', rows[self.identity]['row']['notes'])
-        self.assertEqual('resolve', versions[self.identity]['notes'])
-        with self.assertRaisesRegex(ValueError, 'observed'):
-            project(self.initial, [a, b, dict(resolved, parents=['a'])])
-        with self.assertRaisesRegex(ValueError, 'selected value'):
-            project(self.initial, [a, b, dict(resolved, resolution=dict(resolved['resolution'], choice='fake'))])
-        with self.assertRaisesRegex(ValueError, 'legacy resolution'):
-            project(self.initial, [a, b, dict(resolved, stamp=[100, 0])])
-
-    def test_old_offline_edits_validate_original_common_before_and_remain_available(self):
-        a = self.edit('a', stamp=None, name='one')
-        b = self.edit('b', stamp=None, name='two')
-        old_note = self.edit('old-note', stamp=None, parents=['a', 'b'], notes='old offline note')
-        rows, _, _ = self.assert_orders([a, b, old_note])
-        self.assertEqual(dict(self.base, name='two', notes='old offline note'), rows[self.identity]['row'])
-        new_before = dict(self.base, name='two')
-        current = self.edit('current', parents=['a', 'b'], before=new_before, stamp=1, name='new title')
-        rows, _, _ = self.assert_orders([a, b, current, old_note])
-        self.assertEqual(dict(self.base, name='new title', notes='old offline note'), rows[self.identity]['row'])
-        old_late = self.edit('old-late', parents=['old-note'], before=dict(self.base, notes='old offline note'),
-                             stamp=None, notes='later old note')
-        rows, _, _ = project(self.initial, [a, b, current, old_note, old_late])
-        self.assertEqual('later old note', rows[self.identity]['row']['notes'])
-        with self.assertRaisesRegex(ValueError, 'cannot follow stamped'):
-            project(self.initial, [current, a, b, dict(old_note, parents=['current'])])
-
-    def test_new_stamped_edit_always_wins_over_deeper_old_history(self):
-        old = self.edit('old', stamp=None, notes='old')
-        deeper = self.edit('deeper', stamp=None, parents=['old'], before=old['changes'][0]['after'], notes='deeper')
-        new = self.edit('new', stamp=1, notes='current')
-        rows, _, _ = self.assert_orders([deeper, new, old])
-        self.assertEqual('current', rows[self.identity]['row']['notes'])
-
-    def test_legacy_delete_resolution_translates_to_liveness_without_null_fields(self):
-        note = self.edit('old-note', stamp=None, notes='before delete')
-        delete = event('old-delete', change('flows', self.key, self.base, None), stamp=None)
-        _, [conflict], _ = legacy_project(self.initial, [note, delete])
-        resolved = decision('old-resolution', conflict, None, 'old-note', 'old-delete')
-        revive = self.edit('revive', stamp=100, name='New name')
-        rows, _, _ = self.assert_orders([note, delete, resolved, revive])
-        self.assertEqual(dict(self.base, notes='before delete', name='New name'), rows[self.identity]['row'])
-        self.assert_relations(rows)
+    def test_unstamped_events_and_resolution_payloads_are_rejected(self):
+        unstamped = self.edit('unstamped', stamp=None, notes='No timestamp')
+        with self.assertRaisesRegex(ValueError, 'Invalid peer edit stamp'):
+            project(self.initial, [unstamped])
+        first = self.edit('first', notes='Stamped')
+        child = self.edit('unstamped-child', stamp=None, parents=['first'],
+                          before=first['changes'][0]['after'], notes='No timestamp')
+        with self.assertRaisesRegex(ValueError, 'Invalid peer edit stamp'):
+            project(self.initial, [first, child])
+        resolved = dict(first, resolution={'conflict': 'old', 'choice': 'old'})
+        with self.assertRaisesRegex(ValueError, 'Unsupported peer resolution event'):
+            project(self.initial, [resolved])
 
     def test_four_replicas_delete_recreate_and_replay_without_partial_rows(self):
         rng = Random(19)

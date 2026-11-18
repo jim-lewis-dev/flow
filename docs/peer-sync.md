@@ -67,11 +67,11 @@ sudo ufw allow from 192.168.0.0/24 to any port 47621 proto tcp
 sudo ufw allow from 192.168.0.0/24 to any port 47622 proto udp
 ```
 
-Update Flow on every device before exchanging changes with this version, then
-reopen it. Older shared files upgrade automatically when opened. Existing
-paired devices and shared files keep their identities; no re-pairing is needed.
-Older edits have no recorded edit time, so they keep a deterministic historical
-order. New timestamped edits take precedence over those older edits.
+Keep Flow current on every device. Device pairings survive updates. Ordinary
+local files can be shared directly; sharing gives them a new dataset identity.
+Files shared with the older conflict-resolution format no longer synchronize
+or accept edits. Their saved records remain readable and are not changed.
+Current timestamped shared files continue working without re-pairing.
 
 Linux uses OpenSSL to create a device identity once; the phone uses Android.
 The initial snapshot is limited to 56 MiB of serialized records. After joining, edits travel in batches of up to

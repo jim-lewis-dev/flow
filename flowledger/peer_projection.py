@@ -2,18 +2,85 @@
 
 A stamp orders actual edits to each logical field, never entire row snapshots.
 Quantity/unit, map coordinates and each ordered tag list are atomic groups.
-Historical unstamped events are validated with their original causal semantics
-before their writes are translated into these registers.
 """
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+import hashlib
+import heapq
+import json
 
 from .core import DEFAULT_ANCHOR
 from .history import _COLUMNS, _KEY_LENGTH
-from .peer_legacy import _Projection as _LegacyProjection, _digest, _get, _groups, _ordered, _put
 from .sync import _key
+
+
+def _wire(value):
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+
+
+def _digest(value):
+    return hashlib.sha256(_wire(value).encode()).hexdigest()
+
+
+def _groups(table):
+    fields = list(_COLUMNS[table][_KEY_LENGTH[table]:])
+    groups = []
+    # The magnitude has no meaning without its unit. A point is one position.
+    for group in (('amount', 'units'), ('x', 'y')):
+        if all(field in fields for field in group):
+            groups.append(group)
+            fields = [f for f in fields if f not in group]
+    if table == 'flows':
+        fields.append('tags')
+    return groups + [(field,) for field in fields]
+
+
+def _get(row, group):
+    if row is None or group == ('__row__',):
+        return row
+    if len(group) == 1:
+        return row[group[0]]
+    return {field: row[field] for field in group}
+
+
+def _put(row, group, value):
+    if len(group) == 1:
+        row[group[0]] = value
+    else:
+        row.update(value)
+
+
+def _ordered(events):
+    indexed = {}
+    for event in events.values() if isinstance(events, dict) else events:
+        key = event['id']
+        if key in indexed and indexed[key] != event:
+            raise ValueError('A peer event identifier was reused.')
+        indexed[key] = event
+    remaining = {}
+    children = defaultdict(list)
+    for key, event in indexed.items():
+        parents = set(event['parents'])
+        if any(parent not in indexed for parent in parents):
+            raise ValueError('Missing parent peer event.')
+        remaining[key] = len(parents)
+        for parent in parents:
+            children[parent].append(key)
+    ready = [key for key, pending in remaining.items() if not pending]
+    heapq.heapify(ready)
+    emitted = 0
+    while ready:
+        key = heapq.heappop(ready)
+        yield indexed[key]
+        emitted += 1
+        for child in children[key]:
+            remaining[child] -= 1
+            if not remaining[child]:
+                heapq.heappush(ready, child)
+    if emitted != len(indexed):
+        raise ValueError('Cycle in peer event history.')
 
 
 @dataclass
@@ -38,7 +105,7 @@ class _Record:
         self.field_masks = defaultdict(int)
         self.tag_keys = set((seed or {}).get('tags', {}))
 
-    def add(self, index, before, after, *, whole=False, groups=None):
+    def add(self, index, before, after, *, whole=False):
         bit = 1 << index
         self.writes[index] = _Write(index, before, after)
         self.written |= bit
@@ -50,8 +117,7 @@ class _Record:
         if after is not None:
             self.living |= bit
             for group in self.groups:
-                touched = (group in groups if groups is not None else
-                           whole or before is None or _get(before, group) != _get(after, group))
+                touched = whole or before is None or _get(before, group) != _get(after, group)
                 if touched:
                     self.field_masks[group] |= bit
         if self.table == 'flows':
@@ -124,7 +190,6 @@ class _Projection:
         self.past = []
         self.index = {}
         self.order = []
-        self.legacy = set()
         tags = defaultdict(dict)
         for entity in initial.values():
             if entity['table'] == 'flow_tags':
@@ -150,22 +215,16 @@ class _Projection:
         past = 0
         for parent in parents:
             past |= self.past[parent] | (1 << parent)
-        if 'stamp' in event:
-            stamp = event['stamp']
-            if (not isinstance(stamp, list) or len(stamp) != 2
-                    or any(type(n) is not int for n in stamp)
-                    or stamp[0] <= 0 or stamp[1] < 0
-                    or any(n > 2**53 - 1 for n in stamp)):
-                raise ValueError('Invalid peer edit stamp.')
-            if any(tuple(stamp) <= self.order[parent][:2] for parent in parents):
-                raise ValueError('Peer edit stamp must follow its parents.')
-            if 'resolution' in event:
-                raise ValueError('Stamped peer events cannot contain a legacy resolution.')
-        else:
-            if any(parent not in self.legacy for parent in parents):
-                raise ValueError('Legacy peer events cannot follow stamped edits.')
-            stamp = (0, 1 + max((self.order[parent][1] for parent in parents), default=0))
-            self.legacy.add(index)
+        stamp = event.get('stamp')
+        if (not isinstance(stamp, list) or len(stamp) != 2
+                or any(type(n) is not int for n in stamp)
+                or stamp[0] <= 0 or stamp[1] < 0
+                or any(n > 2**53 - 1 for n in stamp)):
+            raise ValueError('Invalid peer edit stamp.')
+        if any(tuple(stamp) <= self.order[parent][:2] for parent in parents):
+            raise ValueError('Peer edit stamp must follow its parents.')
+        if 'resolution' in event:
+            raise ValueError('Unsupported peer resolution event.')
         self.index[event['id']] = index
         self.names.append(event['id'])
         self.past.append(past)
@@ -175,13 +234,8 @@ class _Projection:
     def add(self, record, index, before, after, **kwargs):
         record.add(index, before, after, **kwargs)
 
-    def ingest(self, event, historical=None):
+    def ingest(self, event):
         index, past = self.register(event)
-        if historical is not None:
-            for old, write, groups, whole in historical:
-                record = self.record(old.table, old.key)
-                self.add(record, index, write.before, write.after, groups=groups, whole=whole)
-            return
         by_record = defaultdict(list)
         for change in event['changes']:
             table, key = change['table'], change['key']
@@ -287,37 +341,7 @@ def project(initial_rows, events):
     Any delivery order of a complete parent-closed graph produces the same
     result. Neither the snapshot nor immutable event payloads are modified.
     """
-    ordered = list(_ordered(events))
-    historical = None
-    translated = {}
-    # Old authors saw the original causal projection, including unresolved
-    # common values. Validate against that view before translating writes;
-    # validating old before-images against today's winners would lose valid
-    # old offline branches and recorded manual decisions.
-    for event in ordered:
-        if 'stamp' in event:
-            continue
-        if historical is None:
-            historical = _LegacyProjection(initial_rows)
-        if any(parent not in historical.index for parent in event['parents']):
-            raise ValueError('Legacy peer events cannot follow stamped edits.')
-        historical.ingest(event)
-        index = historical.index[event['id']]
-        bit = 1 << index
-        if 'resolution' in event:
-            candidates = historical.records.values()
-        else:
-            identities = {
-                _key('flows', change['key'][:1]) if change['table'] == 'flow_tags'
-                else _key(change['table'], change['key'])
-                for change in event['changes']}
-            candidates = (historical.records[identity] for identity in identities)
-        translated[event['id']] = [
-            (record, record.writes[index],
-             {group for group, mask in record.field_masks.items() if mask & bit},
-             bool(record.structural & bit))
-            for record in candidates if index in record.writes]
     projection = _Projection(initial_rows)
-    for event in ordered:
-        projection.ingest(event, translated.get(event['id']))
+    for event in _ordered(events):
+        projection.ingest(event)
     return projection.render((1 << len(projection.names)) - 1)

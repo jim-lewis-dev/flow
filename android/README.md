@@ -90,8 +90,10 @@ shared works even when a different file is open. Edits made offline remain
 in each phone file. Reopen both apps after reconnecting. Edits merge by field,
 with the latest actual edit winning. Amount and units stay together. A delete
 wins over older edits; a later actual edit brings the record back. Keep device
-clocks correct. Update every device for this format; existing files upgrade
-automatically and devices stay paired.
+clocks correct. Keep every device current; devices stay paired after updates.
+Ordinary local files can be shared directly. Files shared with the older
+conflict-resolution format remain readable but no longer synchronize or accept
+edits. Current timestamped shared files continue working.
 
 **Save As** takes a consistent, complete SQLite recovery copy, including the
 shared dataset identity and prior edits. It then opens

@@ -68,6 +68,7 @@ class SyncState:
         self._muted = 0
         self._capturing = False
         self._peer_event_payload = None
+        self._peer_format_version = None
         self._prefix = 'flow_sync_' + uuid.uuid4().hex
         self._journal = self._prefix + '_journal'
         self._triggers = []
@@ -88,8 +89,6 @@ class SyncState:
                 conn.execute(f"CREATE TEMP TRIGGER {name} AFTER {op} ON main.{table} WHEN {self._prefix}_active() BEGIN INSERT INTO {self._journal}(table_name,before_json,after_json) VALUES('{table}',{before},{after}); END")
                 self._triggers.append(name)
         repo.sync = self
-        from .peer_store import upgrade
-        upgrade(repo)
 
     def _install_tables(self):
         self.repo.conn.executescript('''
@@ -179,6 +178,8 @@ class SyncState:
 
     def _start_capture(self):
         if self.tracking and not self._muted:
+            from .peer_store import require_current
+            require_current(self.repo)
             self.repo.conn.execute(f'DELETE FROM {self._journal}')
             self._capturing = True
 

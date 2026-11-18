@@ -139,6 +139,34 @@ class MobilePeerTests(unittest.TestCase):
                 act('poll')
         peers._foreground=True
 
+    def test_retired_test_file_can_reopen_and_be_deleted_without_blocking_files(self):
+        import json
+        from flowledger import peer_store
+        store = self.a
+        record = self.flow(store)
+        shared = store.dispatch('peer_share', {'current': store.dataset})['state']
+        store.dispatch('peer_unshare', {'current': store.dataset})
+        key = store.dataset
+        # Represent the old on-disk format without retaining its replay code.
+        conn = store.repo.conn
+        seed = json.loads(conn.execute('SELECT payload FROM peer_seed').fetchone()[0])
+        seed['protocol'] = 2
+        with conn:
+            conn.execute('DROP TRIGGER peer_immutable_peer_seed_update')
+            conn.execute('UPDATE peer_seed SET payload=?', (json.dumps(seed),))
+            conn.execute("UPDATE sync_meta SET value='2' WHERE key='peer_protocol'")
+        store.close()
+        state = store.dispatch('init', {'dataset': key})['state']
+        self.assertEqual(state['flows'][0]['flow_id'], record['flow_id'])
+        self.assertEqual(state['peer_file'], shared['peer_file'])
+        with self.assertRaisesRegex(ValueError, 'unsupported sharing history'):
+            store.dispatch('peer_share', {'current': key})
+        self.assertEqual(store.repo.get_flow(record['flow_id'])['amount'], '10')
+        state = store.dispatch('delete_dataset', {'name': key})['state']
+        self.assertEqual(state['dataset'], '')
+        store.dispatch('new_dataset', {'name': 'Real file'})
+        self.assertTrue(store.dispatch('peer_share', {'current': store.dataset})['state']['peer_file'])
+
     def test_forget_is_local_even_if_network_cannot_start(self):
         from unittest.mock import patch
         peers = self.a.peers

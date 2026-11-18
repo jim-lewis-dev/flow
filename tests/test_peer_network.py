@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,47 @@ class PeerNetworkTests(unittest.TestCase):
         a.unshare(other_dataset)
         self.assertEqual([], b.available())
         self.assertTrue(source.exists())
+
+    def test_unsupported_history_cannot_be_exchanged_or_shared_again(self):
+        from flowledger import peer_store
+        a, b = self.node("host"), self.node("guest")
+        source, record = self.ledger("old-test.sqlite3")
+        dataset = a.share(source, "Old test")
+        identity = self.connect(b, a)
+        with closing(Repository(source)) as repo:
+            baseline = peer_store.genesis(repo)
+        # Earlier upgrades retained a protocol-2 seed despite marking the
+        # file protocol 3. Build that representation without an old reader.
+        with closing(sqlite3.connect(source)) as db, db:
+            trigger = db.execute("SELECT sql FROM sqlite_master WHERE name='peer_immutable_peer_seed_update'").fetchone()[0]
+            seed = json.loads(db.execute("SELECT payload FROM peer_seed").fetchone()[0])
+            seed["protocol"] = 2
+            db.execute("DROP TRIGGER peer_immutable_peer_seed_update")
+            db.execute("UPDATE peer_seed SET payload=?", (json.dumps(seed),))
+            db.execute(trigger)
+        unchanged = source.read_bytes()
+        # Even an empty exchange must check the file format before accepting
+        # a payload or reporting that this file can synchronize.
+        with self.assertRaisesRegex(ValueError, "Peer could not complete the request"):
+            b._remote(identity, "push", dataset=dataset, baseline=baseline, body=[])
+        a.unshare(dataset)
+        with self.assertRaisesRegex(ValueError, "unsupported sharing history"):
+            a.share(source, "Old test")
+        self.assertEqual([], a.local_files())
+        self.assertEqual([], b.available())
+        self.assertEqual(unchanged, source.read_bytes())
+        with closing(Repository(source)) as repo:
+            self.assertEqual(record, repo.get_flow(record["flow_id"]))
+        # A never-shared real file and the existing device pairing still work.
+        real, real_record = self.ledger("real.sqlite3")
+        current = a.share(real, "Water")
+        a.unshare(current)
+        self.assertEqual(current, a.share(real, "Water"))
+        self.assertEqual([current], [f["dataset"] for f in b.available()])
+        target = self.root / "joined-real.sqlite3"
+        b.join(current, identity, target)
+        with closing(Repository(target)) as repo:
+            self.assertEqual(real_record, repo.get_flow(real_record["flow_id"]))
 
     def test_multicast_discovery_pairs_by_name_without_broadcasting_file_or_device_names(self):
         # Use the loopback interface so discovery never advertises a test service on

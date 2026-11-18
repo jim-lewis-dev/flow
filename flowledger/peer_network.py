@@ -388,6 +388,7 @@ class PeerNode(NearbyPairing):
                     store.dataset(repo) != dataset or self._baseline(repo) != file['baseline']):
                 raise wire.Refused('The file at this location is a different document.')
         with closing(Repository(file['path'], preflight=check)) as repo:
+            store.require_current(repo)
             yield repo, file['name']
 
     def _register(self, db, dataset, name, path, baseline):
@@ -413,10 +414,7 @@ class PeerNode(NearbyPairing):
             previous = store.dataset(repo)
             if registered and registered[0] != previous:
                 raise ValueError('Another shared file is registered at this location. Stop sharing it first.')
-            if previous:
-                dataset = previous
-            else:
-                dataset = store.share(repo, name)
+            dataset = store.share(repo, name)
             self._register(db, dataset, name, path, self._baseline(repo))
             return dataset
 
