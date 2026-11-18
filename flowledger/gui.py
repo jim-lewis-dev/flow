@@ -2554,7 +2554,7 @@ class FlowApp(tk.Tk):
                 picker.entry.bind(sequence,
                     lambda event, k=key: self._finish_graph_date(k, event), add="+")
         self.chart_combined = tk.BooleanVar(self, False)
-        ttk.Checkbutton(controls, text="Combine accounts within each unit", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
+        ttk.Checkbutton(controls, text="Show combined balances\nwithin each unit", variable=self.chart_combined, style="Card.TCheckbutton").grid(row=7, column=0, sticky="w", pady=4)
         self.chart_fit_dates_button = ttk.Button(controls, text="Fit Dates", command=self.fit_chart_dates)
         self.chart_fit_dates_button.grid(row=8, column=0, sticky="ew", pady=(14, 0))
         ttk.Button(controls, text="Export Graph…", command=self.export_chart).grid(row=9, column=0, sticky="ew", pady=(8, 0))
@@ -2898,15 +2898,17 @@ class FlowApp(tk.Tk):
                 unit_unknown = [a for a in unit_accounts if a["opening_amount"] is None]
                 if not accounts:
                     axes.text(.5, .5, "Choose accounts and units to see their balances", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=14)
-                elif self.chart_combined.get() and unit_unknown:
-                    valid = []
-                    axes.text(.5, .5, "Combined balance is unknown\nSet the missing starting balances in Accounts.", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=13)
                 elif unit_unknown and not valid:
                     axes.text(.5, .5, "Starting balance required\nSet a starting balance in Accounts.", ha="center", va="center", transform=axes.transAxes, color=MUTED, fontsize=13)
-                series = graph_timeline(valid, flows, start, end, statuses, combined=self.chart_combined.get())
+                series = list(graph_timeline(valid, flows, start, end, statuses).items())
+                if self.chart_combined.get() and not unit_unknown:
+                    combined = graph_timeline(valid, flows, start, end, statuses, combined=True)
+                    combined_name = "Combined: " + " + ".join(account["name"] for account in valid)
+                    series.extend(((combined_name, series_units), rows)
+                                  for (_, series_units), rows in combined.items())
                 all_lines = []
                 all_values = []
-                for index, ((name, series_units), rows) in enumerate(series.items()):
+                for index, ((name, series_units), rows) in enumerate(series):
                     xs = [datetime.fromisoformat(date) for date, value in rows]
                     ys = [float(value) for date, value in rows]
                     if any(not math.isfinite(plotted) or (exact != 0 and plotted == 0)
@@ -2921,8 +2923,6 @@ class FlowApp(tk.Tk):
                     all_values.extend(ys)
                 if all_lines:
                     labels = [line.get_label() for line in all_lines]
-                    if self.chart_combined.get():
-                        labels = ["Combined: " + " + ".join(account["name"] for account in valid)]
                     legend = axes.legend(all_lines, labels, loc="lower left",
                                          bbox_to_anchor=(0, 1.005), frameon=False,
                                          fontsize=9, ncol=1 if len(all_lines) < 6 else 2)
@@ -3359,3 +3359,4 @@ class FlowApp(tk.Tk):
             item = tree.insert("", "end", values=(category, status, format_display(total, units), units, len(amounts)))
             raw_values[item] = {"amount": total}
         self._sortable_popup(tree, ("amount", "count"), raw_values)
+

@@ -203,9 +203,13 @@ class UnitsGuiTests(unittest.TestCase):
         self.assertEqual(rows["Checking", "kg"][-1][1], Decimal("1.375"))
         self.assertEqual(rows["Warehouse", "kg"][-1][1], Decimal("2.125"))
         rows = self.graph(pairs, combined=True)
-        self.assertEqual(set(rows), {("Combined", "USD"), ("Combined", "kg")})
-        self.assertEqual(rows["Combined", "USD"][-1][1], Decimal("90"))
-        self.assertEqual(rows["Combined", "kg"][-1][1], Decimal("3.5"))
+        self.assertEqual(set(rows), set(pairs) | {
+            ("Combined: Checking", "USD"), ("Combined: Checking + Warehouse", "kg")})
+        self.assertEqual(rows["Checking", "USD"][-1][1], Decimal("90"))
+        self.assertEqual(rows["Checking", "kg"][-1][1], Decimal("1.375"))
+        self.assertEqual(rows["Warehouse", "kg"][-1][1], Decimal("2.125"))
+        self.assertEqual(rows["Combined: Checking", "USD"][-1][1], Decimal("90"))
+        self.assertEqual(rows["Combined: Checking + Warehouse", "kg"][-1][1], Decimal("3.5"))
 
     def test_unknown_anchor_affects_its_unit_only_and_warning_names_pair(self):
         self.seed()
@@ -213,10 +217,10 @@ class UnitsGuiTests(unittest.TestCase):
         self.repo.save_account("Checking", None, "2026-10-01", units="kg")
         self.app.refresh_all()
         rows = self.graph((("Checking", "USD"), ("Checking", "kg")), combined=True)
-        self.assertEqual(set(rows), {("Combined", "USD")})
-        self.assertEqual(rows["Combined", "USD"][-1][1], Decimal("90"))
+        self.assertEqual(set(rows), {("Checking", "USD"), ("Combined: Checking", "USD")})
+        self.assertEqual(rows["Combined: Checking", "USD"][-1][1], Decimal("90"))
         self.assertIn("Checking · kg", self.app.chart_message.get())
-        self.assertTrue(any("Combined balance is unknown" in text.get_text()
+        self.assertTrue(any("Starting balance required" in text.get_text()
                             for text in self.app.chart_axes["kg"].texts))
 
     def test_graph_history_restores_both_unit_selections_axes_and_visibility(self):
@@ -414,3 +418,4 @@ class UnitsGuiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

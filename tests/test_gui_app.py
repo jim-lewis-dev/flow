@@ -297,7 +297,8 @@ class GuiIntegrationTests(unittest.TestCase):
         self.app.chart_combined.set(True)
         self.app.draw_chart()
         self.pump()
-        self.assertTrue(any("Combined balance is unknown" in text.get_text() for text in self.app.axes.texts))
+        self.assertIn("Savings", self.app.chart_message.get())
+        self.assertEqual([line.get_label() for line in self.app.chart_series], ["Checking"])
 
     def test_confirmed_and_pending_graphs_use_saved_flow_values(self):
         self.seed_flow()

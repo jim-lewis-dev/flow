@@ -159,9 +159,9 @@ class GraphAutoFitTests(unittest.TestCase):
         self.assertEqual(set(self.app.chart_axes), {"USD", "litres"})
         usd = [text.get_text() for text in self.app.chart_axes["USD"].get_legend().get_texts()]
         litres = [text.get_text() for text in self.app.chart_axes["litres"].get_legend().get_texts()]
-        self.assertTrue(any("Checking" in label and "Savings" in label for label in usd))
-        self.assertTrue(any("Tank" in label for label in litres))
-        self.assertEqual(list(self.line("Combined").get_ydata())[-1], 1100)
+        self.assertEqual(usd, ["Checking", "Savings", "Combined: Checking + Savings"])
+        self.assertEqual(litres, ["Tank", "Combined: Tank"])
+        self.assertEqual(list(self.line("Combined: Checking + Savings").get_ydata())[-1], 1100)
         self.app.canvas.draw()
         renderer = self.app.canvas.get_renderer()
         for axes in self.app.chart_axes.values():
@@ -208,3 +208,4 @@ class GraphAutoFitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

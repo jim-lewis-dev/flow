@@ -173,8 +173,10 @@ class GraphUiTests(unittest.TestCase):
     def test_combined_keeps_start_transition_and_hover(self):
         self.app.chart_combined.set(True)
         self.select("Checking", "Savings")
-        self.assertEqual(self.app.chart_series[self.line("Combined")][0][1], 1500)
-        self.assertIn('Combined: 1,488 USD', self.hover("2026-10-02", 1488))
+        self.assertEqual({line.get_label() for line in self.app.chart_series},
+                         {"Checking", "Savings", "Combined: Checking + Savings"})
+        self.assertEqual(self.app.chart_series[self.line("Combined: Checking + Savings")][0][1], 1500)
+        self.assertIn('Combined: Checking + Savings: 1,488 USD', self.hover("2026-10-02", 1488))
 
     def test_missing_balance_is_visible_for_single_partial_and_combined(self):
         self.select("Unknown")
@@ -187,8 +189,8 @@ class GraphUiTests(unittest.TestCase):
         self.assertIn("Unknown", self.app.chart_message.get())
         self.app.chart_combined.set(True)
         self.select("Checking", "Unknown")
-        self.assertFalse(self.app.chart_series)
-        self.assertTrue(any("Combined balance is unknown" in text.get_text() for text in self.app.axes.texts))
+        self.assertEqual([line.get_label() for line in self.app.chart_series], ["Checking"])
+        self.assertIn("Unknown", self.app.chart_message.get())
 
     def test_unpadded_dates_stay_raw_until_finished_and_through_keeps_whole_day(self):
         self.repo.save_flow(dict(units="USD", date="2026-10-03 23:59:59", from_account="Checking", to_account="Shop",
@@ -367,3 +369,4 @@ class GraphUiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
