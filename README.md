@@ -4,20 +4,37 @@ Flow records **quantified transfers between accounts**. A flow may move money, m
 
 Inspect individual transfers in the ledger, compare balances over time, or follow resources through an animated map of accounts. Include planned flows to explore future and projected balances.
 
+Each device keeps its own file and works offline. Paired devices exchange changes directly, with the latest edit winning for each field. No central server is required.
+
 ![Flow ledger: editable transfers with filters for accounts, units, status, categories, and tags](docs/ledger.png)
 
 ## Try it
 
-From the project directory on Ubuntu, with Python 3.10 or newer:
+On Ubuntu, with Python 3.10 or newer:
 
 ```bash
-sudo apt install python3-tk python3-matplotlib
+sudo apt install git python3-tk python3-matplotlib openssl
+git clone https://github.com/jim-lewis-dev/flow.git
+cd flow
+./install.sh
 ./flow --demo
 ```
 
 The demo uses a separate database. Run `./flow` for your own records. **Esc** leaves fullscreen; terminal **Ctrl+C** exits.
 
-For a `flow` command available from other directories, run `./install.sh`. It checks dependencies and links `~/.local/bin/flow` to this project. Keep the project folder in place.
+The installer checks dependencies and links `~/.local/bin/flow` to this project. Keep the project folder in place. If that directory is not on your PATH, follow the command the installer prints; `./flow` always works from the project directory.
+
+To update, close Flow and run this from the project directory:
+
+```bash
+git pull --ff-only
+```
+
+Reopen Flow afterward. Your data files and device pairings stay in place.
+
+### Android preview
+
+The [Android preview](https://github.com/jim-lewis-dev/flow/releases/tag/android-0.5.2-preview) provides flows, balances, graphs, and the account map on a phone. It uses the same data engine and pairs directly with desktop Flow or another phone. See [phone screenshots and installation instructions](android/README.md).
 
 ## The model
 
@@ -147,7 +164,7 @@ Flow uses Python, Tkinter, Matplotlib, and SQLite. Quantities use decimal storag
 
 The [Android preview](android/README.md) uses the same Python engine with a touch interface and the same device-pairing method. Its Gradle project is in `android/`; the phone adapter is in `mobile/`.
 
-Run the tests on a graphical desktop:
+Run the tests from the project directory on a graphical desktop:
 
 ```bash
 python3 -m unittest discover -s tests

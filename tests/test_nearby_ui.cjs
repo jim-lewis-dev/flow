@@ -15,20 +15,20 @@ const state={device:{}},c=vm.createContext({state,$:node,el:(t,k,txt)=>item(txt)
 const run=s=>vm.runInContext(s,c),wait=()=>new Promise(r=>setImmediate(r));
 run(code.slice(code.indexOf('let nearbyActive='),code.indexOf('function scheduleSync(')));
 (async()=>{
-  const req={id:'r1',name:'Custard',peer_id:'c',number:'013245',approved:true,direction:'outgoing'};
-  let view={open:true,request:null,paired:[],devices:[{peer_id:'c',name:'Custard',address:'192.168.1.2'}]};
+  const req={id:'r1',name:'Desktop A',peer_id:'c',number:'013245',approved:true,direction:'outgoing'};
+  let view={open:true,request:null,paired:[],devices:[{peer_id:'c',name:'Desktop A',address:'192.168.1.2'}]};
   c.api=async(a,v)=>{calls.push([a,v]);return {nearby:view};};
   const callMode=()=>calls[calls.length-1][1].mode;
   assert.equal(node('nearby-verify').hidden,true);
   node('pair-panel').open=true;node('pair-panel').events.toggle();await wait();assert.equal(callMode(),'open');
-  let candidate=node('nearby-candidates').querySelector('button');assert.equal(candidate.textContent,'Custard');
+  let candidate=node('nearby-candidates').querySelector('button');assert.equal(candidate.textContent,'Desktop A');
   view={...view,request:req};candidate.click();await wait();assert.equal(callMode(),'request');
   assert.equal(calls.at(-1)[1].peer_id,'c');
   assert.doesNotMatch(html,/id="nearby-number"/);
-  assert.equal(node('nearby-name').textContent,'Custard');
+  assert.equal(node('nearby-name').textContent,'Desktop A');
   await run("nearbyAction('poll')");assert.equal(callMode(),'poll');
   assert.equal(node('nearby-approve').hidden,true);assert.equal(calls.some(x=>x[1]?.mode==='approve'),false);
-  assert.match(node('nearby-hint').textContent,/Waiting for Custard/);
+  assert.match(node('nearby-hint').textContent,/Waiting for Desktop A/);
   // Only an incoming request presents a confirmation.
   view={...view,request:{...req,direction:'incoming',approved:false}};await run("nearbyAction('poll')");
   assert.equal(node('nearby-approve').hidden,false);assert.equal(node('nearby-approve').disabled,false);

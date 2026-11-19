@@ -33,7 +33,10 @@ run(source.match(/function bind\(id,event,fn\).*\n/)[0]);
 run(source.slice(source.indexOf('function hint('), source.indexOf('\nfunction render(')));
 run(source.slice(source.indexOf('function formData('), source.indexOf('\nfunction openEditor(')));
 run(source.match(/function resetView\(\).*\n/)[0]);
-run(source.slice(source.indexOf("bind('graph-basis'"), source.indexOf('\nfunction renderSync(')));
+const graphStart = source.indexOf("bind('graph-basis'");
+const graphEnd = source.indexOf('\nlet peerCatalog=');
+assert(graphStart >= 0 && graphEnd > graphStart, 'Graph handler boundaries must exist');
+run(source.slice(graphStart, graphEnd));
 const node = id => document.getElementById(id);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 

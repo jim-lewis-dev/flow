@@ -1,0 +1,10 @@
+{
+  "name": "flow-ui-tests",
+  "private": true,
+  "scripts": {
+    "test": "node test_mobile_ui.cjs && node test_nearby_ui.cjs && node test_peer_forget.cjs"
+  },
+  "devDependencies": {
+    "linkedom": "0.18.15"
+  }
+}

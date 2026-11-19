@@ -125,8 +125,8 @@ class MobilePeerTests(unittest.TestCase):
             self.assertEqual(act('open')['nearby'],view)
             self.assertEqual(act('poll')['nearby'],view)
             mock.nearby_approve.assert_not_called()
-            act('request',peer_id='custard')
-            mock.nearby_request.assert_called_once_with('custard')
+            act('request',peer_id='desktop-a')
+            mock.nearby_request.assert_called_once_with('desktop-a')
             act('approve',request_id='r1')
             mock.nearby_approve.assert_called_once_with('r1')
             act('cancel',request_id='r2')
@@ -173,7 +173,7 @@ class MobilePeerTests(unittest.TestCase):
         self.pair(self.a, self.b)
         identity = self.b.peers.node().status()['peer_id']
         peers._node.stop()
-        peers.error = 'Custard: connection refused'
+        peers.error = 'Desktop A: connection refused'
         with patch.object(peers, 'node', side_effect=OSError('network unavailable')) as start:
             result = peers.call('peer_forget', {'peer_id': identity})
         start.assert_not_called()

@@ -18,10 +18,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
       - name: Check browser scripts
         run: |
           node --check android/app/src/main/assets/app.js
           node --check android/app/src/main/assets/experimental.js
+      - name: Test phone interface
+        run: |
+          npm --prefix tests ci --ignore-scripts
+          npm --prefix tests test
       - name: Test and build Android
         working-directory: android
         run: ./gradlew --no-daemon testDebugUnitTest assembleDebug lintDebug

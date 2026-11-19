@@ -11,14 +11,14 @@ from discovery_test_support import isolate_discovery, PRODUCTION_MAGIC
 class PeerRoutesTests(unittest.TestCase):
     def test_enumeration_does_not_assume_10_means_vpn_or_advertise_a_tunnel(self):
         up, broadcast, point_to_point, loopback = 1, 2, 16, 8
-        adapters = [('nordlynx', up | point_to_point, '10.5.0.2'),
+        adapters = [('nordlynx', up | point_to_point, '10.8.0.2'),
                     ('docker0', up | broadcast, '172.17.0.1'),
                     ('lo', up | loopback, '127.0.0.1'),
-                    ('enp2s0', broadcast, '192.168.2.1'),
-                    ('wlp0s1', up | broadcast, '10.2.3.4'),
-                    ('enp3s0', up | broadcast, '192.168.0.70')]
+                    ('eth0', broadcast, '192.168.2.1'),
+                    ('wlan0', up | broadcast, '10.2.3.4'),
+                    ('eth1', up | broadcast, '192.168.50.10')]
         with patch.object(wire, '_ipv4_interfaces', return_value=[(*a, None) for a in adapters]):
-            self.assertEqual(wire.lan_hosts(), ['192.168.0.70', '10.2.3.4'])
+            self.assertEqual(wire.lan_hosts(), ['192.168.50.10', '10.2.3.4'])
             self.assertEqual(wire.lan_hosts('127.0.0.1'), ['127.0.0.1'])
         with patch.object(wire, '_ipv4_interfaces', return_value=[(*a, None) for a in adapters[:4]]):
             self.assertEqual(wire.lan_hosts(), [])
@@ -40,7 +40,7 @@ class PeerRoutesTests(unittest.TestCase):
         host = '1' * 64
         phone = '2' * 64
         sender = ('10.1.1.20', wire.DISCOVERY_PORT)
-        local = ['10.1.1.5', '192.168.0.70', '10.1.7.1']
+        local = ['10.1.1.5', '192.168.50.10', '10.1.7.1']
         stopped = threading.Event()
         sock = Mock()
         seen, joined, outbound = [], [], []
@@ -75,7 +75,7 @@ class PeerRoutesTests(unittest.TestCase):
         import time
         stop, sock = threading.Event(), Mock()
         phone = '2' * 64
-        local = ('192.168.2.70', '192.168.3.255', 'wlp0s20f3')
+        local = ('192.168.2.70', '192.168.3.255', 'wlan0')
         seen, messages = [], []
         clock = [10.0]
         def set_opt(level, opt, data):

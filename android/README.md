@@ -11,19 +11,30 @@ computers. Every device saves locally and can pass along the changes it knows.
 
 Start with the camp example to explore the controls without using your own records.
 
-## Install on a Galaxy S24
+## Install on Android
 
-Download `flow-android-preview.apk` on your phone, open it in **My Files**, and tap
-**Install**. If asked, allow **Install unknown apps** for My Files. Samsung's
+Download the [signed APK](https://github.com/jim-lewis-dev/flow/releases/download/android-0.5.2-preview/flow-android-preview-0.5.2-build20.apk)
+from the [Android preview release](https://github.com/jim-lewis-dev/flow/releases/tag/android-0.5.2-preview).
+This build is for ARM64 phones running Android 8 or newer; it has been tested
+on the Samsung Galaxy S24 family.
+
+Open the downloaded APK in your file manager (**My Files** on Samsung) and tap
+**Install**. If asked, allow **Install unknown apps** for that file manager. Samsung's
 **Auto Blocker** may need to be turned off for the installation; restore your
 usual security settings afterward. No rooting or developer mode is required
 for the ordinary APK installation path.
 
-If the earlier preview is installed, install this APK over it; there is no need
-to uninstall it. The package and signing key are unchanged.
+To update, close Flow and install the new signed APK over the existing app.
+Do not uninstall first. Updates keep your files and device pairings.
 
 The app appears as **flow**. Open **Files -> Try the camp example** to explore
 battery energy in Wh and water in L without using your own records.
+
+Camp on a Samsung Galaxy S24 Plus:
+
+| Flows | Experimental |
+| --- | --- |
+| <img src="../docs/android-flows.jpg" width="300" alt="Camp resource transfers in the Android ledger"> | <img src="../docs/android-experimental.jpg" width="300" alt="Camp energy transfers moving between accounts in the Android map"> |
 
 ## Your file, on your phone
 
@@ -46,9 +57,10 @@ and reopens it next time.
   The previous file remains unchanged. Use this to put a phone-only file in
   Downloads or Documents for transfer.
 
-For manual transfer, close Flow on the device you are leaving, copy the current
-`.sqlite3` file, and open it on the other device. Work on one device at a time;
-edits made independently on both devices do not merge. A folder such as
+For manual transfer of a standalone file, close Flow on the device you are
+leaving, copy the current `.sqlite3` file, and open it on the other device.
+Work on one device at a time; copying files does not merge independent edits.
+Use device sharing below to exchange edits automatically. A folder such as
 **Documents/flow** is a convenient place for transferred files. The Open picker
 remembers the last selected location.
 
@@ -60,8 +72,8 @@ a persistent message appears and the phone edits remain recoverable. Retry
 after restoring access, or use Save As. If the original changed outside Flow,
 it is not silently overwritten.
 
-Existing phone files from earlier previews are preserved. Files kept only in
-Flow's private folder need Save As before uninstalling or clearing app data.
+Files kept only in Flow's private folder need Save As before uninstalling or
+clearing app data.
 Installing an update over the existing app preserves them.
 
 Files use schema 8, including saved account positions. Other database formats
@@ -70,7 +82,7 @@ units, and map positions travel together.
 
 ## Share directly with another phone or computer
 
-1. Put both devices on the same Wi-Fi. Open **Files -> Pair device** on the
+1. Put both devices on the same local network. Open **Files -> Pair device** on the
    phone and **Sync -> Devices -> Pair device** on the computer. Select the
    other device on one screen, then choose **Pair** on
    the receiving device. There is only one confirmation and nothing to type.
@@ -91,9 +103,6 @@ in each phone file. Reopen both apps after reconnecting. Edits merge by field,
 with the latest actual edit winning. Amount and units stay together. A delete
 wins over older edits; a later actual edit brings the record back. Keep device
 clocks correct. Keep every device current; devices stay paired after updates.
-Ordinary local files can be shared directly. Files shared with the older
-conflict-resolution format remain readable but no longer synchronize or accept
-edits. Current timestamped shared files continue working.
 
 **Save As** takes a consistent, complete SQLite recovery copy, including the
 shared dataset identity and prior edits. It then opens
@@ -231,11 +240,22 @@ Android's document picker grants access only to files you choose. Device keys,
 trusted peers and the sharing catalog stay in a separate private installation
 directory. Peer edit history travels with the replica's SQLite data.
 
-Run the portable adapter tests:
+Run the portable phone adapter tests from the repository root:
 
 ```bash
-python3 -B -m unittest discover -s tests -v
+python3 -B -m unittest discover -s tests -p 'test_mobile*.py' -v
 ```
+
+With Node.js and npm installed, run the phone interface checks from the
+repository root:
+
+```bash
+npm --prefix tests ci --ignore-scripts
+npm --prefix tests test
+```
+
+These checks use the shipped HTML and JavaScript. Their DOM test dependency
+is development-only and is not bundled in the app.
 
 Run the native file-coordination tests with `./gradlew testDebugUnitTest` from
 `android/`. JUnit and Robolectric are test dependencies only; they are not
@@ -251,7 +271,7 @@ adb shell am instrument -w dev.jimlewis.flow.preview/dev.jimlewis.flow.EngineChe
 The result must report `success=true` with no failures or errors. The instrumentation runner
 and test modules are excluded from the release APK.
 
-For local browser development only:
+For local browser development, run from the repository root:
 
 ```bash
 python3 -m mobile.preview_server --data /tmp/flow-phone-test
@@ -264,6 +284,11 @@ Release signing reads `FLOW_ANDROID_KEYSTORE` and
 `FLOW_ANDROID_KEY_PASSWORD` from the build environment, with alias
 `flow-preview`. Keep signing material private and outside the source tree.
 An unrelated debug key cannot update an installed signed preview in place.
+
+With those variables set locally, run `./gradlew assembleRelease` from
+`android/`. The signed APK is written to
+`app/build/outputs/apk/release/app-release.apk`. Publish the APK as a release
+asset; keep the signing key and password private for future updates.
 
 ## License
 

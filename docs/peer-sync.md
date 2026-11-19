@@ -2,7 +2,8 @@
 
 Each device works on a local SQLite file. Pair devices once, then pick the
 files to share. Either device can create the original. No computer is in
-charge. Files stay local until you choose **Share this file**.
+charge. Files stay local until you choose **Share this file**. Normal pairing
+finds devices automatically; you do not need to configure an IP address.
 
 ## Pair, share, join
 
@@ -55,8 +56,10 @@ on the same home network. **Find by address** can use the other device's
 Wi-Fi or Ethernet address, or a hostname your network resolves. It uses
 the same pairing request and acceptance; the port is optional. A timeout means Flow
 could not complete the connection. Guest Wi-Fi isolation, a firewall, or a
-VPN that blocks LAN access can prevent this. On Linux, `ip -br -4 addr`
-shows which address belongs to each interface.
+VPN that blocks LAN access can prevent this. On the device you want to find,
+use `ip -br -4 addr` on Linux or open the connected Wi-Fi network's details
+on Android. Enter its Wi-Fi or Ethernet address in **Find by address** on the
+other device. Use the address on your shared LAN, not a VPN or loopback address.
 
 The peer listener uses TCP 47621; automatic discovery uses UDP 47622.
 Desktop peers announce on Wi-Fi and Ethernet using multicast and local subnet
@@ -64,13 +67,14 @@ broadcasts. Discovery keeps listening if an announcement method fails and
 retries when the network changes. Errors appear on the Devices page. Devices
 already paired are listed under Paired rather than offered for pairing again.
 Each computer with an active firewall needs to allow these ports on its LAN.
-No router port forwarding is needed. If you use UFW, scope any rules to your
-actual LAN. For example, if your LAN is `192.168.0.0/24` and your firewall is
-blocking Flow:
+No router port forwarding is needed. If UFW is blocking Flow, allow only your
+own LAN subnet. On Linux, `ip -4 route show scope link` lists connected
+subnets. Use the CIDR network beside your Wi-Fi or Ethernet interface, not
+a VPN or container network. Replace `YOUR_LAN_CIDR` below before running:
 
 ```sh
-sudo ufw allow from 192.168.0.0/24 to any port 47621 proto tcp
-sudo ufw allow from 192.168.0.0/24 to any port 47622 proto udp
+sudo ufw allow from YOUR_LAN_CIDR to any port 47621 proto tcp
+sudo ufw allow from YOUR_LAN_CIDR to any port 47622 proto udp
 ```
 
 Keep Flow current on every device. Device pairings survive updates. Local

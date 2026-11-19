@@ -167,12 +167,12 @@ class PeerDesktopTests(IsolatedGuiTestCase):
     def test_nearby_pairing_uses_one_confirmation_and_preserves_address(self):
         from unittest.mock import Mock
         node = Mock()
-        row = {"peer_id": "1" * 64, "name": "Custard", "address": "192.168.0.70:47621"}
+        row = {"peer_id": "1" * 64, "name": "Desktop A", "address": "192.168.50.10:47621"}
         idle = {"open": True, "devices": [row], "request": None, "paired": []}
-        request = {"id": "r-1", "name": "Custard", "number": "031245", "peer_id": row["peer_id"],
+        request = {"id": "r-1", "name": "Desktop A", "number": "031245", "peer_id": row["peer_id"],
                    "approved": True, "direction": "outgoing"}
-        node.status.return_value = {"peers": [], "files": [], "address": "192.168.0.88:47621",
-                                    "addresses": ["192.168.0.88:47621"], "name": "XPS"}
+        node.status.return_value = {"peers": [], "files": [], "address": "192.168.50.30:47621",
+                                    "addresses": ["192.168.50.30:47621"], "name": "Laptop"}
         node.nearby_open.return_value = idle
         node.nearby_poll.return_value = idle
         node.nearby_request.return_value = dict(idle, request=request)
@@ -185,18 +185,18 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.app.update()
         self.assertFalse(self.peer.address_box.winfo_ismapped())
         self.assertIsNone(self.peer.worker.thread)
-        self.peer.address.set("custard.local")
+        self.peer.address.set("desktop-a.local")
         self.peer.near_button.invoke()
         self.until(lambda: self.peer.pending is None and self.peer.near_tree.exists(row["peer_id"]))
         self.peer.near_tree.selection_set(row["peer_id"])
         self.app.update()
         box = self.peer.near_tree.bbox(row["peer_id"])
         self.peer.near_tree.event_generate("<ButtonRelease-1>", x=10, y=box[1] + 5)
-        self.until(lambda: self.peer.near_title.get() == "Waiting for Custard to confirm.")
+        self.until(lambda: self.peer.near_title.get() == "Waiting for Desktop A to confirm.")
         self.assertFalse(hasattr(self.peer, "digits"))
         node.nearby_request.assert_called_once_with(row["peer_id"])
         node.nearby_approve.assert_not_called()
-        self.assertEqual("custard.local", self.peer.address.get())
+        self.assertEqual("desktop-a.local", self.peer.address.get())
         self.assertFalse(self.peer.match_button.winfo_ismapped())
         self.assertIn("Waiting", self.peer.near_title.get())
         # The receiver alone gets the explicit Pair button.
@@ -205,7 +205,7 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.app.update()
         self.assertTrue(self.peer.match_button.winfo_ismapped())
         self.assertEqual("Pair", self.peer.match_button.cget("text"))
-        self.assertEqual("Pair with Custard?", self.peer.near_title.get())
+        self.assertEqual("Pair with Desktop A?", self.peer.near_title.get())
         self.peer.match_button.invoke()
         self.until(lambda: self.peer.pending is None and self.peer.match_button.instate(["disabled"]))
         node.nearby_approve.assert_called_once_with("r-1")
@@ -230,7 +230,7 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         from unittest.mock import Mock
         node = Mock()
         idle = {"open": True, "devices": [], "request": None, "paired": []}
-        node.status.return_value = {"peers": [], "files": [], "address": "192.168.0.70:47621"}
+        node.status.return_value = {"peers": [], "files": [], "address": "192.168.50.10:47621"}
         node.nearby_open.return_value = idle
         node.nearby_lookup.return_value = idle
         node.nearby_poll.return_value = idle
@@ -246,10 +246,10 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         self.assertTrue(self.peer.lookup_button.instate(["disabled"]))
         self.peer.near_button.invoke()
         self.until(lambda: self.peer.pending is None and self.peer.nearby.get("open"))
-        self.peer.address.set("192.168.0.107")
+        self.peer.address.set("192.168.50.20")
         self.peer.lookup_button.invoke()
         self.until(lambda: self.peer.pending is None)
-        node.nearby_lookup.assert_called_once_with("192.168.0.107")
+        node.nearby_lookup.assert_called_once_with("192.168.50.20")
         self.assertFalse(hasattr(self.peer, "code"))
 
     def test_external_save_refreshes_ledger_and_graph_without_replacing_a_draft(self):

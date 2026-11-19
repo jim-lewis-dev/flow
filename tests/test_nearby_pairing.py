@@ -223,7 +223,7 @@ class NearbyPairingTests(unittest.TestCase):
             gui.nearby_open()
 
     def test_three_peers_pair_by_name_once_then_relay_offline_edits(self):
-        a, b, c = [self.node(name, discovery=True) for name in ('Custard', 'Dibbles', 'Phone')]
+        a, b, c = [self.node(name, discovery=True) for name in ('Desktop A', 'Desktop B', 'Phone')]
         nodes = [a, b, c]
         for node in nodes:
             node.nearby_open()
@@ -234,9 +234,9 @@ class NearbyPairingTests(unittest.TestCase):
             if all(len(names) == 2 for names in found.values()):
                 break
             time.sleep(.05)
-        self.assertEqual(found[a], {'Dibbles', 'Phone'})
-        self.assertEqual(found[b], {'Custard', 'Phone'})
-        self.assertEqual(found[c], {'Custard', 'Dibbles'})
+        self.assertEqual(found[a], {'Desktop B', 'Phone'})
+        self.assertEqual(found[b], {'Desktop A', 'Phone'})
+        self.assertEqual(found[c], {'Desktop A', 'Desktop B'})
         for sender, recipient in ((a, b), (b, c), (c, a)):
             sid = recipient.status()['peer_id']
             outgoing, incoming = self.prompt(sender, recipient, sid)
@@ -270,7 +270,7 @@ class NearbyPairingTests(unittest.TestCase):
                 self.assertEqual((flow['amount'], flow['notes']), ('9', 'Edited offline'))
 
     def test_one_sided_forget_repairs_only_after_receiver_confirms(self):
-        a, b = self.node('Custard'), self.node('Phone')
+        a, b = self.node('Desktop A'), self.node('Phone')
         _, request = self.prompt(a, b, self.visible(a, b))
         b.nearby_approve(request)
         self.wait_for_trust(a, b)
@@ -289,7 +289,7 @@ class NearbyPairingTests(unittest.TestCase):
         self.assertEqual(a._peer_snapshot()[0]['token'], b._peer_snapshot()[0]['token'])
 
     def test_forget_clears_old_errors_and_ignores_inflight_failure(self):
-        a, b = self.node('Custard'), self.node('Phone')
+        a, b = self.node('Desktop A'), self.node('Phone')
         _, request = self.prompt(a, b, self.visible(a, b))
         b.nearby_approve(request)
         self.wait_for_trust(a, b)
@@ -300,8 +300,8 @@ class NearbyPairingTests(unittest.TestCase):
                                 from_account='Battery', to_account='Lamp'))
         dataset = b.share(source, 'Kept')
         peer = b._peer_snapshot()[0]
-        b._save_peer_errors([(peer, 'Custard: connection refused')])
-        self.assertIn('Custard', b.status()['error'])
+        b._save_peer_errors([(peer, 'Desktop A: connection refused')])
+        self.assertIn('Desktop A', b.status()['error'])
         entered, release = threading.Event(), threading.Event()
         def delayed_failure(*args):
             entered.set()
@@ -331,7 +331,7 @@ class NearbyPairingTests(unittest.TestCase):
                 worker.join(4)
 
     def test_forget_during_pending_request_prevents_late_approval(self):
-        a, b = self.node('Custard'), self.node('Phone')
+        a, b = self.node('Desktop A'), self.node('Phone')
         outgoing, incoming = self.prompt(a, b, self.visible(a, b))
         b.forget(a.status()['peer_id'])
         with self.assertRaisesRegex(ValueError, 'no longer active'):
@@ -341,7 +341,7 @@ class NearbyPairingTests(unittest.TestCase):
         self.assertIsNone(a.nearby_poll()['request'])
 
     def test_forget_stops_retries_to_another_saved_address(self):
-        a, b = self.node('Custard'), self.node('Phone')
+        a, b = self.node('Desktop A'), self.node('Phone')
         _, request = self.prompt(a, b, self.visible(a, b))
         b.nearby_approve(request)
         self.wait_for_trust(a, b)
