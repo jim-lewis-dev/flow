@@ -7,7 +7,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from mobile.bridge import MobileStore, required_hint
-from flowledger.core import Repository, ledger_balance_at
+from flowledger.core import Repository, SCHEMA_VERSION, ledger_balance_at
 
 
 class MobileTests(unittest.TestCase):
@@ -333,6 +333,37 @@ class MobileTests(unittest.TestCase):
         self.store.dispatch('open_dataset',{'name':'calories'})
         self.assertEqual(self.store.repo.list_flows(),[only_phone])
         self.assertEqual(self.store.state()['datasets'],['calories.sqlite3','flow.sqlite3'])
+
+    def test_incompatible_database_cannot_replace_or_switch_current_file(self):
+        self.add(name='Original')
+        source = Path(self.store.dispatch('prepare_export', {})['path'])
+        args = dict(key='a'*64, name='flow.sqlite3')
+        shutil.copy2(source, self.store.root / '.incoming')
+        self.store.dispatch('install_document', args)
+        self.add(name='Latest')
+        before = self.store.state()
+        history = self.store.history
+        cached = Path(self.store.repo.path).read_bytes()
+        rejected = self.store.root / 'incompatible.sqlite3'
+        for version in (SCHEMA_VERSION - 1, SCHEMA_VERSION + 1):
+            shutil.copy2(source, rejected)
+            with sqlite3.connect(rejected) as conn:
+                conn.execute(f'PRAGMA user_version={version}')
+            unchanged = rejected.read_bytes()
+            for action, arguments in (
+                ('install_document', args),
+                ('open_dataset', {'name': rejected.name}),
+            ):
+                with self.subTest(version=version, action=action):
+                    shutil.copy2(rejected, self.store.root / '.incoming')
+                    with self.assertRaisesRegex(ValueError, 'Unsupported database version'):
+                        self.store.dispatch(action, arguments)
+                    after = self.store.state()
+                    for field in ('dataset', 'dataset_name', 'flows', 'undo', 'redo'):
+                        self.assertEqual(after[field], before[field])
+                    self.assertIs(self.store.history, history)
+                    self.assertEqual(Path(self.store.repo.path).read_bytes(), cached)
+                    self.assertEqual(rejected.read_bytes(), unchanged)
 
     def test_invalid_refresh_or_failed_replace_keeps_current_document(self):
         self.add(name='Original')

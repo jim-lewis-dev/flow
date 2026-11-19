@@ -127,7 +127,6 @@ public final class MainActivity extends Activity {
         if (files == null) {
             String root = dataDirectory.getAbsolutePath();
             files = new DocumentFiles(getApplicationContext(), dataDirectory,
-                getPreferences(MODE_PRIVATE).getString("dataset", "flow.sqlite3"),
                 (action, args) -> new JSONObject(Python.getInstance().getModule("mobile.bridge")
                     .callAttr("request", root, new JSONObject().put("action", action).put("args", args).toString()).toString()));
         }

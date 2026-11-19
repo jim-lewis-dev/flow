@@ -1,6 +1,6 @@
 """Dataset lookup and installation preserve caller paths and existing files."""
 
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr
 import io
 import os
 from pathlib import Path
@@ -142,27 +142,23 @@ sys.modules["flowledger.gui"] = module
                 self.assertIn("Choose a dataset", result.stderr)
         self.assertFalse(self.data.exists())
 
-    def test_rename_shared_files_command_does_not_open_the_gui_or_create_a_default(self):
-        output = io.StringIO()
-        module = types.ModuleType("flowledger.gui")
-        module.FlowApp = lambda *a, **k: self.fail("Cleanup must not open a database window")
-        with patch.dict(os.environ, self.env), patch.dict(sys.modules, {"flowledger.gui": module}), \
-                patch.object(sys, "argv", ["flow", "--rename-shared-files"]), \
-                patch("flowledger.shared_files.rename_shared_files", return_value=[]) as rename, \
-                redirect_stdout(output):
-            self.assertEqual(main(), 0)
-        rename.assert_called_once_with()
-        self.assertIn("already readable", output.getvalue())
-        self.assertFalse((self.data / "flow.sqlite3").exists())
+    def test_default_shortcut_opens_the_same_shared_file(self):
+        from flowledger.core import Repository
+        from flowledger import peer_store
+        target = self.data / "shared" / "Money.sqlite3"
+        with closing(Repository(target)) as repo:
+            record = repo.save_flow(dict(date="2026-11-18", from_account="A",
+                to_account="B", amount="3.5", units="Wh"))
+            dataset = peer_store.share(repo, "Money")
+        (self.data / "flow.sqlite3").symlink_to(target)
+        with patch.dict(os.environ, self.env), closing(Repository(database_path())) as repo:
+            self.assertEqual(repo.path, str(target))
+            self.assertEqual(peer_store.dataset(repo), dataset)
+            repo.save_flow(dict(record, notes="Saved through the default"))
+        with closing(Repository(target)) as repo:
+            self.assertEqual(repo.get_flow(record["flow_id"])["notes"], "Saved through the default")
+            self.assertEqual(len(peer_store.inventory(repo)), 1)
 
-    def test_rename_shared_files_failure_is_reported_without_a_traceback(self):
-        error = io.StringIO()
-        with patch.object(sys, "argv", ["flow", "--rename-shared-files"]), \
-                patch("flowledger.shared_files.rename_shared_files", side_effect=ValueError("Close Flow first")), \
-                redirect_stderr(error):
-            self.assertEqual(main(), 1)
-        self.assertIn("Cannot rename shared files: Close Flow first", error.getvalue())
-        self.assertNotIn("Traceback", error.getvalue())
 
 
 if __name__ == "__main__":

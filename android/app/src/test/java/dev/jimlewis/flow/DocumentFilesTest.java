@@ -33,7 +33,7 @@ import java.util.Map;
 import static org.junit.Assert.*;
 
 /** Tests Android document handling without the native picker UI or SQLite.
- * MobileStore's SQLite validation/migration is covered by tests/test_mobile.py.
+ * MobileStore's SQLite validation is covered by tests/test_mobile.py.
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 35, application = Application.class)
@@ -66,7 +66,7 @@ public class DocumentFilesTest {
     }
     private void restart() {
         engine = new Engine(root);
-        files = new DocumentFiles(context, root, "flow.sqlite3", engine);
+        files = new DocumentFiles(context, root, engine);
     }
     private Uri document(String path, String text) throws Exception {
         Uri uri = Uri.parse("content://flow.test.documents/document/" + Uri.encode("primary:" + path));

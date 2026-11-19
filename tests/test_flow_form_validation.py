@@ -250,13 +250,10 @@ class FlowFormValidationTests(IsolatedGuiTestCase):
             self.assertEqual(str(self.app.focus_get()), str(self.entry(key)), key)
         self.assertEqual(self.repo.list_flows(), [])
 
-    def test_obsolete_suggestion_file_is_removed_without_hiding_saved_values(self):
+    def test_saved_values_populate_suggestions(self):
         flow = self.repo.save_flow(dict(date="2026-10-27", from_account="Store",
                                        to_account="Workshop", amount="1", units="kg"))
-        legacy = Path(str(self.path) + ".suggestions.json")
-        legacy.write_text('{"account": ["store"], "unit": ["kg"]}')
         self.open_app()
-        self.assertFalse(legacy.exists())
         self.assertIn("Store", self.app.form_widgets["from_account"].values)
         self.assertIn("kg", self.app.form_widgets["units"].values)
         self.assertEqual(self.repo.get_flow(flow["flow_id"]), flow)

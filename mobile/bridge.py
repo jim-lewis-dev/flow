@@ -1,7 +1,7 @@
 """One serialized Android worker owns this adapter and its SQLite connection.
 
 Amounts cross the JavaScript boundary as strings. All validation, arithmetic,
-transactions, migrations and undo use the desktop engine, unchanged.
+transactions and undo use the desktop engine, unchanged.
 """
 from __future__ import annotations
 
@@ -318,7 +318,7 @@ class MobileStore:
 
         The Android host owns URI permissions and writeback. It calls this only
         after checking that the previous working file has no unsaved changes.
-        All validation and migration happen in temporary files before replacing
+        All validation happens in temporary files before replacing
         the cache; a bad selected file leaves the active database untouched.
         """
         incoming = self.root / '.incoming'
@@ -338,8 +338,8 @@ class MobileStore:
                 if check.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID:
                     raise ValueError('Choose a Flow SQLite database.')
                 version = check.execute('PRAGMA user_version').fetchone()[0]
-                if not 5 <= version <= SCHEMA_VERSION:
-                    raise ValueError('Open this file in the current desktop Flow first, then transfer it again.')
+                if version != SCHEMA_VERSION:
+                    raise ValueError(f'Unsupported database version {version}; expected {SCHEMA_VERSION}.')
                 if check.execute('PRAGMA quick_check').fetchall() != [('ok',)]:
                     raise ValueError('The selected database is damaged.')
             candidate, candidate_history = self._prepare_target(

@@ -99,8 +99,6 @@ class PeerNode(NearbyPairing):
                 CREATE TABLE IF NOT EXISTS sightings(id TEXT PRIMARY KEY,address TEXT NOT NULL,seen INTEGER NOT NULL);
             ''')
             db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', ('name', self.default_name))
-            db.execute('DROP TABLE IF EXISTS pending')
-            db.execute("DELETE FROM meta WHERE key IN ('invite_hash','invite_until','invite_attempts')")
         os.chmod(self.directory / 'devices.sqlite3', 0o600)
 
     def _cert(self):
@@ -381,7 +379,7 @@ class PeerNode(NearbyPairing):
             raise wire.Refused('Shared file is not available at its saved location.')
         def check(repo):
             # Use the same existing SQLite handle for preflight AND use: a path
-            # replacement cannot trick Repository into migrating a private file.
+            # replacement cannot trick Repository into using a different document.
             db = repo.conn
             if (db.execute('PRAGMA application_id').fetchone()[0] != APPLICATION_ID or
                     db.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION or

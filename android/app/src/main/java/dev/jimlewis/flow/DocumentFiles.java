@@ -39,12 +39,12 @@ final class DocumentFiles {
     private String warning = "";
     private boolean ready;
 
-    DocumentFiles(Context context, File root, String legacyDataset, Engine engine) {
+    DocumentFiles(Context context, File root, Engine engine) {
         this.context = context.getApplicationContext();
         this.root = root;
         this.engine = engine;
         prefs = context.getSharedPreferences("flow-files", Context.MODE_PRIVATE);
-        current = prefs.getString("current", legacyDataset);
+        current = prefs.getString("current", "flow.sqlite3");
     }
 
     private JSONObject records() throws Exception {

@@ -88,13 +88,6 @@ class FlowApp(tk.Tk):
         self._draft_redo = None
         self._flow_input_error = None
         self.demo = demo
-        suggestion_cleanup_error = None
-        if repo.path != ":memory:":
-            legacy = Path(str(Path(repo.path).expanduser().resolve()) + ".suggestions.json")
-            try:
-                legacy.unlink(missing_ok=True)
-            except OSError as exc:
-                suggestion_cleanup_error = f"Could not remove obsolete suggestions file: {exc}"
         self.title(f"Flow {__version__}" + (" | Demo" if demo else ""))
         # Keep a modest restore size. The window manager chooses one monitor
         # for fullscreen, rather than sizing against a multi-monitor desktop.
@@ -154,8 +147,6 @@ class FlowApp(tk.Tk):
         self._build_view_history()
         from .sync_ui import SyncController
         self.sync_controller = SyncController(self)
-        if suggestion_cleanup_error:
-            self._feedback(suggestion_cleanup_error, True)
 
     def _configure_styles(self):
         style = ttk.Style(self)
@@ -1747,28 +1738,6 @@ class FlowApp(tk.Tk):
                 preceding[source] = fid
             else:
                 self._ledger_order.append(fid)
-
-    def void_selected(self):
-        flow = self._selected()
-        if not flow or not self._finish_existing("flow"):
-            return
-        try:
-            displayed = self.ledger_rows.get(flow["flow_id"], flow)
-
-            def cancel():
-                if self._sync_enabled():
-                    current = self.repo.get_flow(flow["flow_id"])
-                    if current is None or current["status"] != displayed["status"]:
-                        raise ValueError("This flow's status changed. Review the updated row before canceling it.")
-                return self.repo.void_flow(flow["flow_id"])
-
-            self.history.perform("Void flow", cancel)
-            self.new_flow(focus=False, confirm=False)
-            self.refresh_all()
-            self._update_history_buttons()
-            self.status_message.set("Flow canceled | Ctrl+Z to undo")
-        except (ValueError, sqlite3.Error) as exc:
-            self._feedback(str(exc), True)
 
     def delete_selected(self, event=None):
         """Remove selected saved rows together; undo restores every record."""

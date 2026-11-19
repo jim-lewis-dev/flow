@@ -65,9 +65,9 @@ class SessionHistoryTests(unittest.TestCase):
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), edited)
         self.consistent()
 
-    def test_void_flow_restored_with_same_id(self):
+    def test_canceled_flow_restored_with_same_id(self):
         saved = self.add()
-        self.history.perform("Void Flow", lambda: self.repo.void_flow(saved["flow_id"]))
+        self.history.perform("Edit status", lambda: self.repo.save_flow({**saved, "status": "Canceled"}))
         self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
         self.history.undo()
         self.assertEqual(self.repo.get_flow(saved["flow_id"]), saved)

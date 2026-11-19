@@ -8,7 +8,7 @@ import tempfile
 import unittest
 import uuid
 
-from flowledger.core import Repository, balance_at, format_money, normalize_date, normalize_flow_date, parse_money, timeline, ledger_balance_at, ledger_timeline
+from flowledger.core import Repository, balance_at, normalize_date, normalize_flow_date, timeline, ledger_balance_at, ledger_timeline
 from flowledger.exchange import commit_import, export_flows, preview_import, read_import
 
 
@@ -41,19 +41,6 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(entered=value), self.assertRaises(ValueError):
                 normalize_date(value)
 
-    def test_money_is_exact_and_rejects_fractional_cents(self):
-        self.assertEqual(parse_money("$1,234.56"), 123456)
-        self.assertEqual(parse_money("-12.34", True), -1234)
-        self.assertEqual(parse_money("12.340"), 1234)
-        for text, cents in ((".50", 50), (".05", 5), (".5", 50), ("$.01", 1), ("+.50", 50), (".00", 0)):
-            with self.subTest(text=text):
-                self.assertEqual(parse_money(text), cents)
-        self.assertEqual(parse_money("-.50", True), -50)
-        self.assertEqual(parse_money("-$.05", True), -5)
-        self.assertEqual(format_money(-123456), "-1,234.56")
-        for value in ("0.001", ".001", ".", "-.", "-.50", "NaN", "inf", "1e3", "1,2", "-1", 1.25, True, "92233720368547758.08"):
-            with self.subTest(value=value), self.assertRaises(ValueError):
-                parse_money(value)
 
     def test_local_dates_preserve_times_and_reject_lossy_inputs(self):
         self.assertEqual(normalize_date("2026-10-02"), "2026-10-02 00:00:00")
@@ -111,7 +98,7 @@ class RepositoryTests(unittest.TestCase):
         history = self.repo.history(pending["flow_id"])
         self.assertEqual(len(history), 2)
         self.assertEqual(json.loads(history[-1]["before_json"])["amount"], "20")
-        self.repo.void_flow(pending["flow_id"])
+        self.repo.save_flow({**saved, "status": "Canceled"})
         self.assertEqual(self.balance("AmEx", ("Complete", "Pending", "Planned", "Canceled")), 0)
 
     def test_names_are_identities_and_suggestions_learn_on_save(self):

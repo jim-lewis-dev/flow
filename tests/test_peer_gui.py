@@ -276,8 +276,10 @@ class PeerDesktopTests(IsolatedGuiTestCase):
         fid = self.record["flow_id"]
         with closing(Repository(self.repo.path)) as second:
             second.save_flow(dict(self.record, notes="A later reading", status="Pending"))
-            self.app.void_selected()
-            self.assertIn("status changed", self.app.status_message.get())
+            self.app.form_vars["status"].set("Canceled")
+            self.assertFalse(self.app._finish_existing("flow"))
+            self.assertIn("Status", self.app.status_message.get())
+            self.assertIn("changed on another device", self.app.status_message.get())
             self.assertEqual("Pending", self.repo.get_flow(fid)["status"])
             self.app.delete_selected()
             self.assertIn("selected flow changed", self.app.status_message.get())

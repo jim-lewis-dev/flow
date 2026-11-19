@@ -172,7 +172,7 @@ class AutosaveTests(IsolatedGuiTestCase):
         self.assertEqual(self.repo.list_flows(), [original])
         self.assertIsNone(self.repo.get_account("Never added"))
 
-    def test_add_and_void_are_reversible_without_confirmations(self):
+    def test_add_and_cancel_are_reversible_without_confirmations(self):
         for key, value in dict(units="USD", date="2026-10-03", from_account="Checking", to_account="New shop",
                                amount="33.00", name="Added", category="New category", tags="New tag").items():
             self.app.form_vars[key].set(value)
@@ -186,7 +186,8 @@ class AutosaveTests(IsolatedGuiTestCase):
         self.shortcut("<Control-y>", self.app.ledger)
         self.assertEqual(self.repo.list_flows(), [saved])
         self.select(saved)
-        self.app.void_selected()
+        self.app.form_vars["status"].set("Canceled")
+        self.assertTrue(self.app._finish_existing("flow"))
         self.pump()
         self.assertEqual(self.repo.get_flow(saved["flow_id"])["status"], "Canceled")
         self.shortcut("<Control-z>", self.app.ledger)

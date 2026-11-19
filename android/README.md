@@ -64,9 +64,9 @@ Existing phone files from earlier previews are preserved. Files kept only in
 Flow's private folder need Save As before uninstalling or clearing app data.
 Installing an update over the existing app preserves them.
 
-Files use schema 8, including saved account positions. Schema 5-7 files are
-upgraded when opened; older files need current desktop Flow first. Records,
-starting balances, audit history, units, and map positions travel together.
+Files use schema 8, including saved account positions. Other database formats
+are rejected without conversion. Records, starting balances, audit history,
+units, and map positions travel together.
 
 ## Share directly with another phone or computer
 

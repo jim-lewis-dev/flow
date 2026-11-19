@@ -27,35 +27,13 @@ def _identity(table, row):
     return tuple(row[c] for c in TABLES[table][:_KEY_LENGTH[table]])
 
 
-def retire_settings(conn):
-    """Deactivate obsolete sync settings without altering ledger records."""
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone():
-        return
-    # Retire old connection settings without replaying queues or replacing
-    # records. Existing journal tables stay untouched for data preservation.
-    keys = ('dataset', 'endpoint', 'token', 'certificate', 'server', 'cursor')
-    settings = [row[0] for row in conn.execute(
-        "SELECT key FROM sync_meta WHERE key IN ('dataset','endpoint','token','certificate','server','cursor')")]
-    old_guards = {f'sync_guard_{table}_{op}' for table in TABLES
-                  for op in ('insert', 'update', 'delete')}
-    guards = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
-              if row[0] in old_guards]
-    if not settings and not guards:
-        return
-    conn.execute('SAVEPOINT retire_sync_settings')
-    try:
-        for name in guards:
-            conn.execute(f'DROP TRIGGER "{name}"')
-        conn.executemany('DELETE FROM sync_meta WHERE key=?', [(key,) for key in keys])
-        if not conn.execute("SELECT 1 FROM sync_meta WHERE key='peer_dataset'").fetchone():
-            for table in ('sync_versions', 'sync_remote_versions'):
-                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-                    conn.execute(f'DELETE FROM {table}')
-        conn.execute('RELEASE SAVEPOINT retire_sync_settings')
-    except BaseException:
-        conn.execute('ROLLBACK TO SAVEPOINT retire_sync_settings')
-        conn.execute('RELEASE SAVEPOINT retire_sync_settings')
-        raise
+def require_supported_settings(conn):
+    """Reject unsupported synchronization settings without modifying the file."""
+    meta = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_meta'").fetchone()
+    if (meta and conn.execute(
+            "SELECT 1 FROM sync_meta WHERE key IN ('dataset','endpoint','token','certificate','server','cursor') LIMIT 1").fetchone()
+            or conn.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name GLOB 'sync_guard_*' LIMIT 1").fetchone()):
+        raise ValueError('This file uses unsupported synchronization settings.')
 
 
 class SyncConflict(ValueError):
@@ -72,6 +50,7 @@ class SyncState:
         self._prefix = 'flow_sync_' + uuid.uuid4().hex
         self._journal = self._prefix + '_journal'
         self._triggers = []
+        require_supported_settings(repo.conn)
         self._install_tables()
         conn = repo.conn
         # Persistent guards prevent clients without event capture from writing.
@@ -96,7 +75,6 @@ class SyncState:
         CREATE TABLE IF NOT EXISTS sync_versions(identity TEXT NOT NULL,column_name TEXT NOT NULL,token TEXT NOT NULL,PRIMARY KEY(identity,column_name));
         CREATE TABLE IF NOT EXISTS sync_remote_versions(identity TEXT NOT NULL,column_name TEXT NOT NULL,token TEXT NOT NULL,PRIMARY KEY(identity,column_name));
         ''')
-        retire_settings(self.repo.conn)
 
     def close(self):
         """Release connection-local capture before replacing a local database."""

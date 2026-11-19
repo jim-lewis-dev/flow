@@ -137,7 +137,7 @@ Close Flow before copying a standalone database to another computer. The file ca
 
 Under **Sync**, pair devices, share a file, and join it on the others. Each device saves locally and exchanges changes while Flow is open. Any paired device holding the file can pass along edits, so no particular computer needs to stay on. Edits merge by field, with the latest actual edit winning. See [share a file](docs/peer-sync.md) for pairing, offline work, and merging.
 
-Joined desktop copies use readable filenames, such as `~/.local/share/flowledger/shared/Money.sqlite3`. To rename older generated filenames, close Flow and run `flow --rename-shared-files`. This updates registered paths and default shortcuts while preserving the shared file's identity and contents.
+Joined desktop copies use readable filenames, such as `~/.local/share/flowledger/shared/Money.sqlite3`. Shared filenames must be unique on each device.
 
 The **Data** tab offers CSV/JSON import and export, plus full database backup and restore. Imports preview duplicates and conflicts. CSV/JSON files contain flows only; [examples](examples/README.md) show the format.
 

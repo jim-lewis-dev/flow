@@ -172,7 +172,7 @@ class ControlFixGuiTests(IsolatedGuiTestCase):
         self.assertEqual(set(self.app.ledger_rows), {self.flows[0]["flow_id"]})
         self.assertEqual(self.app.report_summary.get(), "Complete | 0.1250 kg")
 
-    def test_units_choices_follow_saved_flows_including_void_and_not_other_filters(self):
+    def test_units_choices_follow_saved_flows_including_canceled_and_not_other_filters(self):
         expected = {flow["units"] for flow in self.flows}
         self.select_filter("Status", "Complete")
         self.select_filter("Units", "kg")
@@ -312,7 +312,7 @@ class ControlFixGuiTests(IsolatedGuiTestCase):
         self.assertIsNotNone(self.repo.get_flow(flow["flow_id"]))
         self.assertEqual(len(self.repo.list_flows()), len(self.flows))
 
-    def test_void_keeps_saved_row_while_delete_removes_it_and_both_undo(self):
+    def test_canceled_keeps_saved_row_while_delete_removes_it_and_both_undo(self):
         flow = self.flows[0]
         self.select(flow)
         self.app.form_vars["status"].set("Canceled")

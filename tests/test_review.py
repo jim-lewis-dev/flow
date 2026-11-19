@@ -37,7 +37,7 @@ class IndependentReviewTests(unittest.TestCase):
         return {account["name"]: ledger_balance_at(account, flows, at, statuses)
                 for account in self.repo.list_accounts() if account["name"] in ("Checking", "AmEx", "Wallet")}
 
-    def test_purchase_transfer_income_pending_and_void_have_exact_independent_answers(self):
+    def test_purchase_transfer_income_pending_and_canceled_have_exact_independent_answers(self):
         self.example()
         self.assertEqual(self.balances("2026-10-01"),
                          {"AmEx": -Decimal("100"), "Checking": Decimal("900"), "Wallet": Decimal("150")})

@@ -121,7 +121,6 @@ class SignedQuantityTests(unittest.TestCase):
         self.repo.close()
         self.repo = Repository(self.path)
         self.assertEqual(self.repo.list_flows(), original)
-        self.assertIsNone(self.repo.migration_backup_path)
         backup = Path(self.directory.name) / "snapshot.sqlite3"
         self.repo.backup(backup)
         self.repo.save_flow({**original[0], "amount": "7"})

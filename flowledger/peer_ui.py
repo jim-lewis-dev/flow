@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import datetime
+import os
 from pathlib import Path
 from queue import Empty, Queue
 import sqlite3
@@ -16,7 +17,25 @@ from tkinter import ttk
 
 from . import peer_store
 from .peer_network import PeerNode, default_config_dir
-from .shared_files import shared_path as copy_path
+
+
+def copy_path(name):
+    """Return a safe readable path; joining still refuses an existing file."""
+    if (not isinstance(name, str) or not name or name != name.strip()
+            or not name.isascii() or len(name) > 200 or name.startswith('.')
+            or name.endswith('.') or any(ord(c) < 32 or ord(c) == 127 for c in name)
+            or any(c in '<>:"/\\|?*' for c in name)):
+        raise ValueError('Choose a shared name using plain letters, numbers, spaces or punctuation without path separators.')
+    stem = name[:-8] if name.lower().endswith('.sqlite3') else name
+    if not stem or stem.endswith((' ', '.')):
+        raise ValueError('Choose a nonempty shared file name.')
+    root = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+    target = (root / 'flowledger').expanduser().resolve() / 'shared' / (stem + '.sqlite3')
+    if target.parent.is_dir():
+        for entry in target.parent.iterdir():
+            if entry.name.casefold() == target.name.casefold() and entry.name != target.name:
+                raise ValueError('A shared file with that name already exists: ' + entry.name)
+    return target
 
 
 def open_copy(path, dataset):

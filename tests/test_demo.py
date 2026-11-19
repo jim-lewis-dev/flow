@@ -61,7 +61,7 @@ class DemoIntegrationTests(unittest.TestCase):
         snapshot = Path(self.directory.name) / "snapshot.sqlite3"
         self.repo.backup(snapshot)
         first = self.repo.list_flows()[0]
-        self.repo.void_flow(first["flow_id"])
+        self.repo.save_flow({**first, "status": "Canceled"})
         self.repo.restore(snapshot)
         self.assertEqual(self.total("2026-10-02 23:59:59"), Decimal("7812.25"))
         self.assertEqual(len(self.repo.list_flows()), 20)

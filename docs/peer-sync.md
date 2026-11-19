@@ -37,13 +37,6 @@ existing files are never overwritten or silently numbered. If the shared name
 is not a valid filename or is already taken here, choose a different shared
 name on the device offering the file before joining.
 
-To rename older generated desktop filenames, close every Flow window on that
-computer and run `flow --rename-shared-files`. It renames only generated copies
-in the shared folder, updates the registered paths and shortcuts in the data
-folder, and keeps the dataset identity and records. Original files shared from
-other locations stay where they are. The command is safe to repeat after an
-interruption. Device pairings and the phone app need no changes.
-
 Flows, account starting balances, tags and saved node positions travel with
 their changes. The undo stack, screen selections and audit log stay local.
 Each shared file retains its edit history so a device can catch up later.
@@ -80,11 +73,8 @@ sudo ufw allow from 192.168.0.0/24 to any port 47621 proto tcp
 sudo ufw allow from 192.168.0.0/24 to any port 47622 proto udp
 ```
 
-Keep Flow current on every device. Device pairings survive updates. Ordinary
-local files can be shared directly; sharing gives them a new dataset identity.
-Files shared with the older conflict-resolution format no longer synchronize
-or accept edits. Their saved records remain readable and are not changed.
-Current timestamped shared files continue working without re-pairing.
+Keep Flow current on every device. Device pairings survive updates. Local
+files can be shared directly; sharing gives them a new dataset identity.
 
 Linux uses OpenSSL to create a device identity once; the phone uses Android.
 The initial snapshot is limited to 56 MiB of serialized records. After joining, edits travel in batches of up to

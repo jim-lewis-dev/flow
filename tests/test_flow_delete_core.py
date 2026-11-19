@@ -126,15 +126,15 @@ class DeleteFlowTests(unittest.TestCase):
         self.assertFalse(self.history.can_redo)
         self.assertFalse(self.repo.conn.in_transaction)
 
-    def test_deleting_void_record_is_distinct_from_voiding(self):
+    def test_deleting_canceled_record_is_distinct_from_canceling(self):
         record = self.flow()
-        voided = self.repo.void_flow(record["flow_id"])
-        self.assertEqual(voided["status"], "Canceled")
-        self.assertEqual(self.repo.list_flows(), [voided])
-        self.delete(voided)
+        canceled = self.repo.save_flow({**record, "status": "Canceled"})
+        self.assertEqual(canceled["status"], "Canceled")
+        self.assertEqual(self.repo.list_flows(), [canceled])
+        self.delete(canceled)
         self.assertEqual(self.repo.list_flows(), [])
         self.history.undo()
-        self.assertEqual(self.repo.list_flows(), [voided])
+        self.assertEqual(self.repo.list_flows(), [canceled])
 
 
 if __name__ == "__main__":

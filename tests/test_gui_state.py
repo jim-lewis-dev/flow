@@ -281,19 +281,6 @@ class GuiEditingStateTests(IsolatedGuiTestCase):
         self.assertEqual(len(self.repo.list_flows()), 2)
         self.assertEqual(self.repo.get_flow(first["flow_id"]), first)
 
-    def test_void_clears_editor_so_old_complete_status_cannot_be_saved_back(self):
-        row = self.seed_flow(name="Void me")
-        self.click_flow(row)
-        with patch("flowledger.gui.messagebox.askyesno", side_effect=self.unexpected_dialog):
-            self.app.void_selected()
-        self.settle()
-        self.assert_empty_flow()
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["status"], "Canceled")
-        self.assertFalse(self.app.save_flow())
-        self.pump()
-        self.assertEqual(self.repo.get_flow(row["flow_id"])["status"], "Canceled")
-        self.assertEqual(len(self.repo.list_flows()), 1)
-
     def test_account_refresh_preserves_field_and_completion_keeps_selected_account(self):
         self.seed_flow(to_account="AmEx", status="Canceled")
         self.app.show_view("accounts")

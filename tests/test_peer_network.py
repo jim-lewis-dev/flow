@@ -207,22 +207,6 @@ class PeerNetworkTests(unittest.TestCase):
         self.assertEqual([], node.peers())
         self.assertIsNone(node.nearby_poll()["request"])
 
-    def test_retired_invitation_state_is_removed_without_forgetting_devices(self):
-        a, b = self.node("a"), self.node("b")
-        self.connect(b, a)
-        before = a.peers()
-        a.stop()
-        with a._db() as db:
-            db.execute("CREATE TABLE pending(ticket TEXT PRIMARY KEY, proof TEXT, expires INTEGER)")
-            db.execute("INSERT INTO pending VALUES('ticket','proof',9999999999)")
-            db.executemany("INSERT INTO meta VALUES(?,?)", [(key, "private-value") for key in
-                           ("invite_hash", "invite_until", "invite_attempts")])
-        restarted = self.node("a")
-        self.assertEqual(before, restarted.peers())
-        with restarted._db() as db:
-            self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='pending'").fetchone())
-            self.assertFalse(db.execute("SELECT 1 FROM meta WHERE key LIKE 'invite_%'").fetchone())
-
     def test_missing_or_replaced_file_does_not_become_a_new_shared_database(self):
         a, b = self.node("owner"), self.node("reader")
         watched, _ = self.ledger("published.sqlite3")
